@@ -1,0 +1,70 @@
+# Borek Finance — local team stack (starter)
+# Docs: DOCS/12. Deployment & Environments 1.md
+#
+# Default:  db + backend (health stub until full app is implemented)
+# Frontend: docker compose --profile full up -d --build  (after frontend/ is scaffolded)
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: finance-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-finance_ai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finance} -d ${POSTGRES_DB:-finance_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-ai-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-finance_ai}
+      STORAGE_PATH: /data/uploads
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - upload_data:/data/uploads
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: finance-ai-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - .env
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+
+volumes:
+  postgres_data:
+  upload_data:
