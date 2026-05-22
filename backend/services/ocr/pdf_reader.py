@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 
 import pdfplumber
 import pypdfium2 as pdfium
@@ -54,6 +55,26 @@ def pdf_text_usable(text: str) -> bool:
     if stripped.count("\ufffd") / max(len(stripped), 1) > GARBLED_REPLACEMENT_RATIO:
         return False
     return True
+
+
+def slice_pdf_text_by_pages(full_text: str, page_start: int, page_end: int) -> str:
+    """Return text for pages [page_start, page_end] using --- Page N --- markers."""
+    if not full_text.strip():
+        return ""
+    pattern = re.compile(r"--- Page (\d+) ---", re.MULTILINE)
+    matches = list(pattern.finditer(full_text))
+    if not matches:
+        return full_text if page_start == 1 else ""
+
+    parts: list[str] = []
+    for i, match in enumerate(matches):
+        page_num = int(match.group(1))
+        if page_num < page_start or page_num > page_end:
+            continue
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+        parts.append(full_text[start:end].strip())
+    return "\n\n".join(parts)
 
 
 def render_pdf_pages_as_images(
