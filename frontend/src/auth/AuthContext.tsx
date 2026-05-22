@@ -9,7 +9,6 @@ import {
 } from "react";
 import { getMe, login as apiLogin, logout as apiLogout } from "../api/auth";
 import type { LoginResponse } from "../api/auth";
-import { ApiError } from "../api/client";
 
 interface AuthState {
   user: LoginResponse | null;
@@ -26,11 +25,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     getMe()
-      .then(setUser)
+      .then((data) => setUser(data ?? null))
       .catch((e) => {
-        if (e instanceof ApiError && e.status === 401) {
-          setUser(null);
+        if (import.meta.env.DEV) {
+          console.warn("[auth] getMe failed:", e instanceof Error ? e.message : e);
         }
+        setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);

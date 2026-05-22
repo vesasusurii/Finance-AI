@@ -6,10 +6,8 @@ export function ProtectedRoute() {
 
   if (loading) {
     return (
-      <div className="section">
-        <div className="container">
-          <p className="text-fg2">Loading…</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-[13px] text-muted-foreground">Loading…</p>
       </div>
     );
   }

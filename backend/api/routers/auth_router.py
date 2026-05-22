@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
 from api.controllers.auth_controller import AuthController
-from api.dependencies import get_auth_controller, get_current_user
+from api.dependencies import get_auth_controller
 from schemas.auth import LoginRequest, LoginResponse, UserContext
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,7 +26,10 @@ async def logout(
 
 @router.get("/me", response_model=LoginResponse)
 async def me(
-    user: UserContext = Depends(get_current_user),
+    request: Request,
     ctrl: AuthController = Depends(get_auth_controller),
 ):
+    user: UserContext | None = getattr(request.state, "user", None)
+    if user is None:
+        return Response(status_code=204)
     return await ctrl.me(user)

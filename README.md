@@ -13,6 +13,8 @@ All UI work must follow the Borek design system:
 
 See [`DOCS/1. Project Summary.md`](DOCS/1.%20Project%20Summary.md) for scope and the full document map.
 
+Agent handoff and session notes: [`context.md`](context.md).
+
 Implementation roadmap (phase-by-phase, file-by-file): [`DOCS/0. Roadmap.md`](DOCS/0.%20Roadmap.md)
 
 Technical architecture and workflows: [`DOCS/README.md`](DOCS/README.md)
