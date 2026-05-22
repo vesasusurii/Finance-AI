@@ -1,0 +1,69 @@
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from models.base import Base
+
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+    __table_args__ = (
+        Index("ix_invoices_invoice_number", "invoice_number"),
+        Index("ix_invoices_invoice_number_normalized", "invoice_number_normalized"),
+        Index("ix_invoices_review_status", "review_status"),
+        Index("ix_invoices_match_status", "match_status"),
+        Index("ix_invoices_paid_at_date", "paid_at_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    invoice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    name_of_company: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    address_of_company: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    invoice_number_normalized: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    account_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    internal_note_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_employee_related: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    paid_at_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    paid_by: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    fixed_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    review_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default="pending",
+    )
+    match_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default="unmatched",
+    )
+    source_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("uploaded_files.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

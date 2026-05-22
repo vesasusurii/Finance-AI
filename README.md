@@ -27,14 +27,29 @@ docker compose up -d --build
 curl http://localhost:8000/api/health
 ```
 
-Details: [`DOCS/12. Deployment & Environments 1.md`](DOCS/12.%20Deployment%20%26%20Environments%201.md)
+Details: [`DOCS/12. Deployment & Environments.md`](DOCS/12.%20Deployment%20%26%20Environments.md)
 
-## Repository layout (starter)
+Frontend (after Phase 0 scaffold):
+
+```bash
+docker compose --profile full up -d --build
+```
+
+Migrations:
+
+```bash
+docker compose exec backend alembic upgrade head
+```
+
+## Repository layout
 
 ```
-backend/     FastAPI — health stub now; full app per DOCS/6
-frontend/    React + Vite — scaffold later; Docker profile `full`
+backend/     FastAPI — auth, invoices, export (Phase 1)
+frontend/    React + Vite — dashboard, upload, table, export
+branding/    theme.css (import as @brand in frontend)
 DOCS/        Specifications
 docker-compose.yml
 .env.example
 ```
+
+**Seed login (local):** after `python scripts/seed_admin.py` → `finance@borek.com` / `changeme`

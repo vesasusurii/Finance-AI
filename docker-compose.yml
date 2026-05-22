@@ -48,8 +48,8 @@ services:
   frontend:
     profiles: ["full"]
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: finance-ai-frontend
     restart: unless-stopped
     depends_on:
@@ -62,6 +62,7 @@ services:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
+      - ./branding:/branding
       - /app/node_modules
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
 
