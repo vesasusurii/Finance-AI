@@ -9,8 +9,9 @@
    -----
      <link rel="stylesheet" href="branding/theme.css">
 
-     Or in Vite/React:
-       import '../branding/theme.css';
+     Or in Vite/React (from frontend/src):
+       import '@brand/theme.css';
+     Requires vite resolve.alias @brand → ../branding and branding mounted in Docker.
 
      Then use CSS variables (`var(--accent)`) or helper classes
      (`.btn-ghost`, `.eyebrow`, `.card`, `.hero-gradient`, etc.).

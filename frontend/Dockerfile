@@ -1,14 +1,15 @@
-# Starter frontend image — use after Vite scaffold exists (doc 4, doc 12)
-# Enable with: docker compose --profile full up -d --build
+# Build context: repo root (see docker-compose.yml)
+# Branding lives at /branding so Vite alias @brand → ../branding resolves in the container.
 
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm ci
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-COPY . .
+COPY frontend/ ./
+COPY branding/ /branding/
 
 EXPOSE 5173
 
