@@ -1,8 +1,9 @@
 """
 Invoice extraction — OpenAI Vision is the primary OCR path (DOCS/8).
 
-All PDF pages are rendered and processed (batched when needed). pdfplumber text
-is supplemental context. Google Document AI / Tesseract are not implemented.
+Digital PDFs with a usable text layer are extracted via text-first (more accurate
+for amounts and references). Scanned PDFs and images use Vision. Multi-page PDFs
+are batched when needed, then merged with supplemental text on every batch.
 """
 
 import base64
@@ -21,12 +22,19 @@ from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
 from schemas.invoice import ExtractionResult, UploadItemResponse
 from services.ai_validation_service import AIValidationService
+from services.extraction_prompts import (
+    BATCH_SYSTEM_PROMPT,
+    MERGE_SYSTEM_PROMPT,
+    TEXT_SYSTEM_PROMPT,
+    VISION_SYSTEM_PROMPT,
+)
 from services.ocr.pdf_reader import (
     extract_pdf_text,
     pdf_is_encrypted,
     pdf_page_count,
     pdf_text_usable,
     render_pdf_pages_as_images,
+    slice_pdf_text_by_pages,
 )
 from utils.file_storage import save_upload
 
@@ -42,52 +50,7 @@ ALLOWED_MIME = {
 }
 MAX_FILE_BYTES = 20 * 1024 * 1024
 VISION_RETRY_CONFIDENCE = 0.85
-
-SYSTEM_PROMPT = """You are an invoice OCR and data extractor for Borek Finance.
-You read complete invoice documents (all pages provided) in many formats: standard
-tax invoices, proforma invoices, utility bills, SaaS receipts, hospitality bills,
-credit notes, bilingual Albanian/English/Serbian layouts, and scanned multi-page PDFs.
-
-The bill-to / Klienti / Customer block is the customer — never use customer tax IDs
-(NUI, UNI, NRF, VAT, EIN) as invoice_number.
-
-Return a single JSON object with these keys only:
-invoice_date, name_of_company, address_of_company, invoice_number, amount, currency,
-account_details, internal_note_description, client_employee_related, category,
-confidence_score, needs_review.
-
-Rules:
-- Read every page: header and issuer on early pages; line items may span pages;
-  totals, VAT, and payment due often appear on the last page.
-- name_of_company = issuer in letterhead/header, not bill-to / Klienti / Customer.
-- invoice_number: Invoice Ref, Fatura Nr., Invoice No., Bill number, Document number —
-  not tax registration IDs. Accept 10210, 1/2026/0048, 3807F638-0011, 132018959018.
-- amount: Total Amount Due, Për pagesë / For payment / Za naplatu, Amount due,
-  Total invoice, Grand total — NOT utility "Total Due" that includes prior balance
-  when a separate "Për pagesë" / For payment line exists.
-- currency: ISO code as printed (EUR, USD, GBP, CHF, ALL, etc.).
-- Dates: convert to YYYY-MM-DD (DD.MM.YYYY, DD/MM/YYYY, DD-MMM-YY, long month names).
-- account_details: IBAN, bank name, SWIFT; concatenate briefly if multiple.
-- internal_note_description: brief summary of line items or services when visible.
-- category: Professional services, Utilities, Software, IT / Hardware, Office, Travel, Other.
-- Do not guess invoice_number or amount; set needs_review true when uncertain.
-- confidence_score: 0.0–1.0; needs_review: true if critical fields missing or unclear.
-- Never include paid_at_date or paid_by."""
-
-BATCH_SYSTEM_PROMPT = SYSTEM_PROMPT + """
-
-You are viewing a page range of a longer invoice. Extract any fields visible on these
-pages. Leave fields null if not on these pages. Put line-item detail in
-internal_note_description. Do not invent totals from partial pages."""
-
-MERGE_SYSTEM_PROMPT = """You merge partial JSON extractions from a multi-page invoice into one
-final extraction. Use the same field keys as a single invoice extract.
-
-Prefer: issuer and invoice_number from header pages; amount and currency from pages
-showing totals, VAT, or "Për pagesë" / Amount due; combine internal_note_description
-from all parts. Resolve conflicts by trusting pages that show the payment summary.
-Apply the same rules as invoice extraction (no customer tax ID as invoice_number).
-Return one JSON object only."""
+TEXT_FIRST_MIN_CONFIDENCE = 0.80
 
 
 class InvoiceExtractionService:
@@ -134,6 +97,7 @@ class InvoiceExtractionService:
             result, model_used, meta = await self._extract(
                 file.filename, mime, content
             )
+            result = self._ai_validation.sanitize_and_validate(result)
             missing = self._ai_validation.validate_required_fields(result)
             if missing:
                 result.needs_review = True
@@ -187,6 +151,34 @@ class InvoiceExtractionService:
                     f"{settings.openai_max_pdf_pages}"
                 )
 
+            raw_text = extract_pdf_text(content, max_pages=settings.openai_max_pdf_pages)
+            supplemental_full = (
+                raw_text[: settings.openai_max_supplemental_chars]
+                if pdf_text_usable(raw_text)
+                else None
+            )
+
+            if supplemental_full:
+                text_result, text_model = await self._try_text_first_extract(
+                    filename, supplemental_full, total_pages
+                )
+                if text_result is not None:
+                    meta = {
+                        "pages_processed": total_pages,
+                        "total_pdf_pages": total_pages,
+                        "extraction_mode": "text_layer",
+                        "model": text_model,
+                    }
+                    return await self._maybe_retry_strong(
+                        filename,
+                        text_result,
+                        text_model,
+                        meta,
+                        extract_fn=lambda m: self._extract_from_text(
+                            filename, supplemental_full, total_pages, model=m
+                        ),
+                    )
+
             images = render_pdf_pages_as_images(
                 content,
                 max_pages=settings.openai_max_pdf_pages,
@@ -194,13 +186,6 @@ class InvoiceExtractionService:
             )
             if not images:
                 raise ExtractionError("PDF has no readable pages")
-
-            raw_text = extract_pdf_text(content, max_pages=settings.openai_max_pdf_pages)
-            supplemental = (
-                raw_text[: settings.openai_max_supplemental_chars]
-                if pdf_text_usable(raw_text)
-                else None
-            )
 
             meta = {
                 "pages_processed": len(images),
@@ -210,16 +195,22 @@ class InvoiceExtractionService:
             result, model_used, mode = await self._extract_pdf_pages(
                 filename,
                 images,
-                supplemental_text=supplemental,
+                supplemental_text=supplemental_full,
                 total_pages=total_pages,
             )
             meta["extraction_mode"] = mode
             meta["model"] = model_used
             return await self._maybe_retry_strong(
-                filename, result, model_used, meta,
+                filename,
+                result,
+                model_used,
+                meta,
                 extract_fn=lambda m: self._extract_pdf_pages(
-                    filename, images, supplemental_text=supplemental,
-                    total_pages=total_pages, model=m,
+                    filename,
+                    images,
+                    supplemental_text=supplemental_full,
+                    total_pages=total_pages,
+                    model=m,
                 ),
             )
 
@@ -241,6 +232,59 @@ class InvoiceExtractionService:
         return await self._maybe_retry_strong(
             filename, result, model_used, meta, extract_fn=extract_image
         )
+
+    async def _try_text_first_extract(
+        self,
+        filename: str,
+        full_text: str,
+        total_pages: int,
+    ) -> tuple[ExtractionResult | None, str]:
+        """Text-layer path for digital PDFs; returns None if quality is insufficient."""
+        try:
+            result, model = await self._extract_from_text(
+                filename, full_text, total_pages, model=settings.openai_model
+            )
+            result = self._ai_validation.sanitize_and_validate(result)
+            missing = self._ai_validation.validate_required_fields(result)
+            if (
+                not missing
+                and result.confidence_score >= TEXT_FIRST_MIN_CONFIDENCE
+                and not result.needs_review
+            ):
+                return result, model
+            logger.info(
+                "Text-first extract insufficient for %s (missing=%s, confidence=%.2f)",
+                filename,
+                missing,
+                result.confidence_score,
+            )
+        except Exception:
+            logger.info("Text-first extract failed for %s, using Vision", filename)
+        return None, settings.openai_model
+
+    async def _extract_from_text(
+        self,
+        filename: str,
+        full_text: str,
+        total_pages: int,
+        *,
+        model: str | None = None,
+    ) -> tuple[ExtractionResult, str]:
+        model = model or settings.openai_model
+        user_text = (
+            f"Digital PDF invoice: {filename}\n"
+            f"Pages: {total_pages}\n\n"
+            "Full document text (all pages):\n\n"
+            f"{full_text}"
+        )
+        response = await self._chat_completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": TEXT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
+            ],
+        )
+        return self._parse_response(response.choices[0].message.content or "{}"), model
 
     async def _extract_pdf_pages(
         self,
@@ -264,7 +308,7 @@ class InvoiceExtractionService:
                 model=model,
                 page_range=(1, len(images)),
                 total_pages=total_pages,
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=VISION_SYSTEM_PROMPT,
             )
             return result, model, "vision_full_document"
 
@@ -273,10 +317,18 @@ class InvoiceExtractionService:
             batch = images[start : start + batch_size]
             page_start = start + 1
             page_end = start + len(batch)
+            batch_supplemental = None
+            if supplemental_text:
+                batch_supplemental = slice_pdf_text_by_pages(
+                    supplemental_text, page_start, page_end
+                )
+                if not batch_supplemental.strip():
+                    batch_supplemental = None
+
             partial = await self._openai_vision_extract(
                 batch,
                 label,
-                supplemental_text=None,
+                supplemental_text=batch_supplemental,
                 model=model,
                 page_range=(page_start, page_end),
                 total_pages=total_pages,
@@ -307,8 +359,8 @@ class InvoiceExtractionService:
         )
         if supplemental_text:
             user_text += (
-                "\n\nFull PDF text layer (use for exact amounts and references):\n\n"
-                f"{supplemental_text}"
+                "\n\nFull PDF text layer (authoritative for amounts and references):\n\n"
+                f"{supplemental_text[: settings.openai_max_supplemental_chars]}"
             )
 
         response = await self._chat_completion(
@@ -329,12 +381,14 @@ class InvoiceExtractionService:
         *,
         extract_fn,
     ) -> tuple[ExtractionResult, str, dict]:
+        result = self._ai_validation.sanitize_and_validate(result)
         missing = self._ai_validation.validate_required_fields(result)
-        if (
+        should_retry = (
             missing
             or result.confidence_score < VISION_RETRY_CONFIDENCE
-            or result.needs_review
-        ) and settings.openai_model_strong != settings.openai_model:
+        ) and settings.openai_model_strong != settings.openai_model
+
+        if should_retry:
             logger.info(
                 "Retrying %s with %s (confidence=%.2f, missing=%s)",
                 filename,
@@ -345,7 +399,15 @@ class InvoiceExtractionService:
             retry_result, retry_model, retry_mode = await extract_fn(
                 settings.openai_model_strong
             )
-            if retry_result.confidence_score >= result.confidence_score:
+            retry_result = self._ai_validation.sanitize_and_validate(retry_result)
+            retry_missing = self._ai_validation.validate_required_fields(retry_result)
+            retry_score = retry_result.confidence_score
+            original_score = result.confidence_score
+            if (
+                retry_score > original_score
+                or (retry_missing and not missing)
+                or (not retry_missing and missing)
+            ):
                 meta["extraction_mode"] = retry_mode
                 meta["model"] = retry_model
                 return retry_result, retry_model, meta
@@ -361,7 +423,7 @@ class InvoiceExtractionService:
         model: str,
         page_range: tuple[int, int] | None,
         total_pages: int,
-        system_prompt: str = SYSTEM_PROMPT,
+        system_prompt: str = VISION_SYSTEM_PROMPT,
     ) -> ExtractionResult:
         if page_range:
             start, end = page_range
@@ -378,18 +440,19 @@ class InvoiceExtractionService:
                 "type": "text",
                 "text": (
                     f"{label}\n"
-                    "Read every page in this request completely before extracting. "
-                    f"{scope}"
+                    "Study every page image in order before extracting. "
+                    f"{scope}\n"
+                    "Return one JSON object only."
                 ),
             },
         ]
-        if supplemental_text and page_range and page_range[0] == 1:
+        if supplemental_text:
             user_content.append(
                 {
                     "type": "text",
                     "text": (
-                        "Full PDF text layer (all pages; use for exact numbers; "
-                        "prefer visual layout for totals and tables):\n\n"
+                        "PDF text for these pages (use for exact numbers and refs; "
+                        "prefer images for layout and totals):\n\n"
                         f"{supplemental_text}"
                     ),
                 }
@@ -436,6 +499,7 @@ class InvoiceExtractionService:
             try:
                 return await self._openai.chat.completions.create(
                     model=model,
+                    temperature=0,
                     response_format={"type": "json_object"},
                     timeout=timeout,
                     messages=messages,
@@ -463,9 +527,11 @@ class InvoiceExtractionService:
         try:
             data = json.loads(raw)
             if data.get("amount") is not None:
-                data["amount"] = float(data["amount"])
+                normalized = self._ai_validation._normalize_amount(data["amount"])
+                data["amount"] = normalized
             if data.get("confidence_score") is not None:
                 data["confidence_score"] = float(data["confidence_score"])
-            return ExtractionResult.model_validate(data)
+            result = ExtractionResult.model_validate(data)
+            return self._ai_validation.sanitize_and_validate(result)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             raise ExtractionError(f"Invalid OpenAI response: {exc}") from exc

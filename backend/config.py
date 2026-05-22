@@ -1,12 +1,21 @@
 """Application settings — single source for env vars (doc 12)."""
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _BACKEND_DIR.parent
+# Docker runs with cwd /app (backend/); local dev may use repo root .env
+_ENV_FILES = [
+    p for p in (_BACKEND_DIR / ".env", _REPO_ROOT / ".env") if p.is_file()
+]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILES or ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
