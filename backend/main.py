@@ -11,9 +11,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 
-from api.routers import auth_router, export_router, health_router, invoice_router
+from api.routers import (
+    auth_router,
+    bank_statement_router,
+    export_router,
+    health_router,
+    invoice_router,
+)
 from config import settings
-from core.exceptions import AppError, ExtractionError, ExportError
+from core.exceptions import AppError, ExcelParseError, ExtractionError, ExportError
 from db.pool import engine
 from middleware.auth import AuthMiddleware
 from middleware.cors import setup_cors
@@ -26,6 +32,7 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 async def lifespan(app: FastAPI):
     os.makedirs(settings.storage_path, exist_ok=True)
     os.makedirs(os.path.join(settings.storage_path, "invoices"), exist_ok=True)
+    os.makedirs(os.path.join(settings.storage_path, "bank_statements"), exist_ok=True)
     app.state.http_client = httpx.AsyncClient(timeout=30.0)
     app.state.openai_client = (
         AsyncOpenAI(api_key=settings.openai_api_key)
@@ -54,6 +61,23 @@ async def http_exception_handler(_request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": "http_error", "message": str(exc.detail)},
+    )
+
+
+@app.exception_handler(ExcelParseError)
+async def excel_parse_error_handler(_request: Request, exc: ExcelParseError):
+    msg = str(exc).lower()
+    if "header" in msg or "column" in msg or "komenti" in msg:
+        code = "missing_required_columns"
+    elif "no transaction" in msg or "no data" in msg:
+        code = "empty_file"
+    elif "unsupported" in msg:
+        code = "unsupported_file_type"
+    else:
+        code = "parse_error"
+    return JSONResponse(
+        status_code=400,
+        content={"error": code, "message": str(exc)},
     )
 
 
@@ -89,3 +113,4 @@ app.include_router(health_router.router, prefix="/api")
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(invoice_router.router, prefix="/api")
 app.include_router(export_router.router, prefix="/api")
+app.include_router(bank_statement_router.router, prefix="/api")

@@ -9,6 +9,7 @@ import { PermissionsPage } from "./routes/admin.permissions";
 import { SettingsPage } from "./routes/admin.settings";
 import { UsersPage } from "./routes/admin.users";
 import { BankPage } from "./routes/bank-statements";
+import { BankTransactionsPage } from "./routes/bank-transactions";
 import { DocumentsPage } from "./routes/documents";
 import { ExportsPage } from "./routes/exports";
 import { UploadPage } from "./routes/index";
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="documents" element={<DocumentsPage />} />
               <Route path="review" element={<ReviewPage />} />
               <Route path="bank-statements" element={<BankPage />} />
+              <Route path="bank-transactions" element={<BankTransactionsPage />} />
               <Route path="matching" element={<MatchingPage />} />
               <Route path="manual-review" element={<ManualReviewPage />} />
               <Route path="exports" element={<ExportsPage />} />

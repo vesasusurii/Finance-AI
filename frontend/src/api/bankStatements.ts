@@ -1,0 +1,43 @@
+import { apiFetch } from "./client";
+import type {
+  BankStatementListResponse,
+  BankStatementUploadResponse,
+  BankTransactionFilters,
+  BankTransactionListResponse,
+} from "../types/bank";
+
+export async function uploadBankStatement(
+  file: File,
+): Promise<BankStatementUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<BankStatementUploadResponse>("/api/bank-statements/upload", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export async function listBankStatements(
+  page = 1,
+  limit = 50,
+): Promise<BankStatementListResponse> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  return apiFetch<BankStatementListResponse>(
+    `/api/bank-statements?${params}`,
+  );
+}
+
+export async function listBankTransactions(
+  filters: BankTransactionFilters = {},
+): Promise<BankTransactionListResponse> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
+  });
+  const qs = params.toString();
+  return apiFetch<BankTransactionListResponse>(
+    `/api/bank-transactions${qs ? `?${qs}` : ""}`,
+  );
+}

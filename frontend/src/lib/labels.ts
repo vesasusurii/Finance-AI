@@ -18,6 +18,16 @@ export function matchStatusLabel(status: string): string {
   return map[status] ?? status;
 }
 
+export function reconciliationStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: "Pending",
+    matched: "Matched",
+    partial: "Partial",
+    needs_review: "Needs Review",
+  };
+  return map[status] ?? status;
+}
+
 export function processingStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pending: "Pending",

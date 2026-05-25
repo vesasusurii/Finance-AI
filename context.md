@@ -25,48 +25,59 @@ cd frontend && npm install && npm run dev
 - **API:** http://localhost:8000 — health: `/api/health`
 - **Auth:** JWT in `access_token` HttpOnly cookie; `GET /api/auth/me` returns **204** when signed out (not 401)
 
+**After Phase 2 pull:** `docker compose build backend` (adds `xlrd` for `.xls` bank files).
+
 ## OCR / upload pipeline (OpenAI-primary)
 
 Per [DOCS/8. OCR-Technology.md](DOCS/8. OCR-Technology.md), **all invoice OCR is OpenAI** — no Google Document AI or Tesseract in this build.
 
 1. `POST /api/invoices/upload` (multipart `files`)
-2. `InvoiceExtractionService`:
-   - **Every file** → page images → **OpenAI Vision** (`gpt-4o-mini` by default), `detail: high`
-   - **PDFs:** all pages up to `OPENAI_MAX_PDF_PAGES` (25); batched in groups of `OPENAI_VISION_PAGE_BATCH_SIZE` when &gt; 6 pages, then merged; full `pdfplumber` text with page markers as hints
-   - **Low confidence / missing fields:** automatic retry with `OPENAI_MODEL_STRONG` (`gpt-4o`)
-3. Pydantic validation → `invoices` + audit log (`provider: openai_vision`, `model: …`)
-4. Required: `OPENAI_API_KEY` in `.env`
+2. `InvoiceExtractionService` → OpenAI Vision, audit `openai_vision`
+3. Required: `OPENAI_API_KEY` in `.env`
 
-**Not yet implemented:** Google Document AI failover, Tesseract, upload list API, file preview in review UI.
+## Bank statement pipeline (Phase 2)
+
+1. `POST /api/bank-statements/upload` (multipart `file`, `.xlsx` / `.xls`)
+2. `BankStatementService` → `bank_excel_parser` (header scan for Data + Komenti) → `invoice_number_parser` per comment
+3. Tables: `bank_statements`, `bank_transactions` (`reconciliation_status` starts `pending`)
+4. `GET /api/bank-statements`, `GET /api/bank-transactions?bank_statement_id=…`
+
+**Not yet:** `POST /api/reconciliation/run` (Phase 3), matching UI
 
 ## Frontend (no mock data)
 
-- UI from `exact-screenshot-clone` layout; data from APIs only
-- **Live:** Upload, Purchase invoices (documents), OCR review queue, Excel export
-- **Placeholder screens:** Bank statements, matching, manual review, admin (empty state copy)
+- **Live:** Upload, Purchase invoices, OCR review, Excel export, **Bank statements upload + preview**, **Bank transactions table**
+- **Placeholder:** Matching, manual review, admin
+
+| Route | Screen |
+|-------|--------|
+| `/` | Invoice upload |
+| `/documents` | Purchase invoices |
+| `/review` | OCR review queue |
+| `/bank-statements` | Bank Excel upload + statement list |
+| `/bank-transactions` | Parsed transaction rows |
+| `/exports` | Excel export |
+| `/matching` | Placeholder (Phase 3) |
 
 ## Key paths
 
 | Area | Path |
 |------|------|
+| Bank service | `backend/services/bank_statement_service.py` |
+| Excel parser | `backend/utils/bank_excel_parser.py` |
+| Invoice # parser | `backend/utils/invoice_number_parser.py` |
+| Bank API | `backend/api/routers/bank_statement_router.py` |
 | OCR service | `backend/services/invoice_extraction_service.py` |
-| PDF helpers | `backend/services/ocr/pdf_reader.py` |
-| Upload API | `backend/api/routers/invoice_router.py` |
-| Auth | `backend/middleware/auth.py`, `frontend/src/auth/` |
-| Branding | `DOCS/BRANDING.md`, `branding/theme.css` |
 | Specs | `DOCS/*.md` |
 
-## Session notes (2026-05-22)
+## Session notes
 
-- Replaced partial clone integration with full UI; removed `frontend/src/lib/mock-data.ts`
-- Fixed OCR: scanned PDFs no longer fail with “could not extract text”; Vision used via `pypdfium2`
-- Added root `.gitignore`, this `context.md`
-- Docker backend image rebuild required after `requirements.txt` change (`pypdfium2`, `Pillow`)
+- **2026-05-22:** Phase 1 — full UI, OpenAI Vision OCR, scanned PDFs via `pypdfium2`
+- **2026-05-22:** Phase 2 — bank models/migration, Excel parse, bank APIs, `/bank-statements` + `/bank-transactions` UI
 
 ## Handoff checklist
 
-- [ ] Confirm `OPENAI_API_KEY` set in `.env` (never commit)
-- [ ] `docker compose build backend` after pulling OCR dependency changes
-- [ ] Restart `npm run dev` after `frontend/.env` changes
-- [ ] Test upload: digital PDF + scanned PDF
-- [ ] Bank/matching phases per `DOCS/0. Roadmap.md`
+- [ ] `docker compose build backend` && `alembic upgrade head`
+- [ ] Test bank upload with ProCredit-style `.xlsx` or `.xls`
+- [ ] Confirm `OPENAI_API_KEY` for invoice OCR tests
+- [ ] Phase 3 matching per `DOCS/0. Roadmap.md`

@@ -5,17 +5,21 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.controllers.auth_controller import AuthController
+from api.controllers.bank_statement_controller import BankStatementController
 from api.controllers.export_controller import ExportController
 from api.controllers.invoice_controller import InvoiceController
 from config import settings
 from db.pool import async_session
 from middleware.auth import get_current_user as _get_user_from_request
 from repositories.audit_repository import AuditRepository
+from repositories.bank_statement_repository import BankStatementRepository
+from repositories.bank_transaction_repository import BankTransactionRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
 from services.ai_validation_service import AIValidationService
+from services.bank_statement_service import BankStatementService
 from services.excel_service import ExcelService
 from services.invoice_extraction_service import InvoiceExtractionService
 
@@ -112,3 +116,31 @@ async def get_export_controller(
     excel: ExcelService = Depends(get_excel_service),
 ) -> ExportController:
     return ExportController(invoice_repo, excel)
+
+
+async def get_bank_statement_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> BankStatementRepository:
+    return BankStatementRepository(session)
+
+
+async def get_bank_transaction_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> BankTransactionRepository:
+    return BankTransactionRepository(session)
+
+
+async def get_bank_statement_service(
+    upload_repo: UploadRepository = Depends(get_upload_repo),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
+    transaction_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
+) -> BankStatementService:
+    return BankStatementService(upload_repo, statement_repo, transaction_repo)
+
+
+async def get_bank_statement_controller(
+    service: BankStatementService = Depends(get_bank_statement_service),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
+    transaction_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
+) -> BankStatementController:
+    return BankStatementController(service, statement_repo, transaction_repo)

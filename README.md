@@ -46,7 +46,7 @@ docker compose exec backend alembic upgrade head
 ## Repository layout
 
 ```
-backend/     FastAPI — auth, invoices, export (Phase 1)
+backend/     FastAPI — auth, invoices, export, bank statements (Phase 1–2)
 frontend/    React + Vite — dashboard, upload, table, export
 branding/    theme.css (import as @brand in frontend)
 DOCS/        Specifications
