@@ -1,0 +1,15 @@
+# Keep Docker build context small (frontend build uses repo root)
+**/node_modules
+**/.git
+**/.venv
+**/venv
+**/__pycache__
+**/.pytest_cache
+**/dist
+frontend/dist
+upload_data
+golden
+samples
+*.pdf
+.env
+.cursor
