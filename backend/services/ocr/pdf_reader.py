@@ -1,19 +1,10 @@
-"""PDF text extraction and page rendering for OpenAI Vision (doc 8)."""
+"""PDF page rendering for OpenAI Vision — no text/OCR outside OpenAI (doc 8)."""
 
 from __future__ import annotations
 
 import io
-import logging
-import re
 
-import pdfplumber
 import pypdfium2 as pdfium
-from pdfminer.pdfdocument import PDFPasswordIncorrect
-
-logger = logging.getLogger(__name__)
-
-MIN_PDF_TEXT_CHARS = 80
-GARBLED_REPLACEMENT_RATIO = 0.02
 
 
 def pdf_page_count(content: bytes) -> int:
@@ -25,56 +16,25 @@ def pdf_page_count(content: bytes) -> int:
 
 
 def pdf_is_encrypted(content: bytes) -> bool:
+    """Return True only when the PDF genuinely requires a password to open.
+
+    Previous implementation caught *every* exception and returned True, which
+    meant any rendering hiccup (memory, codec, unusual PDF variant) would
+    silently reject a valid document as "encrypted".  Now we only return True
+    when pypdfium2 signals a password/encryption problem.
+    """
     try:
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            doc = getattr(pdf, "doc", None)
-            if doc is not None and getattr(doc, "is_encrypted", False):
-                return True
-    except PDFPasswordIncorrect:
-        return True
-    except Exception:
-        logger.debug("Could not determine PDF encryption via pdfplumber", exc_info=True)
-    return False
-
-
-def extract_pdf_text(content: bytes, max_pages: int | None = None) -> str:
-    """Extract text with page markers for multi-page invoices."""
-    parts: list[str] = []
-    with pdfplumber.open(io.BytesIO(content)) as pdf:
-        pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
-        for index, page in enumerate(pages, start=1):
-            text = (page.extract_text() or "").strip()
-            parts.append(f"--- Page {index} ---\n{text}")
-    return "\n\n".join(parts)
-
-
-def pdf_text_usable(text: str) -> bool:
-    stripped = text.strip()
-    if len(stripped) < MIN_PDF_TEXT_CHARS:
+        doc = pdfium.PdfDocument(content)
+        doc.close()
         return False
-    if stripped.count("\ufffd") / max(len(stripped), 1) > GARBLED_REPLACEMENT_RATIO:
+    except Exception as exc:
+        msg = str(exc).lower()
+        # pypdfium2 / PDFium surfaces password problems via error messages
+        if any(k in msg for k in ("password", "encrypt", "locked", "protected")):
+            return True
+        # Any other exception (corrupt page, codec issue, etc.) — not our
+        # concern here; let the render step surface the real error.
         return False
-    return True
-
-
-def slice_pdf_text_by_pages(full_text: str, page_start: int, page_end: int) -> str:
-    """Return text for pages [page_start, page_end] using --- Page N --- markers."""
-    if not full_text.strip():
-        return ""
-    pattern = re.compile(r"--- Page (\d+) ---", re.MULTILINE)
-    matches = list(pattern.finditer(full_text))
-    if not matches:
-        return full_text if page_start == 1 else ""
-
-    parts: list[str] = []
-    for i, match in enumerate(matches):
-        page_num = int(match.group(1))
-        if page_num < page_start or page_num > page_end:
-            continue
-        start = match.start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
-        parts.append(full_text[start:end].strip())
-    return "\n\n".join(parts)
 
 
 def render_pdf_pages_as_images(
@@ -85,7 +45,7 @@ def render_pdf_pages_as_images(
     max_dimension: int = 2048,
     jpeg_quality: int = 92,
 ) -> list[tuple[bytes, str]]:
-    """Return (jpeg_bytes, mime) per page for Vision API."""
+    """Rasterise PDF pages to JPEG for OpenAI Vision."""
     doc = pdfium.PdfDocument(content)
     try:
         total = len(doc)

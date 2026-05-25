@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     environment: str = Field(default="local", validation_alias="ENVIRONMENT")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
-    # Primary OCR: OpenAI Vision (gpt-4o-mini). Strong model used on low-confidence retry.
+    # Invoice OCR: OpenAI Vision only (gpt-4o-mini). Strong model on low-confidence retry.
     openai_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_MODEL")
     openai_model_strong: str = Field(
         default="gpt-4o", validation_alias="OPENAI_MODEL_STRONG"

@@ -27,13 +27,14 @@ cd frontend && npm install && npm run dev
 
 **After Phase 2 pull:** `docker compose build backend` (adds `xlrd` for `.xls` bank files).
 
-## OCR / upload pipeline (OpenAI-primary)
+## OCR / upload pipeline (OpenAI Vision only)
 
-Per [DOCS/8. OCR-Technology.md](DOCS/8. OCR-Technology.md), **all invoice OCR is OpenAI** — no Google Document AI or Tesseract in this build.
+Per [DOCS/8. OCR-Technology.md](DOCS/8. OCR-Technology.md), **all invoice scanning is OpenAI Vision** — PDF, JPEG, JPG, PNG only. No pdfplumber text OCR, Google Document AI, or Tesseract.
 
-1. `POST /api/invoices/upload` (multipart `files`)
-2. `InvoiceExtractionService` → OpenAI Vision, audit `openai_vision`
-3. Required: `OPENAI_API_KEY` in `.env`
+1. `POST /api/invoices/upload` (multipart `files`) — PDF, JPEG, JPG, PNG
+2. PDFs: pages rasterised with `pypdfium2` → JPEG → OpenAI Vision (`gpt-4o-mini`, retry `gpt-4o`)
+3. Images: sent directly to OpenAI Vision
+4. Audit provider: `openai_vision` — requires `OPENAI_API_KEY` in `.env`
 
 ## Bank statement pipeline (Phase 2)
 

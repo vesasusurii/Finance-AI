@@ -21,27 +21,44 @@ Technical architecture and workflows: [`DOCS/README.md`](DOCS/README.md)
 
 ## Quick start (Docker — team default)
 
+Run all commands from the **repo root** (`Finance-AI/`), not from `backend/`.
+
 ```bash
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD and JWT_SECRET
+# Edit .env: POSTGRES_PASSWORD, JWT_SECRET, OPENAI_API_KEY
 
-docker compose up -d --build
-curl http://localhost:8000/api/health
+docker compose --profile full up -d --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python scripts/seed_admin.py
 ```
+
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:5173 |
+| API health | http://localhost:8000/api/health |
+
+**Login (after seed):** `finance@borek.com` / `changeme`
 
 Details: [`DOCS/12. Deployment & Environments.md`](DOCS/12.%20Deployment%20%26%20Environments.md)
 
-Frontend (after Phase 0 scaffold):
+### Local frontend only (no Docker UI)
 
 ```bash
-docker compose --profile full up -d --build
+cd frontend
+npm install
+npm run dev
 ```
 
-Migrations:
+Requires backend + db running (`docker compose up -d db backend`). Leave `VITE_API_BASE_URL` unset so Vite proxies `/api` to port 8000.
 
-```bash
-docker compose exec backend alembic upgrade head
-```
+### Common issues
+
+| Symptom | Fix |
+|---|---|
+| `docker API ... dockerDesktopLinuxEngine` | Start **Docker Desktop**, wait until running, retry compose |
+| `OPENAI_API_KEY is not set` | Set key in `.env`, then `docker compose up -d --force-recreate backend` |
+| `npm run dev` at repo root fails | No root `package.json` — use `frontend/` or Docker profile `full` |
+| API unreachable from UI in Docker | Use default compose frontend env (proxy via `/api`, not direct `:8000`) |
 
 ## Repository layout
 
