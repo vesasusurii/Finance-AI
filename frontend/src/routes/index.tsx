@@ -1,84 +1,39 @@
-import { useCallback, useRef, useState } from "react";
-import { Upload, FileText, RefreshCw } from "lucide-react";
+import { useRef, useState } from "react";
+import { Upload, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
-import { DataTable, type Column } from "@/components/ui-finance/DataTable";
-import { StatusBadge } from "@/components/ui-finance/StatusBadge";
-import { uploadInvoices } from "@/api/invoices";
-import type { UploadItem } from "@/types/invoice";
-import { processingStatusLabel } from "@/lib/labels";
-
-type UploadRow = UploadItem & { id: string };
+import { InvoiceDetailsDrawer } from "@/components/invoices/InvoiceDetailsDrawer";
+import { ProcessingQueueTable } from "@/components/invoices/ProcessingQueueTable";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
+import type { UploadQueueItem } from "@/types/uploadQueue";
 
 export function UploadPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<UploadRow[]>([]);
+  const [selectedItem, setSelectedItem] = useState<UploadQueueItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const runUpload = useCallback(async (files: FileList | File[]) => {
-    const list = Array.from(files);
-    if (!list.length) return;
-
-    setUploading(true);
-    setError(null);
-    try {
-      const res = await uploadInvoices(list);
-      const mapped: UploadRow[] = res.items.map((item) => ({
-        ...item,
-        id: `${item.upload_id}-${item.original_filename}`,
-      }));
-      setRows((prev) => [...mapped, ...prev]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  }, []);
+  const {
+    items,
+    isRunning,
+    enqueueFiles,
+    retryItem,
+    clearCompleted,
+    clearAll,
+  } = useUploadQueue();
 
   const onFiles = (files: FileList | null) => {
-    if (files?.length) void runUpload(files);
+    if (!files?.length) return;
+    setError(null);
+    enqueueFiles(files);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
-  const columns: Column<UploadRow>[] = [
-    {
-      key: "file",
-      header: "Filename",
-      cell: (r) => (
-        <div className="flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-md border border-border bg-surface-muted">
-            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-          </div>
-          <div>
-            <div className="font-medium text-foreground">{r.original_filename}</div>
-            {r.invoice_id != null && (
-              <div className="text-[11px] text-muted-foreground">
-                Invoice #{r.invoice_id}
-              </div>
-            )}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "status",
-      header: "Processing",
-      cell: (r) => (
-        <StatusBadge value={processingStatusLabel(r.processing_status)} />
-      ),
-    },
-    {
-      key: "error",
-      header: "Details",
-      cell: (r) =>
-        r.error ? (
-          <span className="text-[12px] text-destructive">{r.error}</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-  ];
+  function handleView(item: UploadQueueItem) {
+    setSelectedItem(item);
+    setDrawerOpen(true);
+  }
 
   return (
     <div>
@@ -87,14 +42,23 @@ export function UploadPage() {
         title="Upload invoices"
         description="Upload supplier invoices and scans. OpenAI Vision reads each document and extracts structured data; uncertain rows go to review."
         actions={
-          <Button
-            variant="secondary"
-            icon={<RefreshCw className="h-3.5 w-3.5" />}
-            disabled={uploading}
-            onClick={() => setRows([])}
-          >
-            Clear list
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              disabled={isRunning || items.length === 0}
+              onClick={clearCompleted}
+            >
+              Clear finished
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={isRunning || items.length === 0}
+              onClick={clearAll}
+            >
+              Clear all
+            </Button>
+          </div>
         }
       />
 
@@ -130,15 +94,14 @@ export function UploadPage() {
           Drop invoices here to upload
         </h3>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          PDF, JPG, PNG · scanned PDFs supported · up to 20 MB each
+          PDF, JPG, PNG · scanned PDFs supported · up to 20 MB each · bulk batches supported
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
           <Button
-            disabled={uploading}
             onClick={() => inputRef.current?.click()}
             icon={<Upload className="h-3.5 w-3.5" />}
           >
-            {uploading ? "Uploading…" : "Select files"}
+            Select files
           </Button>
         </div>
       </div>
@@ -149,14 +112,17 @@ export function UploadPage() {
         </p>
       )}
 
-      {rows.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">
-          No uploads in this session yet. Files you upload will appear here with
-          processing status.
-        </p>
-      ) : (
-        <DataTable columns={columns} rows={rows} />
-      )}
+      <ProcessingQueueTable
+        items={items}
+        onView={handleView}
+        onRetry={(item) => retryItem(item.id)}
+      />
+
+      <InvoiceDetailsDrawer
+        item={selectedItem}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   rejectMatch,
   runReconciliation,
 } from "@/api/reconciliation";
+import { ApiError } from "@/api/client";
 import { listReviewTasks } from "@/api/review";
 import { listBankTransactions } from "@/api/bankStatements";
 import { useInvoices } from "@/hooks/useInvoices";
@@ -43,6 +44,7 @@ export function MatchingPage() {
   const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
   const [unmatchedTxns, setUnmatchedTxns] = useState<BankTransaction[]>([]);
   const [multiTxns, setMultiTxns] = useState<BankTransaction[]>([]);
+  const [busyMatchId, setBusyMatchId] = useState<number | null>(null);
 
   const { items: unmatchedInvoices, reload: reloadInvoices } = useInvoices({
     match_status: "unmatched",
@@ -84,6 +86,12 @@ export function MatchingPage() {
     await reloadInvoices();
   }, [statementId, reloadInvoices]);
 
+  useEffect(() => {
+    void refresh().catch((e) => {
+      setError(e instanceof Error ? e.message : "Could not load matching data");
+    });
+  }, [refresh]);
+
   const onRun = async () => {
     setRunning(true);
     setError(null);
@@ -102,13 +110,42 @@ export function MatchingPage() {
   };
 
   const onApprove = async (matchId: number) => {
-    await approveMatch(matchId);
+    if (busyMatchId != null) return;
+    setBusyMatchId(matchId);
+    setError(null);
+    try {
+      await approveMatch(matchId);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "match_already_resolved") {
+        // Idempotent — row was already approved/rejected; refresh UI.
+      } else {
+        setError(e instanceof Error ? e.message : "Could not approve match");
+        return;
+      }
+    } finally {
+      setBusyMatchId(null);
+    }
     await refresh();
   };
 
   const onReject = async (matchId: number) => {
+    if (busyMatchId != null) return;
     const reason = window.prompt("Reason for rejecting this match (optional):");
-    await rejectMatch(matchId, reason ?? undefined);
+    if (reason === null) return;
+    setBusyMatchId(matchId);
+    setError(null);
+    try {
+      await rejectMatch(matchId, reason || undefined);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "match_already_resolved") {
+        // Idempotent — refresh to sync state.
+      } else {
+        setError(e instanceof Error ? e.message : "Could not reject match");
+        return;
+      }
+    } finally {
+      setBusyMatchId(null);
+    }
     await refresh();
   };
 
@@ -140,6 +177,7 @@ export function MatchingPage() {
               variant="success"
               size="sm"
               icon={<Check className="h-3 w-3" />}
+              disabled={busyMatchId === r.id}
               onClick={(e) => {
                 e.stopPropagation();
                 void onApprove(r.id);
@@ -151,6 +189,7 @@ export function MatchingPage() {
               variant="danger"
               size="sm"
               icon={<X className="h-3 w-3" />}
+              disabled={busyMatchId === r.id}
               onClick={(e) => {
                 e.stopPropagation();
                 void onReject(r.id);

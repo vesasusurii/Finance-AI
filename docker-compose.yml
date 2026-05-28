@@ -32,10 +32,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+        required: false
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-finance_ai}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-finance_ai}}
       STORAGE_PATH: /data/uploads
       ENVIRONMENT: ${ENVIRONMENT:-local}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}

@@ -11,7 +11,7 @@ export function ManualReviewPage() {
       />
       <EmptyState
         title="Manual review not available in this build"
-        description="Use OCR review and purchase invoices until bank matching is live."
+        description="Use purchase invoices until bank matching is live."
       />
     </div>
   );

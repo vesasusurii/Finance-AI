@@ -17,6 +17,10 @@ export async function uploadInvoices(files: File[]): Promise<UploadResponse> {
   });
 }
 
+export async function getInvoice(id: number): Promise<Invoice> {
+  return apiFetch<Invoice>(`/api/invoices/${id}`);
+}
+
 export async function listInvoices(
   filters: InvoiceFilters = {},
 ): Promise<InvoiceListResponse> {

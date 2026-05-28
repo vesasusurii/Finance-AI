@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -65,16 +65,25 @@ export function InvoiceDocumentEditor({
   invoice,
   onApproved,
   onSaved,
+  embedded = false,
 }: {
   invoice: Invoice;
   onApproved: () => void;
   onSaved: (invoice: Invoice) => void;
+  /** When true, fits inside a drawer/panel instead of a full page. */
+  embedded?: boolean;
 }) {
   const [form, setForm] = useState<FormData>(toFormData(invoice));
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setForm(toFormData(invoice));
+    setSaveError(null);
+    setSaved(false);
+  }, [invoice]);
 
   const isDirty = JSON.stringify(form) !== JSON.stringify(toFormData(invoice));
 
@@ -135,7 +144,12 @@ export function InvoiceDocumentEditor({
     : null;
 
   return (
-    <div className="grid min-h-[calc(100vh-11rem)] grid-cols-1 gap-4 lg:grid-cols-2">
+    <div
+      className={cn(
+        "grid grid-cols-1 gap-4 lg:grid-cols-2",
+        embedded ? "min-h-[640px]" : "min-h-[calc(100vh-11rem)]",
+      )}
+    >
       <DocumentPreview invoice={invoice} />
 
       <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">

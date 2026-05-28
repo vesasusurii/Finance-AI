@@ -137,7 +137,7 @@ class InvoiceExtractionService:
             )
 
             invoice = await self._invoice_repo.create(
-                result, upload_row.id, review_status
+                result, upload_row.id, review_status, uploaded_by=user.user_id
             )
             logger.debug(
                 "Invoice persisted: id=%d (%s)", invoice.id, type(invoice).__name__

@@ -37,6 +37,12 @@ def _to_response(row: Invoice) -> InvoiceResponse:
     )
 
 
+def _apply_owner_scope(query, owner_user_id: int | None):
+    if owner_user_id is not None:
+        return query.where(Invoice.uploaded_by == owner_user_id)
+    return query
+
+
 class InvoiceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -46,6 +52,7 @@ class InvoiceRepository:
         data: ExtractionResult,
         source_file_id: int,
         review_status: str,
+        uploaded_by: int,
     ) -> InvoiceResponse:
         formatted = normalize_invoice_number(data.invoice_number)
         row = Invoice(
@@ -66,17 +73,25 @@ class InvoiceRepository:
             review_status=review_status,
             match_status="unmatched",
             source_file_id=source_file_id,
+            uploaded_by=uploaded_by,
         )
         self._session.add(row)
         await self._session.flush()
-        return await self.get(row.id)  # type: ignore[return-value]
+        return await self.get(row.id, owner_user_id=None)  # type: ignore[return-value]
 
-    async def get(self, invoice_id: int) -> InvoiceResponse | None:
-        result = await self._session.execute(
+    async def get(
+        self,
+        invoice_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> InvoiceResponse | None:
+        query = (
             select(Invoice)
             .where(Invoice.id == invoice_id)
             .options(joinedload(Invoice.source_file))
         )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
         row = result.scalar_one_or_none()
         return _to_response(row) if row else None
 
@@ -85,9 +100,14 @@ class InvoiceRepository:
         filters: dict,
         page: int,
         limit: int,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[list[InvoiceResponse], int]:
         query = select(Invoice).options(joinedload(Invoice.source_file))
         count_query = select(func.count()).select_from(Invoice)
+
+        query = _apply_owner_scope(query, owner_user_id)
+        count_query = _apply_owner_scope(count_query, owner_user_id)
 
         if filters.get("review_status"):
             query = query.where(Invoice.review_status == filters["review_status"])
@@ -131,12 +151,28 @@ class InvoiceRepository:
         rows = (await self._session.execute(query)).scalars().all()
         return [_to_response(r) for r in rows], int(total)
 
-    async def list_for_export(self, filters: dict) -> list[InvoiceResponse]:
-        items, _ = await self.list_invoices(filters, page=1, limit=10_000)
+    async def list_for_export(
+        self,
+        filters: dict,
+        *,
+        owner_user_id: int | None = None,
+    ) -> list[InvoiceResponse]:
+        items, _ = await self.list_invoices(
+            filters,
+            page=1,
+            limit=10_000,
+            owner_user_id=owner_user_id,
+        )
         return items
 
-    async def update(self, invoice_id: int, data: InvoiceUpdate) -> InvoiceResponse | None:
-        row = await self._session.get(Invoice, invoice_id)
+    async def update(
+        self,
+        invoice_id: int,
+        data: InvoiceUpdate,
+        *,
+        owner_user_id: int | None = None,
+    ) -> InvoiceResponse | None:
+        row = await self._get_row(invoice_id, owner_user_id=owner_user_id)
         if not row:
             return None
         payload = data.model_dump(exclude_unset=True)
@@ -147,23 +183,33 @@ class InvoiceRepository:
         for key, value in payload.items():
             setattr(row, key, value)
         await self._session.flush()
-        return await self.get(invoice_id)
+        return await self.get(invoice_id, owner_user_id=owner_user_id)
 
-    async def delete(self, invoice_id: int) -> bool:
-        row = await self._session.get(Invoice, invoice_id)
+    async def delete(
+        self,
+        invoice_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> bool:
+        row = await self._get_row(invoice_id, owner_user_id=owner_user_id)
         if not row:
             return False
         await self._session.delete(row)
         await self._session.flush()
         return True
 
-    async def approve(self, invoice_id: int) -> InvoiceResponse | None:
-        row = await self._session.get(Invoice, invoice_id)
+    async def approve(
+        self,
+        invoice_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> InvoiceResponse | None:
+        row = await self._get_row(invoice_id, owner_user_id=owner_user_id)
         if not row:
             return None
         row.review_status = "approved"
         await self._session.flush()
-        return await self.get(invoice_id)
+        return await self.get(invoice_id, owner_user_id=owner_user_id)
 
     async def find_by_number(
         self, normalized: str
@@ -238,3 +284,29 @@ class InvoiceRepository:
             Invoice.match_status == match_status
         )
         return int((await self._session.execute(q)).scalar_one())
+
+    async def get_owned_row(
+        self,
+        invoice_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> Invoice | None:
+        query = (
+            select(Invoice)
+            .where(Invoice.id == invoice_id)
+            .options(joinedload(Invoice.source_file))
+        )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def _get_row(
+        self,
+        invoice_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> Invoice | None:
+        query = select(Invoice).where(Invoice.id == invoice_id)
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()

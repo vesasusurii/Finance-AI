@@ -25,6 +25,7 @@ class Invoice(Base):
         Index("ix_invoices_review_status", "review_status"),
         Index("ix_invoices_match_status", "match_status"),
         Index("ix_invoices_paid_at_date", "paid_at_date"),
+        Index("ix_invoices_uploaded_by", "uploaded_by"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -58,6 +59,10 @@ class Invoice(Base):
     source_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("uploaded_files.id"),
         nullable=True,
+    )
+    uploaded_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
     )
     source_file: Mapped["UploadedFile | None"] = relationship(
         "UploadedFile",
