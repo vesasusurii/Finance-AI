@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +8,9 @@ from api.controllers.auth_controller import AuthController
 from api.controllers.bank_statement_controller import BankStatementController
 from api.controllers.export_controller import ExportController
 from api.controllers.invoice_controller import InvoiceController
+from api.controllers.user_controller import UserController
 from config import settings
+from core.roles import is_admin
 from db.pool import async_session
 from middleware.auth import get_current_user as _get_user_from_request
 from repositories.audit_repository import AuditRepository
@@ -36,6 +38,18 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 def get_current_user(request: Request) -> UserContext:
     return _get_user_from_request(request)
+
+
+def require_admin(user: UserContext = Depends(get_current_user)) -> UserContext:
+    if not is_admin(user.role):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "forbidden",
+                "message": "Admin access required.",
+            },
+        )
+    return user
 
 
 def get_openai_client(request: Request) -> AsyncOpenAI:
@@ -101,6 +115,12 @@ async def get_auth_controller(
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> AuthController:
     return AuthController(user_repo)
+
+
+async def get_user_controller(
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> UserController:
+    return UserController(user_repo)
 
 
 async def get_invoice_controller(

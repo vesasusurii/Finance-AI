@@ -5,9 +5,10 @@ import re
 from utils.normalization import is_tax_or_client_id, normalize_invoice_number
 
 PATTERNS = [
-    r"(?:invoice|fatura|inv|ref|nr\.?|pagesa)\s*[:#]?\s*([A-Z0-9][\w./-]{2,})",
+    r"\b(?:invoices?|fatur[aëe]?|fatures?|faturat?)\s+([\d\s,./-]+)",
     r"\b(\d{1,4}/\d{4}/\d{2,6})\b",
-    r"(?:invoices?|faturat?|fatures?)\s+([\d\s,.-/]+)",
+    r"\bpagesa\b(?:\s+(?:per|për|par))?(?:\s+(?:invoice|fatur[aëe]?))?\s*[:#]?\s*([A-Z0-9][\w./-]{2,})",
+    r"\b(?:invoice|fatur[aëe]?|inv|ref|nr\.?)\b\s*[:#]?\s*([A-Z0-9][\w./-]{2,})",
     r"\b([A-Z0-9]{4,}[-/][A-Z0-9]{2,})\b",
     r"\b(\d{4,})\b",
 ]
@@ -33,6 +34,20 @@ def extract_invoice_numbers(comment: str | None) -> list[str]:
                     and norm not in candidates
                     and not is_tax_or_client_id(norm)
                 ):
+                    if any(
+                        existing.isdigit() and norm.isdigit() and norm in existing
+                        for existing in candidates
+                    ):
+                        continue
+                    candidates = [
+                        existing
+                        for existing in candidates
+                        if not (
+                            existing.isdigit()
+                            and norm.isdigit()
+                            and existing in norm
+                        )
+                    ]
                     candidates.append(norm)
 
     return candidates

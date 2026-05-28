@@ -6,6 +6,8 @@ import type {
   UploadResponse,
 } from "../types/invoice";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
 export async function uploadInvoices(files: File[]): Promise<UploadResponse> {
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
@@ -35,12 +37,14 @@ export async function updateInvoice(
   data: Partial<Invoice>,
 ): Promise<Invoice> {
   const {
-    paid_at_date: _skip,
+    paid_at_date: _paidAtDate, // system-only — bank matching sets this later
     extraction_confidence: _c,
     match_status: _m,
     review_status: _r,
     id: _id,
     source_file_id: _s,
+    source_filename: _sf,
+    source_mime_type: _sm,
     created_at: _ca,
     updated_at: _ua,
     ...writable
@@ -55,4 +59,12 @@ export async function approveInvoice(
   id: number,
 ): Promise<{ id: number; review_status: string }> {
   return apiFetch(`/api/invoices/${id}/approve`, { method: "POST" });
+}
+
+/**
+ * Authenticated URL for inline document preview (PDF / JPEG / PNG).
+ * Uses GET only — do not probe with HEAD (not supported by the dev proxy).
+ */
+export function invoiceFileUrl(invoiceId: number): string {
+  return `${API_BASE}/api/invoices/${invoiceId}/file`;
 }

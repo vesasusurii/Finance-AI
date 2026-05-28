@@ -7,7 +7,7 @@ AI-powered internal tool for **Borek Finance**: purchase invoice extraction and 
 All UI work must follow the Borek design system:
 
 - **[DOCS/BRANDING.md](DOCS/BRANDING.md)** — voice, colours, typography, component rules
-- **[branding/theme.css](branding/theme.css)** — CSS tokens and ready-made classes
+- **[DOCS/branding/theme.css](DOCS/branding/theme.css)** — CSS tokens and ready-made classes
 
 ## Documentation
 
@@ -29,7 +29,7 @@ cp .env.example .env
 
 docker compose --profile full up -d --build
 docker compose exec backend alembic upgrade head
-docker compose exec backend python scripts/seed_admin.py
+docker compose exec backend python scripts/seed_users.py
 ```
 
 | Service | URL |
@@ -37,7 +37,14 @@ docker compose exec backend python scripts/seed_admin.py
 | Frontend | http://localhost:5173 |
 | API health | http://localhost:8000/api/health |
 
-**Login (after seed):** `finance@borek.com` / `changeme`
+**Login (after seed):** run `python scripts/seed_users.py` in the backend container.
+
+| Role | Email | Password |
+|------|-------|----------|
+| Finance | `finance@borek.com` | `changeme` |
+| Admin | `admin@borek.com` | `changeme` |
+
+Access tokens refresh every minute (configurable via `JWT_ACCESS_EXPIRE_MINUTES`).
 
 Details: [`DOCS/12. Deployment & Environments.md`](DOCS/12.%20Deployment%20%26%20Environments.md)
 
@@ -65,10 +72,10 @@ Requires backend + db running (`docker compose up -d db backend`). Leave `VITE_A
 ```
 backend/     FastAPI — auth, invoices, export, bank statements (Phase 1–2)
 frontend/    React + Vite — dashboard, upload, table, export
-branding/    theme.css (import as @brand in frontend)
+DOCS/branding/    theme.css (import as @brand in frontend)
 DOCS/        Specifications
 docker-compose.yml
 .env.example
 ```
 
-**Seed login (local):** after `python scripts/seed_admin.py` → `finance@borek.com` / `changeme`
+**Seed login (local):** after `python scripts/seed_users.py` → see table above (`changeme` for both)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func, true
+from sqlalchemy import Boolean, DateTime, String, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -14,6 +14,23 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(500), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, server_default="finance")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=false(),
+    )
+    email_verification_code_hash: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

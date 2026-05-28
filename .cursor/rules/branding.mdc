@@ -5,14 +5,14 @@ alwaysApply: true
 
 # Borek Finance branding
 
-Before building or styling any UI, read [BRANDING.md](../../BRANDING.md) and use [branding/theme.css](../../branding/theme.css).
+Before building or styling any UI, read [BRANDING.md](../../DOCS/BRANDING.md) and use [DOCS/branding/theme.css](../../DOCS/branding/theme.css).
 
 ## Hard rules
 
 - Product: **Borek Finance** (repo: Finance-AI). Parent: Borek Solutions Group.
 - **No new colours** — only CSS variables from `branding/theme.css` (`--navy-700`, `--accent`, `--fg1`, etc.).
 - Page background: `--navy-700` (#0D123F). Accent: `--accent` (#DB3714), used sparingly.
-- Import theme in frontend entry: `import '../branding/theme.css'` (adjust path as needed).
+- Import theme in frontend entry: `import '@brand/theme.css'` (Vite alias → `DOCS/branding`).
 - Use existing classes: `.eyebrow`, `.card`, `.btn-accent`, `.btn-ghost`, `.data-table`, `.upload-zone`, `.badge--*`.
 - No emoji, no exclamation marks, British spelling, sentence-case headlines.
 - Cards: no default shadows. Buttons: pills. Motion: `--ease`, no bounce.

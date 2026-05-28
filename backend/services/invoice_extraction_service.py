@@ -21,7 +21,7 @@ from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
 from schemas.invoice import ExtractionResult, UploadItemResponse
 from services.ai_validation_service import AIValidationService
-from services.extraction_prompts import (
+from ai.prompts import (
     BATCH_SYSTEM_PROMPT,
     MERGE_SYSTEM_PROMPT,
     VISION_SYSTEM_PROMPT,
@@ -398,6 +398,37 @@ class InvoiceExtractionService:
             "3. Apply all field rules exactly — especially the amount decision tree.",
             "4. Return a single JSON object. Nothing else.",
         ]
+        fn_lower = filename.lower()
+        if "kesco" in fn_lower:
+            instruction_parts += [
+                "",
+                "KESCO bill detected:",
+                "• invoice_number = alphanumeric value after Nr. Ref. / Nr. Ret. on the BOTTOM payment strip (below barcode).",
+                "• NEVER use Shifra e konsumatorit, Customer ID, DPR codes, or other numeric-only header IDs.",
+            ]
+        elif any(
+            token in fn_lower for token in ("pastrimi", "mbeturinave", "krm")
+        ):
+            instruction_parts += [
+                "",
+                "Pastrimi / KRM waste bill detected:",
+                "• amount = Gjithsej borxhi / Total Due / Ukupan dug (includes prior debt).",
+                "• NOT Vlera mujore e fatures / Monthly Invoice Total / Per pagese alone.",
+                "• invoice_number = Nr.-No.-Br. in header; debt = Borgji paraprak / Previous due.",
+                "• Capture all bank accounts from Xhirollogaria block.",
+            ]
+        elif any(
+            token in fn_lower
+            for token in ("ujesjel", "ujësjell", "ujesjell", "water", "ujesjelles")
+        ):
+            instruction_parts += [
+                "",
+                "Regional water bill — CRITICAL invoice_number:",
+                "• Scan bottom 10–15%: full payment string above barcode (^F[0-9]+[A-Z]?$, usually 12+ digits after F).",
+                "• Read twice character-by-character; if reads disagree → invoice_number null, needs_review true.",
+                "• Optional trailing letter A–Z varies per bill — read from document. Never truncate to header Bill number.",
+                "• FORBIDDEN: Customer ID, NUI/NIPT, meter #, amounts, dates, values not starting with F.",
+            ]
 
         # Multi-page specific guidance injected directly into the user message
         # so the model receives it regardless of which system prompt is active.
@@ -524,6 +555,8 @@ class InvoiceExtractionService:
             if data.get("amount") is not None:
                 normalized = self._ai_validation._normalize_amount(data["amount"])
                 data["amount"] = normalized
+            if data.get("debt") is not None:
+                data["debt"] = self._ai_validation._normalize_amount(data["debt"])
             if data.get("confidence_score") is not None:
                 data["confidence_score"] = float(data["confidence_score"])
             result = ExtractionResult.model_validate(data)

@@ -1,13 +1,14 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Bell, Search, ChevronDown, Check } from "lucide-react";
+import { Bell, Search, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/auth/AuthContext";
+import { roleLabel } from "@/types/auth";
+import { BrandLogo } from "./BrandLogo";
 
 const financeNav = [
   { to: "/", label: "Upload" },
   { to: "/documents", label: "Documents" },
-  { to: "/review", label: "OCR Review" },
   { to: "/bank-statements", label: "Bank Statements" },
   { to: "/matching", label: "Matching" },
   { to: "/manual-review", label: "Manual Review" },
@@ -21,20 +22,21 @@ const adminNav = [
   { to: "/admin/settings", label: "Settings" },
 ];
 
-export type Role = "Finance Admin" | "Site Admin";
-
-export function Navbar({ role, onRoleChange }: { role: Role; onRoleChange: (r: Role) => void }) {
-  const [menu, setMenu] = useState<null | "role" | "user">(null);
+export function Navbar() {
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const nav = role === "Finance Admin" ? financeNav : adminNav;
+  const { user, logout, isAdmin } = useAuth();
+
+  const nav = isAdmin ? adminNav : financeNav;
+  const homeTo = isAdmin ? "/admin/users" : "/";
 
   const displayName = user?.email?.split("@")[0] ?? "User";
   const initials = displayName.slice(0, 2).toUpperCase();
+  const role = user?.role ? roleLabel(user.role) : "";
 
   async function handleSignOut() {
-    setMenu(null);
+    setUserMenuOpen(false);
     await logout();
     navigate("/login", { replace: true });
   }
@@ -42,19 +44,15 @@ export function Navbar({ role, onRoleChange }: { role: Role; onRoleChange: (r: R
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-6 px-6">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground text-[11px] font-bold tracking-tight">
-            B
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-[15px] font-semibold tracking-tight text-foreground">Borek</span>
-            <span className="text-[15px] font-normal text-muted-foreground">Finance</span>
-          </div>
+        <Link to={homeTo} className="flex items-center">
+          <BrandLogo imageClassName="h-9" />
         </Link>
 
-        <nav className="flex items-center gap-1">
+        <nav className="flex flex-wrap items-center gap-1">
           {nav.map((n) => {
-            const active = n.to === "/" ? pathname === "/" : pathname.startsWith(n.to);
+            const active =
+              n.to === "/" ? pathname === "/" : pathname.startsWith(n.to);
+            const isAdminLink = n.to.startsWith("/admin");
             return (
               <Link
                 key={n.to}
@@ -64,6 +62,7 @@ export function Navbar({ role, onRoleChange }: { role: Role; onRoleChange: (r: R
                   active
                     ? "bg-accent text-primary"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  isAdminLink && !active && "text-muted-foreground/90",
                 )}
               >
                 {n.label}
@@ -95,64 +94,36 @@ export function Navbar({ role, onRoleChange }: { role: Role; onRoleChange: (r: R
           <div className="relative">
             <button
               type="button"
-              onClick={() => setMenu(menu === "role" ? null : "role")}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] font-medium text-foreground hover:bg-secondary"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              {role}
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-            {menu === "role" && (
-              <div className="absolute right-0 top-9 w-48 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-md">
-                {(["Finance Admin", "Site Admin"] as Role[]).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      onRoleChange(r);
-                      setMenu(null);
-                    }}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                  >
-                    {r}
-                    {role === r && <Check className="h-3.5 w-3.5 text-primary" />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMenu(menu === "user" ? null : "user")}
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
               className="flex h-8 items-center gap-2 rounded-md pl-1 pr-2 hover:bg-secondary"
             >
               <div className="grid h-6 w-6 place-items-center rounded-full bg-soft-navy text-[10px] font-semibold text-primary-foreground">
                 {initials}
               </div>
-              <span className="hidden text-[13px] font-medium text-foreground md:inline">{displayName}</span>
+              <span className="hidden text-[13px] font-medium text-foreground md:inline">
+                {displayName}
+              </span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
-            {menu === "user" && (
+            {userMenuOpen && (
               <div className="absolute right-0 top-9 w-56 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-md">
                 <div className="border-b border-border px-3 py-2">
-                  <div className="text-[13px] font-medium text-foreground">{displayName}</div>
-                  <div className="text-[11px] text-muted-foreground">{user?.email ?? ""}</div>
+                  <div className="text-[13px] font-medium text-foreground">
+                    {displayName}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {user?.email ?? ""}
+                  </div>
+                  {role && (
+                    <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {role}
+                    </div>
+                  )}
                 </div>
-                {["Profile", "Preferences", "Keyboard shortcuts"].map((x) => (
-                  <button
-                    key={x}
-                    type="button"
-                    className="block w-full px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                  >
-                    {x}
-                  </button>
-                ))}
                 <button
                   type="button"
                   onClick={() => void handleSignOut()}
-                  className="block w-full px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+                  className="block w-full px-3 py-2 text-left text-[13px] text-foreground hover:bg-accent"
                 >
                   Sign out
                 </button>

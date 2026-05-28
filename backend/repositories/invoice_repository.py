@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.invoice import Invoice
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
+from sqlalchemy.orm import joinedload
 from utils.normalization import normalize_invoice_number
 
 
@@ -21,7 +22,16 @@ def _parse_date(value: str | None) -> date | None:
 
 
 def _to_response(row: Invoice) -> InvoiceResponse:
-    return InvoiceResponse.model_validate(row)
+    data = InvoiceResponse.model_validate(row)
+    upload = row.source_file
+    if upload is None:
+        return data
+    return data.model_copy(
+        update={
+            "source_filename": upload.original_filename,
+            "source_mime_type": upload.mime_type,
+        }
+    )
 
 
 class InvoiceRepository:
@@ -34,31 +44,37 @@ class InvoiceRepository:
         source_file_id: int,
         review_status: str,
     ) -> InvoiceResponse:
-        normalized = normalize_invoice_number(data.invoice_number)
+        formatted = normalize_invoice_number(data.invoice_number)
         row = Invoice(
             invoice_date=_parse_date(data.invoice_date),
             name_of_company=data.name_of_company,
             address_of_company=data.address_of_company,
-            invoice_number=data.invoice_number,
-            invoice_number_normalized=normalized,
+            invoice_number=formatted,
+            invoice_number_normalized=formatted,
             amount=Decimal(str(data.amount)) if data.amount is not None else None,
+            debt=Decimal(str(data.debt)) if data.debt is not None else None,
             currency=data.currency,
             account_details=data.account_details,
             internal_note_description=data.internal_note_description,
             client_employee_related=data.client_employee_related,
             category=data.category,
             extraction_confidence=Decimal(str(round(data.confidence_score, 4))),
+            field_confidences=data.field_confidences,
             review_status=review_status,
             match_status="unmatched",
             source_file_id=source_file_id,
         )
         self._session.add(row)
         await self._session.flush()
-        await self._session.refresh(row)
-        return _to_response(row)
+        return await self.get(row.id)  # type: ignore[return-value]
 
     async def get(self, invoice_id: int) -> InvoiceResponse | None:
-        row = await self._session.get(Invoice, invoice_id)
+        result = await self._session.execute(
+            select(Invoice)
+            .where(Invoice.id == invoice_id)
+            .options(joinedload(Invoice.source_file))
+        )
+        row = result.scalar_one_or_none()
         return _to_response(row) if row else None
 
     async def list_invoices(
@@ -67,7 +83,7 @@ class InvoiceRepository:
         page: int,
         limit: int,
     ) -> tuple[list[InvoiceResponse], int]:
-        query = select(Invoice)
+        query = select(Invoice).options(joinedload(Invoice.source_file))
         count_query = select(func.count()).select_from(Invoice)
 
         if filters.get("review_status"):
@@ -122,14 +138,13 @@ class InvoiceRepository:
             return None
         payload = data.model_dump(exclude_unset=True)
         if "invoice_number" in payload:
-            row.invoice_number_normalized = normalize_invoice_number(
-                payload["invoice_number"]
-            )
+            formatted = normalize_invoice_number(payload["invoice_number"])
+            payload["invoice_number"] = formatted
+            row.invoice_number_normalized = formatted
         for key, value in payload.items():
             setattr(row, key, value)
         await self._session.flush()
-        await self._session.refresh(row)
-        return _to_response(row)
+        return await self.get(invoice_id)
 
     async def delete(self, invoice_id: int) -> bool:
         row = await self._session.get(Invoice, invoice_id)
@@ -145,8 +160,7 @@ class InvoiceRepository:
             return None
         row.review_status = "approved"
         await self._session.flush()
-        await self._session.refresh(row)
-        return _to_response(row)
+        return await self.get(invoice_id)
 
     async def find_by_number(self, normalized: str) -> InvoiceResponse | None:
         result = await self._session.execute(
