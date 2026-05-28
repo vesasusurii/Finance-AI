@@ -19,11 +19,13 @@ target_metadata = Base.metadata
 
 
 def _sync_database_url() -> str:
-    return settings.database_url.replace(
+    url = settings.database_url.replace(
         "postgresql+asyncpg://",
         "postgresql+psycopg2://",
         1,
     )
+    # asyncpg uses ?ssl=require; psycopg2 expects sslmode=require
+    return url.replace("ssl=require", "sslmode=require")
 
 
 def run_migrations_offline() -> None:

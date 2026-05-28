@@ -1,9 +1,13 @@
+import mimetypes
 from datetime import date
+from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExtractionError
+from core.invoice_access import invoice_owner_user_id
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_repository import InvoiceRepository
 from schemas.auth import UserContext
@@ -16,6 +20,7 @@ from schemas.invoice import (
     UploadItemResponse,
 )
 from services.invoice_extraction_service import InvoiceExtractionService
+from utils.file_storage import get_file_path
 
 logger = get_logger(__name__)
 
@@ -61,6 +66,7 @@ class InvoiceController:
     @debug_trace
     async def list(
         self,
+        user: UserContext,
         review_status: str | None,
         match_status: str | None,
         invoice_date_from: date | None,
@@ -82,14 +88,22 @@ class InvoiceController:
             }.items()
             if v is not None
         }
-        items, total = await self._invoice_repo.list_invoices(filters, page, limit)
+        items, total = await self._invoice_repo.list_invoices(
+            filters,
+            page,
+            limit,
+            owner_user_id=invoice_owner_user_id(user),
+        )
         return InvoiceListResponse(
             items=items, total=total, page=page, limit=limit
         )
 
     @debug_trace
-    async def get(self, invoice_id: int) -> InvoiceResponse:
-        invoice = await self._invoice_repo.get(invoice_id)
+    async def get(self, invoice_id: int, user: UserContext) -> InvoiceResponse:
+        invoice = await self._invoice_repo.get(
+            invoice_id,
+            owner_user_id=invoice_owner_user_id(user),
+        )
         if not invoice:
             raise HTTPException(
                 status_code=404,
@@ -104,7 +118,8 @@ class InvoiceController:
     async def update(
         self, invoice_id: int, data: InvoiceUpdate, user: UserContext
     ) -> InvoiceResponse:
-        before = await self._invoice_repo.get(invoice_id)
+        owner = invoice_owner_user_id(user)
+        before = await self._invoice_repo.get(invoice_id, owner_user_id=owner)
         if not before:
             raise HTTPException(
                 status_code=404,
@@ -113,7 +128,11 @@ class InvoiceController:
                     "message": "Invoice not found.",
                 },
             )
-        updated = await self._invoice_repo.update(invoice_id, data)
+        updated = await self._invoice_repo.update(
+            invoice_id,
+            data,
+            owner_user_id=owner,
+        )
         if updated:
             await self._audit_repo.log(
                 user.user_id,
@@ -126,8 +145,11 @@ class InvoiceController:
         return updated  # type: ignore[return-value]
 
     @debug_trace
-    async def delete(self, invoice_id: int) -> None:
-        if not await self._invoice_repo.delete(invoice_id):
+    async def delete(self, invoice_id: int, user: UserContext) -> None:
+        if not await self._invoice_repo.delete(
+            invoice_id,
+            owner_user_id=invoice_owner_user_id(user),
+        ):
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -140,7 +162,10 @@ class InvoiceController:
     async def approve(
         self, invoice_id: int, user: UserContext
     ) -> InvoiceApproveResponse:
-        invoice = await self._invoice_repo.approve(invoice_id)
+        invoice = await self._invoice_repo.approve(
+            invoice_id,
+            owner_user_id=invoice_owner_user_id(user),
+        )
         if not invoice:
             raise HTTPException(
                 status_code=404,
@@ -158,3 +183,55 @@ class InvoiceController:
             {"review_status": "approved"},
         )
         return InvoiceApproveResponse(id=invoice.id, review_status=invoice.review_status)
+
+    async def serve_file(self, invoice_id: int, user: UserContext) -> FileResponse:
+        owner = invoice_owner_user_id(user)
+        row = await self._invoice_repo.get_owned_row(invoice_id, owner_user_id=owner)
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "invoice_not_found",
+                    "message": "Invoice not found.",
+                },
+            )
+        if not row.source_file_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "no_source_file",
+                    "message": "No source file attached to this invoice.",
+                },
+            )
+
+        upload = row.source_file
+        if not upload:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "file_record_missing",
+                    "message": "File record not found.",
+                },
+            )
+
+        file_path: Path = get_file_path(upload.storage_path)
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "file_missing",
+                    "message": "File not found on storage.",
+                },
+            )
+
+        mime = (
+            upload.mime_type
+            or mimetypes.guess_type(str(file_path))[0]
+            or "application/octet-stream"
+        )
+        return FileResponse(
+            path=str(file_path),
+            media_type=mime,
+            filename=upload.original_filename,
+            headers={"Content-Disposition": "inline"},
+        )

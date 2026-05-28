@@ -90,18 +90,19 @@ class MatchingService:
                     llm_extra[txn_id] = result.invoice_numbers
 
         # ── Main matching loop ──
-        # Each transaction is wrapped in try/except so a single bad row (data
-        # quirk, transient DB error, etc.) can't abort the whole run. Failed
-        # txns become `needs_review` with an `internal_error` review task.
+        # Each transaction uses a savepoint so one bad row cannot abort the
+        # whole run (Postgres rejects further SQL after any error in-session).
+        session = self._bank_txn_repo._session
         for txn in transactions:
             try:
-                await self._process_txn(
-                    txn,
-                    regex_results.get(txn.id, []),
-                    llm_extra.get(txn.id, []),
-                    summary,
-                    now,
-                )
+                async with session.begin_nested():
+                    await self._process_txn(
+                        txn,
+                        regex_results.get(txn.id, []),
+                        llm_extra.get(txn.id, []),
+                        summary,
+                        now,
+                    )
             except Exception as exc:
                 logger.exception(
                     "Matching failed for bank_transaction id=%d: %s",

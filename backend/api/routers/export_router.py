@@ -21,6 +21,7 @@ async def export_purchase_invoices_excel(
     ctrl: ExportController = Depends(get_export_controller),
 ) -> StreamingResponse:
     return await ctrl.export_excel(
+        user,
         invoice_date_from,
         invoice_date_to,
         match_status,

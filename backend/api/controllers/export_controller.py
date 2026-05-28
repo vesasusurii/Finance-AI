@@ -1,11 +1,12 @@
 from datetime import date, datetime, timezone
 
-from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExportError
+from core.invoice_access import invoice_owner_user_id
 from repositories.invoice_repository import InvoiceRepository
+from schemas.auth import UserContext
 from services.excel_service import ExcelService
 
 logger = get_logger(__name__)
@@ -23,6 +24,7 @@ class ExportController:
     @debug_trace
     async def export_excel(
         self,
+        user: UserContext,
         invoice_date_from: date | None,
         invoice_date_to: date | None,
         match_status: str | None,
@@ -41,7 +43,10 @@ class ExportController:
             if v is not None
         }
         try:
-            invoices = await self._invoice_repo.list_for_export(filters)
+            invoices = await self._invoice_repo.list_for_export(
+                filters,
+                owner_user_id=invoice_owner_user_id(user),
+            )
             data = self._excel.write_purchase_invoices_workbook(invoices)
         except Exception as exc:
             raise ExportError(str(exc)) from exc
