@@ -1,26 +1,32 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { isAdminRole, needsOnboarding } from "@/types/auth";
 import { Button } from "@/components/ui-finance/Button";
+import { BrandLogo } from "@/components/shell/BrandLogo";
 
-/** Matches backend/scripts/seed_admin.py defaults — remove hint before production. */
-const DEV_LOGIN_EMAIL = "finance@borek.com";
-const DEV_LOGIN_PASSWORD = "changeme";
+/** Matches backend/scripts/seed_users.py — remove hint before production. */
+const DEV_FINANCE_EMAIL = "finance@borek.com";
+const DEV_ADMIN_EMAIL = "admin@borek.com";
+const DEV_PASSWORD = "changeme";
 
 const showDevLoginHint =
   import.meta.env.VITE_SHOW_DEV_LOGIN_HINT !== "false" &&
   (import.meta.env.DEV || import.meta.env.VITE_SHOW_DEV_LOGIN_HINT === "true");
 
 export function LoginPage() {
-  const { user, login } = useAuth();
+  const { user, login, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(showDevLoginHint ? DEV_LOGIN_EMAIL : "");
-  const [password, setPassword] = useState(showDevLoginHint ? DEV_LOGIN_PASSWORD : "");
+  const [email, setEmail] = useState(showDevLoginHint ? DEV_FINANCE_EMAIL : "");
+  const [password, setPassword] = useState(showDevLoginHint ? DEV_PASSWORD : "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (user) {
-    return <Navigate to="/" replace />;
+    if (needsOnboarding(user)) {
+      return <Navigate to="/onboarding" replace />;
+    }
+    return <Navigate to={isAdmin ? "/admin/users" : "/"} replace />;
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -28,8 +34,12 @@ export function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await login(email, password);
-      navigate("/");
+      const signedIn = await login(email, password);
+      if (needsOnboarding(signedIn)) {
+        navigate("/onboarding");
+        return;
+      }
+      navigate(isAdminRole(signedIn.role) ? "/admin/users" : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -41,12 +51,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
         <header className="mb-8 text-center">
-          <div className="mx-auto mb-4 grid h-10 w-10 place-items-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground">
-            B
-          </div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Borek Finance
-          </p>
+          <BrandLogo className="mb-4 justify-center" imageClassName="h-14" />
           <h1 className="mt-2 text-[22px] font-semibold tracking-tight text-foreground">Sign in</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
             Internal operations platform for Borek Solutions Group
@@ -60,9 +65,14 @@ export function LoginPage() {
           >
             <p className="font-medium text-foreground">Dev login (temporary)</p>
             <p className="mt-1">
-              Email: <span className="font-mono text-foreground">{DEV_LOGIN_EMAIL}</span>
+              Finance:{" "}
+              <span className="font-mono text-foreground">{DEV_FINANCE_EMAIL}</span>
               <br />
-              Password: <span className="font-mono text-foreground">{DEV_LOGIN_PASSWORD}</span>
+              Admin:{" "}
+              <span className="font-mono text-foreground">{DEV_ADMIN_EMAIL}</span>
+              <br />
+              Password:{" "}
+              <span className="font-mono text-foreground">{DEV_PASSWORD}</span>
             </p>
             <p className="mt-2 text-[11px]">Hide: set VITE_SHOW_DEV_LOGIN_HINT=false in .env</p>
           </div>

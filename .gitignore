@@ -6,7 +6,9 @@
 
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 *$py.class
 *.so
 .Python
@@ -23,6 +25,10 @@ build/
 htmlcov/
 .coverage
 coverage.xml
+.ipynb_checkpoints/
+
+# Prompt refactor dev baseline (regenerate via backend/scripts/prompts/verify_prompt_refactor.py)
+backend/_prompt_baseline.txt
 
 # Node / frontend
 node_modules/
@@ -59,6 +65,8 @@ samples/
 
 # Cursor
 .cursor/
+.cursor/projects/
+agent-transcripts/
 
 # Terraform / secrets
 *.pem

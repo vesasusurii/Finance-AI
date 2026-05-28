@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
+/** Access token lifetime on server (minutes) — keep refresh interval below this. */
+const ACCESS_TOKEN_MINUTES = Number(
+  import.meta.env.VITE_JWT_ACCESS_EXPIRE_MINUTES ?? "1",
+);
+const REFRESH_INTERVAL_MS = Math.max(
+  15_000,
+  ACCESS_TOKEN_MINUTES * 60 * 1000 - 10_000,
+);
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -11,28 +20,82 @@ export class ApiError extends Error {
   }
 }
 
+let refreshInFlight: Promise<void> | null = null;
+
+/** Raw refresh call — avoids circular import with auth.ts */
+async function refreshAccessToken(): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        throw new ApiError(
+          body.message ?? "Session expired. Please sign in again.",
+          res.status,
+          body.error,
+        );
+      }
+      await res.json().catch(() => undefined);
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  await refreshInFlight;
+}
+
+type ApiFetchOptions = RequestInit & {
+  /** Internal: skip refresh retry (refresh endpoint itself). */
+  _skipAuthRetry?: boolean;
+};
+
 export async function apiFetch<T>(
   path: string,
-  init?: RequestInit,
+  init?: ApiFetchOptions,
 ): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      ...init,
+  const { _skipAuthRetry, ...requestInit } = init ?? {};
+
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, {
+      ...requestInit,
       credentials: "include",
       headers: {
-        ...(!(init?.body instanceof FormData)
+        ...(!(requestInit.body instanceof FormData)
           ? { "Content-Type": "application/json" }
           : {}),
-        ...init?.headers,
+        ...requestInit.headers,
       },
     });
-  } catch {
-    throw new ApiError(
-      "Cannot reach the API. Start the backend (e.g. docker compose up -d db backend).",
-      0,
-      "network_error",
-    );
+
+  let res = await doFetch();
+
+  if (
+    res.status === 401 &&
+    !_skipAuthRetry &&
+    path !== "/api/auth/login" &&
+    path !== "/api/auth/refresh" &&
+    path !== "/api/auth/logout"
+  ) {
+    const body = (await res.clone().json().catch(() => ({}))) as {
+      error?: string;
+    };
+    if (body.error === "token_expired" || body.error === "invalid_token") {
+      try {
+        await refreshAccessToken();
+        res = await doFetch();
+      } catch {
+        throw new ApiError(
+          "Session expired. Please sign in again.",
+          401,
+          "session_expired",
+        );
+      }
+    }
   }
 
   if (!res.ok) {
@@ -52,4 +115,8 @@ export async function apiFetch<T>(
   }
 
   return res.json() as Promise<T>;
+}
+
+export function getAuthRefreshIntervalMs(): number {
+  return REFRESH_INTERVAL_MS;
 }

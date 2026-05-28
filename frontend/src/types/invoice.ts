@@ -8,6 +8,7 @@ export interface Invoice {
   address_of_company: string | null;
   invoice_number: string | null;
   amount: number | null;
+  debt: number | null;
   currency: string | null;
   account_details: string | null;
   internal_note_description: string | null;
@@ -17,9 +18,13 @@ export interface Invoice {
   fixed_status: string | null;
   category: string | null;
   extraction_confidence: number | null;
+  /** Per-field confidence map, e.g. { name_of_company: 0.95, amount: 0.72 } */
+  field_confidences: Record<string, number> | null;
   review_status: ReviewStatus;
   match_status: MatchStatus;
   source_file_id: number | null;
+  source_filename: string | null;
+  source_mime_type: string | null;
   created_at: string;
   updated_at: string;
 }

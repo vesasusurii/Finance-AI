@@ -1,16 +1,13 @@
-import { apiFetch } from "./client";
+import { ApiError, apiFetch } from "./client";
+import type { AuthUser } from "../types/auth";
 
-export interface LoginResponse {
-  user_id: number;
-  email: string;
-  role: string;
-}
+export type { AuthUser as LoginResponse };
 
 export async function login(
   email: string,
   password: string,
-): Promise<LoginResponse> {
-  return apiFetch<LoginResponse>("/api/auth/login", {
+): Promise<AuthUser> {
+  return apiFetch<AuthUser>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
@@ -20,6 +17,38 @@ export async function logout(): Promise<void> {
   await apiFetch("/api/auth/logout", { method: "POST" });
 }
 
-export async function getMe(): Promise<LoginResponse> {
-  return apiFetch<LoginResponse>("/api/auth/me");
+export async function refreshSession(): Promise<AuthUser> {
+  return apiFetch<AuthUser>("/api/auth/refresh", { method: "POST" });
+}
+
+export async function getMe(): Promise<AuthUser | null> {
+  try {
+    const user = await apiFetch<AuthUser>("/api/auth/me");
+    return user ?? null;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      return null;
+    }
+    throw e;
+  }
+}
+
+export async function verifyEmail(code: string): Promise<AuthUser> {
+  return apiFetch<AuthUser>("/api/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<AuthUser> {
+  return apiFetch<AuthUser>("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
 }

@@ -11,7 +11,8 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base
 
@@ -33,6 +34,7 @@ class Invoice(Base):
     invoice_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
     invoice_number_normalized: Mapped[str | None] = mapped_column(String(200), nullable=True)
     amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    debt: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
     account_details: Mapped[str | None] = mapped_column(Text, nullable=True)
     internal_note_description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -42,6 +44,7 @@ class Invoice(Base):
     fixed_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
     category: Mapped[str | None] = mapped_column(String(200), nullable=True)
     extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    field_confidences: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     review_status: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -55,6 +58,11 @@ class Invoice(Base):
     source_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("uploaded_files.id"),
         nullable=True,
+    )
+    source_file: Mapped["UploadedFile | None"] = relationship(
+        "UploadedFile",
+        foreign_keys=[source_file_id],
+        lazy="joined",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

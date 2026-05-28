@@ -8,8 +8,36 @@ from datetime import datetime
 from schemas.invoice import ExtractionResult
 from utils.normalization import is_tax_or_client_id, normalize_invoice_number
 
-CONFIDENCE_AUTO_OK = 0.90
+# At or above this score: skip the immediate OCR Review queue by default.
+# Below this score: route to OCR Review as "needs_review".
+CONFIDENCE_AUTO_OK = 0.95
 CONFIDENCE_REVIEW = 0.70
+
+# Default when no contact person is extracted from the document
+DEFAULT_CLIENT_RELATED = "Borek Solutions"
+
+KESCO_COMPANY_NAME = "KESCO"
+WATER_COMPANY_NAME = "Kompania Rajonale e Ujesjellesit"
+PASTRIMI_COMPANY_NAME = 'Ndermarrja Regjionale e Mbeturinave "Pastrimi" SH.A'
+PASTRIMI_ADDRESS = "Rr. Bill Clinton p.n., Prishtinë"
+
+_DOC_TYPE_KESCO = "electricity_kesco"
+_DOC_TYPE_WATER = "water_regional"
+_DOC_TYPE_PASTRIMI = "waste_pastrimi"
+
+_RE_PASTRIMI_HEADER_INVOICE = re.compile(r"^\d{6,8}$")
+
+# Pattern shapes for validation only — not fixed invoice numbers
+_RE_KESCO_CUSTOMER_ID = re.compile(r"^\d{7,12}$")
+_RE_KESCO_NR_REF = re.compile(r"^[0-9]{10,}[A-Z][A-Z0-9]*$", re.IGNORECASE)
+_RE_KESCO_DATE_LIKE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
+# Water payment ref: ^F[0-9]+[A-Z]?$ with minimum digit length enforced in helpers
+_RE_WATER_PAYMENT_REF = re.compile(r"^F\d+[A-Z]?$", re.IGNORECASE)
+_WATER_PAYMENT_MIN_DIGITS = 12
+_RE_WATER_PURE_NUMERIC = re.compile(r"^\d{3,12}$")
+_RE_WATER_METER_LIKE = re.compile(r"^\d{3,6}$")
+_RE_NUI_NIPT = re.compile(r"^810\d{6,}$")
+_RE_WATER_DATE_LIKE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
 
 # Tax / registration IDs commonly misread as invoice numbers
 _TAX_ID_PATTERN = re.compile(r"^(811\d{6}|330\d{6,})$")
@@ -35,6 +63,12 @@ class AIValidationService:
     # ─────────────────────────────────────────────────────────────────────
 
     def determine_review_status(self, result: ExtractionResult) -> str:
+        """
+        Route invoices to the OCR Review queue by confidence.
+
+        - Score >= 95% and no review flags -> pending (no immediate review).
+        - Score < 95%, or needs_review, or missing critical fields -> needs_review.
+        """
         if result.confidence_score >= CONFIDENCE_AUTO_OK and not result.needs_review:
             return "pending"
         return "needs_review"
@@ -84,6 +118,23 @@ class AIValidationService:
         if result.category and result.category not in VALID_CATEGORIES:
             issues.append("category_invalid")
 
+        doc_type = getattr(result, "document_type", None)
+        if result.invoice_number:
+            inv = re.sub(r"\s", "", result.invoice_number)
+            inv_upper = inv.upper()
+            if doc_type == _DOC_TYPE_KESCO:
+                if _RE_KESCO_CUSTOMER_ID.fullmatch(inv) or _RE_KESCO_DATE_LIKE.fullmatch(inv):
+                    issues.append("kesco_invoice_number_not_nr_ref")
+            elif doc_type == _DOC_TYPE_WATER:
+                if (
+                    _RE_NUI_NIPT.fullmatch(inv_upper)
+                    or _RE_WATER_PURE_NUMERIC.fullmatch(inv)
+                    or _RE_WATER_DATE_LIKE.fullmatch(inv)
+                    or self._water_invoice_is_truncated(inv_upper)
+                    or not self._water_payment_ref_valid(inv_upper)
+                ):
+                    issues.append("water_invoice_number_invalid")
+
         return issues
 
     def sanitize_and_validate(self, result: ExtractionResult) -> ExtractionResult:
@@ -92,6 +143,7 @@ class AIValidationService:
 
         data["invoice_number"] = self._clean_invoice_number(data.get("invoice_number"))
         data["amount"] = self._normalize_amount(data.get("amount"))
+        data["debt"] = self._normalize_amount(data.get("debt"))
         data["currency"] = self._normalize_currency(data.get("currency"))
         data["invoice_date"] = self._normalize_date(data.get("invoice_date"))
         data["category"] = self._normalize_category(data.get("category"))
@@ -100,13 +152,20 @@ class AIValidationService:
         data["address_of_company"] = self._clean_text(data.get("address_of_company"))
         data["account_details"] = self._clean_text(data.get("account_details"))
         data["internal_note_description"] = self._clean_text(data.get("internal_note_description"))
-        data["client_employee_related"] = self._clean_text(data.get("client_employee_related"))
+        data["client_employee_related"] = self._default_client_related(
+            data.get("client_employee_related")
+        )
 
         if self._invoice_number_is_tax_id(data.get("invoice_number")):
             data["invoice_number"] = None
 
         data["needs_review"] = bool(data.get("needs_review"))
+        data = self._apply_utility_document_rules(data)
         data = self._apply_review_rules(data)
+
+        inv = data.get("invoice_number")
+        if inv:
+            data["invoice_number"] = normalize_invoice_number(inv) or None
 
         return ExtractionResult.model_validate(data)
 
@@ -121,25 +180,28 @@ class AIValidationService:
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned if cleaned else None
 
+    def _default_client_related(self, raw: str | None) -> str:
+        """Use Borek Solutions when the model returns no related person."""
+        cleaned = self._clean_text(raw)
+        if not cleaned:
+            return DEFAULT_CLIENT_RELATED
+        lowered = cleaned.lower()
+        if lowered in ("null", "none", "n/a", "-", "unknown"):
+            return DEFAULT_CLIENT_RELATED
+        return cleaned
+
     def _clean_invoice_number(self, raw: str | None) -> str | None:
         if not raw:
             return None
         cleaned = _ZERO_WIDTH.sub("", str(raw)).strip()
-        cleaned = re.sub(r"\s+", " ", cleaned)
         if not cleaned:
             return None
-        # Reject if normalization identifies it as a tax/client ID
-        compact = re.sub(r"[^A-Z0-9]", "", cleaned.upper())
-        if is_tax_or_client_id(compact):
+        formatted = normalize_invoice_number(cleaned)
+        if formatted is None:
             return None
-        if normalize_invoice_number(cleaned) is None and is_tax_or_client_id(compact):
+        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", formatted)):
             return None
-        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", cleaned)):
-            return None
-        # Reject pure-year values (e.g. "2025", "2026")
-        if re.fullmatch(r"20\d{2}", cleaned):
-            return None
-        return cleaned
+        return formatted
 
     def _invoice_number_is_tax_id(self, invoice_number: str | None) -> bool:
         if not invoice_number:
@@ -311,6 +373,278 @@ class AIValidationService:
         return max(0.0, min(1.0, score))
 
     # ─────────────────────────────────────────────────────────────────────
+    # Utility document rules (KESCO / regional water)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _detect_document_type(self, data: dict) -> str | None:
+        declared = (data.get("document_type") or "").strip().lower()
+        if declared in (_DOC_TYPE_KESCO, _DOC_TYPE_WATER, _DOC_TYPE_PASTRIMI, "generic"):
+            return declared if declared != "generic" else None
+
+        blob = " ".join(
+            str(v) for v in (
+                data.get("name_of_company"),
+                data.get("address_of_company"),
+                data.get("internal_note_description"),
+                data.get("invoice_number"),
+            )
+            if v
+        ).lower()
+        blob_ascii = (
+            blob.replace("ë", "e")
+            .replace("ç", "c")
+            .replace("ü", "u")
+            .replace("š", "s")
+        )
+
+        if "kesco" in blob_ascii or ("borxhi kesco" in blob_ascii):
+            return _DOC_TYPE_KESCO
+        if (
+            "ujesjelles" in blob_ascii
+            or "regional water" in blob_ascii
+            or "ujesjell" in blob_ascii
+        ):
+            return _DOC_TYPE_WATER
+        if (
+            "pastrimi" in blob_ascii
+            or "mbeturinave" in blob_ascii
+            or "krm" in blob_ascii
+            or "gjithsej borxhi" in blob_ascii
+        ):
+            return _DOC_TYPE_PASTRIMI
+        return None
+
+    def _apply_utility_document_rules(self, data: dict) -> dict:
+        doc_type = self._detect_document_type(data)
+        if not doc_type:
+            data["document_type"] = data.get("document_type") or "generic"
+            return data
+
+        data["document_type"] = doc_type
+        data["category"] = "Utilities"
+        if not data.get("currency"):
+            data["currency"] = "EUR"
+
+        if doc_type == _DOC_TYPE_KESCO:
+            data["name_of_company"] = KESCO_COMPANY_NAME
+            data = self._apply_kesco_rules(data)
+        elif doc_type == _DOC_TYPE_WATER:
+            data["name_of_company"] = WATER_COMPANY_NAME
+            data = self._apply_water_rules(data)
+        elif doc_type == _DOC_TYPE_PASTRIMI:
+            data["name_of_company"] = PASTRIMI_COMPANY_NAME
+            data = self._apply_pastrimi_rules(data)
+
+        return data
+
+    def _apply_kesco_rules(self, data: dict) -> dict:
+        client = data.get("client_employee_related") or ""
+        if self._utility_customer_name_invalid(client, issuer=KESCO_COMPANY_NAME):
+            data["needs_review"] = True
+
+        data = self._validate_kesco_invoice_number(data)
+
+        data["internal_note_description"] = self._ensure_utility_description(
+            data.get("internal_note_description"),
+            "KESCO electricity bill",
+        )
+        return data
+
+    def _apply_water_rules(self, data: dict) -> dict:
+        client = data.get("client_employee_related") or ""
+        if self._utility_customer_name_invalid(client, issuer=WATER_COMPANY_NAME):
+            data["needs_review"] = True
+
+        data = self._validate_water_invoice_number(data)
+        data = self._apply_water_invoice_confidence(data)
+
+        data["internal_note_description"] = self._ensure_utility_description(
+            data.get("internal_note_description"),
+            "Regional water bill",
+        )
+        return data
+
+    def _apply_pastrimi_rules(self, data: dict) -> dict:
+        if not data.get("address_of_company"):
+            data["address_of_company"] = PASTRIMI_ADDRESS
+
+        data = self._validate_pastrimi_invoice_number(data)
+        data = self._validate_pastrimi_amount(data)
+
+        data["internal_note_description"] = self._ensure_utility_description(
+            data.get("internal_note_description"),
+            "Pastrimi regional waste bill",
+        )
+        return data
+
+    def _validate_pastrimi_invoice_number(self, data: dict) -> dict:
+        inv = re.sub(r"\s", "", (data.get("invoice_number") or ""))
+        if not inv:
+            data["needs_review"] = True
+            return data
+        if is_tax_or_client_id(inv) or _TAX_ID_PATTERN.match(inv) or _RE_NUI_NIPT.fullmatch(
+            inv
+        ):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        if _RE_PASTRIMI_HEADER_INVOICE.fullmatch(inv):
+            return data
+        data["needs_review"] = True
+        return data
+
+    def _validate_pastrimi_amount(self, data: dict) -> dict:
+        """
+        Flag likely use of monthly/for-payment line instead of Total Due.
+        When prior debt exists, amount should exceed previous-due alone.
+        """
+        amount = data.get("amount")
+        debt = data.get("debt")
+        if amount is None or debt is None:
+            return data
+        try:
+            amt = float(amount)
+            prior = float(debt)
+        except (TypeError, ValueError):
+            return data
+        if prior > 0 and amt <= prior:
+            data["needs_review"] = True
+        return data
+
+    def _apply_water_invoice_confidence(self, data: dict) -> dict:
+        """Low per-field confidence on invoice_number → clear value and require review."""
+        confidences = data.get("field_confidences") or {}
+        raw_score = confidences.get("invoice_number")
+        if raw_score is None:
+            return data
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return data
+        if score <= 0.70:
+            if data.get("invoice_number"):
+                data["invoice_number"] = None
+            data["needs_review"] = True
+        return data
+
+    def _validate_kesco_invoice_number(self, data: dict) -> dict:
+        """Reject Customer ID / due-date confusion; accept bottom Nr. Ref. alphanumeric values."""
+        inv = re.sub(r"\s", "", (data.get("invoice_number") or ""))
+        if not inv:
+            data["needs_review"] = True
+            return data
+        inv_upper = inv.upper()
+        if _RE_KESCO_DATE_LIKE.fullmatch(inv):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        if _RE_KESCO_NR_REF.fullmatch(inv_upper):
+            return data
+        # Pure numeric short values = Shifra e konsumatorit / Customer ID, not Nr. Ref.
+        if _RE_KESCO_CUSTOMER_ID.fullmatch(inv) or re.fullmatch(r"\d{7,11}", inv):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        # Alphanumeric but too short or missing letter suffix typical of Nr. Ref.
+        if not re.search(r"[A-Z]", inv_upper) or len(inv_upper) < 12:
+            data["invoice_number"] = None
+            data["needs_review"] = True
+        else:
+            data["needs_review"] = True
+        return data
+
+    def _restore_water_invoice_number(self, raw: str) -> str | None:
+        """
+        Rebuild F-prefixed refs when Vision drops the leading F (common on water bills).
+        Pattern-based only — no fixed invoice values.
+        """
+        inv_upper = re.sub(r"\s", "", raw).upper()
+        if not inv_upper:
+            return None
+        if self._water_payment_ref_valid(inv_upper):
+            return inv_upper
+        # Footer line: digit run + optional suffix letter, missing leading F
+        if re.fullmatch(r"\d{12,22}[A-Z]?", inv_upper):
+            candidate = f"F{inv_upper}"
+            if self._water_payment_ref_valid(candidate):
+                return candidate
+        return None
+
+    def _water_ref_digit_count(self, inv_upper: str) -> int | None:
+        match = re.match(r"^F(\d+)", inv_upper, re.IGNORECASE)
+        return len(match.group(1)) if match else None
+
+    def _water_payment_ref_valid(self, inv_upper: str) -> bool:
+        if not _RE_WATER_PAYMENT_REF.fullmatch(inv_upper):
+            return False
+        count = self._water_ref_digit_count(inv_upper)
+        return count is not None and count >= _WATER_PAYMENT_MIN_DIGITS
+
+    def _water_invoice_is_truncated(self, inv_upper: str) -> bool:
+        """True when only the short header bill-number prefix was captured."""
+        if not inv_upper.startswith("F"):
+            return False
+        count = self._water_ref_digit_count(inv_upper)
+        return count is not None and count < _WATER_PAYMENT_MIN_DIGITS
+
+    def _validate_water_invoice_number(self, data: dict) -> dict:
+        """Require full footer payment ref (F + digits + letter); reject truncated header-only values."""
+        inv = re.sub(r"\s", "", (data.get("invoice_number") or ""))
+        if not inv:
+            data["needs_review"] = True
+            return data
+        inv_upper = inv.upper()
+        if (
+            _RE_WATER_DATE_LIKE.fullmatch(inv)
+            or is_tax_or_client_id(inv_upper)
+            or _RE_NUI_NIPT.fullmatch(inv_upper)
+        ):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        if self._water_payment_ref_valid(inv_upper):
+            return data
+        if self._water_invoice_is_truncated(inv_upper):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        restored = self._restore_water_invoice_number(inv_upper)
+        if restored:
+            data["invoice_number"] = restored
+            data["needs_review"] = True
+            return data
+        # Short numeric = Customer ID; longer numeric without restore = NUI/meter/guess
+        if _RE_WATER_METER_LIKE.fullmatch(inv) or _RE_WATER_PURE_NUMERIC.fullmatch(inv):
+            data["invoice_number"] = None
+            data["needs_review"] = True
+            return data
+        # F-prefixed but missing trailing letter or wrong shape (incomplete footer read)
+        if inv_upper.startswith("F"):
+            data["invoice_number"] = None
+        data["needs_review"] = True
+        return data
+
+    def _utility_customer_name_invalid(self, client: str, *, issuer: str) -> bool:
+        if not client or client == DEFAULT_CLIENT_RELATED:
+            return False
+        lowered = client.lower()
+        if issuer.lower() in lowered:
+            return True
+        compact = re.sub(r"[^A-Z0-9]", "", client.upper())
+        if compact.isdigit() and len(compact) >= 7:
+            return True
+        if re.fullmatch(r"\d[\d\s]{6,}", client.replace(" ", "")):
+            return True
+        return False
+
+    def _ensure_utility_description(
+        self, existing: str | None, prefix: str
+    ) -> str | None:
+        if existing and prefix.lower() not in existing.lower():
+            return f"{prefix}; {existing}"
+        return existing or prefix
+
+    # ─────────────────────────────────────────────────────────────────────
     # Review rule engine
     # ─────────────────────────────────────────────────────────────────────
 
@@ -327,11 +661,14 @@ class AIValidationService:
 
         score = data.get("confidence_score", 0.0)
 
-        if missing or score < CONFIDENCE_REVIEW:
+        if missing:
             data["needs_review"] = True
-            # Cap confidence to below auto-ok threshold when critical fields missing
             if score >= CONFIDENCE_AUTO_OK:
-                data["confidence_score"] = min(score, CONFIDENCE_REVIEW - 0.01)
+                data["confidence_score"] = CONFIDENCE_AUTO_OK
+        elif score < CONFIDENCE_AUTO_OK:
+            data["needs_review"] = True
+        elif score < CONFIDENCE_REVIEW:
+            data["needs_review"] = True
 
         # Zero/negative amounts are invalid
         if data.get("amount") is not None and data["amount"] <= 0:
