@@ -46,6 +46,8 @@ services:
     volumes:
       - ./backend:/app
       - upload_data:/data/uploads
+      # Persist debug logs on host so they survive container restarts
+      - ./logs:/var/log/borek
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:

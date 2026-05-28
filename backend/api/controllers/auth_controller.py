@@ -5,14 +5,18 @@ import jwt
 from fastapi import HTTPException, Response
 
 from config import settings
+from core.debug_logger import debug_trace, get_logger
 from repositories.user_repository import UserRepository
 from schemas.auth import LoginRequest, LoginResponse, UserContext
+
+logger = get_logger(__name__)
 
 
 class AuthController:
     def __init__(self, user_repo: UserRepository) -> None:
         self._user_repo = user_repo
 
+    @debug_trace
     async def login(self, request: LoginRequest, response: Response) -> LoginResponse:
         user = await self._user_repo.find_by_email(request.email)
         if not user or not bcrypt.checkpw(
@@ -59,10 +63,12 @@ class AuthController:
         )
         return LoginResponse(user_id=user.id, email=user.email, role=user.role)
 
+    @debug_trace
     async def logout(self, response: Response) -> dict:
         response.delete_cookie("access_token")
         return {"message": "Logged out."}
 
+    @debug_trace
     async def me(self, user: UserContext) -> LoginResponse:
         return LoginResponse(
             user_id=user.user_id, email=user.email, role=user.role

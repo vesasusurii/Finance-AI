@@ -1,0 +1,144 @@
+from datetime import datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.review_task import ReviewTask
+from schemas.review import ReviewTaskResponse
+
+
+def _to_response(row: ReviewTask) -> ReviewTaskResponse:
+    return ReviewTaskResponse.model_validate(row)
+
+
+class ReviewRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create_bank_unmatched(
+        self,
+        bank_transaction_id: int,
+        invoice_number: str,
+        reason: str,
+    ) -> ReviewTask:
+        row = ReviewTask(
+            task_type="bank_match",
+            bank_transaction_id=bank_transaction_id,
+            invoice_id=None,
+            reason=reason,
+            status="open",
+            payload={"invoice_number": invoice_number} if invoice_number else None,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def create_extraction_failure(
+        self,
+        invoice_id: int,
+        reason: str,
+        payload: dict | None,
+    ) -> ReviewTask:
+        row = ReviewTask(
+            task_type="extraction",
+            invoice_id=invoice_id,
+            bank_transaction_id=None,
+            reason=reason,
+            status="open",
+            payload=payload,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def list_open(
+        self,
+        task_type: str | None,
+        page: int,
+        limit: int,
+    ) -> tuple[list[ReviewTaskResponse], int]:
+        query = select(ReviewTask).where(ReviewTask.status == "open")
+        count_q = select(func.count()).select_from(ReviewTask).where(
+            ReviewTask.status == "open"
+        )
+        if task_type:
+            query = query.where(ReviewTask.task_type == task_type)
+            count_q = count_q.where(ReviewTask.task_type == task_type)
+
+        total = (await self._session.execute(count_q)).scalar_one()
+        offset = (page - 1) * limit
+        query = query.order_by(ReviewTask.created_at.desc()).offset(offset).limit(limit)
+        rows = (await self._session.execute(query)).scalars().all()
+        return [_to_response(r) for r in rows], int(total)
+
+    async def get(self, task_id: int) -> ReviewTask | None:
+        return await self._session.get(ReviewTask, task_id)
+
+    async def resolve(
+        self, task_id: int, status: str, resolved_at: datetime
+    ) -> ReviewTask | None:
+        row = await self.get(task_id)
+        if not row:
+            return None
+        row.status = status
+        row.resolved_at = resolved_at
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def has_open_bank_task(
+        self,
+        bank_transaction_id: int,
+        reason: str,
+        invoice_number: str | None = None,
+    ) -> bool:
+        """Check if an open bank_match review task already exists for this txn.
+
+        Used by matching service to avoid creating duplicate tasks on re-runs.
+        """
+        q = select(ReviewTask.id).where(
+            ReviewTask.task_type == "bank_match",
+            ReviewTask.bank_transaction_id == bank_transaction_id,
+            ReviewTask.reason == reason,
+            ReviewTask.status == "open",
+        )
+        rows = (await self._session.execute(q)).scalars().all()
+        if not invoice_number:
+            return len(rows) > 0
+        for tid in rows:
+            row = await self._session.get(ReviewTask, tid)
+            if row and row.payload and row.payload.get("invoice_number") == invoice_number:
+                return True
+        return False
+
+    async def resolve_open_bank_tasks_for_txn(
+        self,
+        bank_transaction_id: int,
+        matched_invoice_numbers: list[str],
+        resolved_at: datetime,
+    ) -> int:
+        """Auto-resolve open bank_match tasks for a txn whose invoice now exists.
+
+        Called after a re-run match succeeds for a previously failed candidate.
+        Returns the number of tasks resolved.
+        """
+        q = select(ReviewTask).where(
+            ReviewTask.task_type == "bank_match",
+            ReviewTask.bank_transaction_id == bank_transaction_id,
+            ReviewTask.status == "open",
+        )
+        rows = (await self._session.execute(q)).scalars().all()
+        count = 0
+        for row in rows:
+            payload_num = (row.payload or {}).get("invoice_number")
+            if not payload_num:
+                continue
+            if payload_num in matched_invoice_numbers:
+                row.status = "approved"
+                row.resolved_at = resolved_at
+                count += 1
+        if count:
+            await self._session.flush()
+        return count

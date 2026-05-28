@@ -91,6 +91,24 @@ class BankTransactionRepository:
         result = await self._session.execute(q)
         return list(result.scalars().all())
 
+    async def list_unresolved(
+        self, bank_statement_id: int | None = None
+    ) -> list[BankTransaction]:
+        """Transactions still eligible for matching: pending, needs_review, partial.
+
+        `matched` rows are excluded — they're finalised. This lets re-runs pick up
+        previously failed rows after the user edits invoice numbers.
+        """
+        q = select(BankTransaction).where(
+            BankTransaction.reconciliation_status.in_(
+                ("pending", "needs_review", "partial")
+            )
+        )
+        if bank_statement_id is not None:
+            q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
+
     async def save_detected_numbers(
         self, transaction_id: int, numbers: list[str]
     ) -> None:
@@ -98,3 +116,39 @@ class BankTransactionRepository:
         if row:
             row.detected_invoice_numbers = numbers
             await self._session.flush()
+
+    async def update_reconciliation_status(
+        self, transaction_id: int, status: str
+    ) -> None:
+        row = await self._session.get(BankTransaction, transaction_id)
+        if row:
+            row.reconciliation_status = status
+            await self._session.flush()
+
+    async def list_needs_review(
+        self, bank_statement_id: int | None = None
+    ) -> list[BankTransactionResponse]:
+        q = select(BankTransaction).where(
+            BankTransaction.reconciliation_status == "needs_review"
+        )
+        if bank_statement_id is not None:
+            q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        result = await self._session.execute(q)
+        return [_to_response(r) for r in result.scalars().all()]
+
+    async def list_multi_invoice_matches(
+        self, bank_statement_id: int | None = None
+    ) -> list[BankTransactionResponse]:
+        """Transactions with more than one detected invoice number."""
+        q = select(BankTransaction).where(
+            BankTransaction.reconciliation_status.in_(("matched", "partial"))
+        )
+        if bank_statement_id is not None:
+            q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        result = await self._session.execute(q)
+        rows = []
+        for r in result.scalars().all():
+            nums = r.detected_invoice_numbers
+            if isinstance(nums, list) and len(nums) > 1:
+                rows.append(_to_response(r))
+        return rows

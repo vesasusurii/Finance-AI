@@ -3,7 +3,12 @@
 import os
 import re
 
+from core.debug_logger import debug_trace, get_logger
 
+logger = get_logger(__name__)
+
+
+@debug_trace
 def is_tax_or_client_id(s: str) -> bool:
     if s.isdigit() and len(s) == 9 and s.startswith(("811", "330")):
         return True
@@ -12,6 +17,7 @@ def is_tax_or_client_id(s: str) -> bool:
     return False
 
 
+@debug_trace
 def normalize_invoice_number(raw: str | None) -> str | None:
     if not raw or not str(raw).strip():
         return None

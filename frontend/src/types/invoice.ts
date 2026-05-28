@@ -1,3 +1,5 @@
+/** Phase 3: Documents drawer Save sends partial Invoice (writable fields only). */
+
 export type ReviewStatus = "pending" | "approved" | "needs_review";
 export type MatchStatus = "unmatched" | "matched" | "needs_review";
 

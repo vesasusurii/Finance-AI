@@ -7,13 +7,13 @@ OpenAI Vision. No pdfplumber, Document AI, Tesseract, or other OCR providers.
 
 import base64
 import json
-import logging
 import mimetypes
 
 from fastapi import UploadFile
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from config import settings
+from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.exceptions import ExtractionError
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_repository import InvoiceRepository
@@ -33,7 +33,7 @@ from services.ocr.pdf_reader import (
 )
 from utils.file_storage import save_upload
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 EXTRACTION_PROVIDER = "openai_vision"
 
@@ -72,17 +72,26 @@ class InvoiceExtractionService:
     # Public entry point
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     async def process_upload(
         self, file: UploadFile, user: UserContext
     ) -> UploadItemResponse:
+        logger.debug(
+            "OCR upload start: filename=%r content_type=%r user_id=%r",
+            file.filename, file.content_type, user.user_id,
+        )
         if not file.filename:
             raise ExtractionError("Missing filename")
 
         content = await file.read()
+        logger.debug(
+            "Read upload bytes: size=%d (%s)", len(content), type(content).__name__
+        )
         if len(content) > MAX_FILE_BYTES:
             raise ExtractionError("File exceeds 20 MB limit")
 
         mime = file.content_type or mimetypes.guess_type(file.filename)[0] or ""
+        logger.debug("Resolved mime: %r (%s)", mime, type(mime).__name__)
         if mime not in ALLOWED_MIME:
             raise ExtractionError(
                 f"Unsupported file type: {mime}. Supported: PDF, JPEG, JPG, PNG."
@@ -98,21 +107,42 @@ class InvoiceExtractionService:
             user_id=user.user_id,
             processing_status="processing",
         )
+        logger.debug(
+            "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
+        )
 
         try:
             result, model_used, meta = await self._extract(
                 file.filename, mime, content
             )
+            log_typed_fields(logger, "OCR raw extraction", result)
+            logger.debug("OCR meta: %r model_used=%r", meta, model_used)
+
             result = self._ai_validation.sanitize_and_validate(result)
+            log_typed_fields(logger, "OCR after sanitize_and_validate", result)
+
             missing = self._ai_validation.validate_required_fields(result)
+            logger.debug(
+                "OCR missing required fields: %s (%s, len=%d)",
+                missing, type(missing).__name__, len(missing),
+            )
             if missing:
                 result.needs_review = True
                 result.confidence_score = min(result.confidence_score, 0.69)
 
             review_status = self._ai_validation.determine_review_status(result)
+            logger.debug(
+                "OCR review_status decision: %r (%s)",
+                review_status, type(review_status).__name__,
+            )
+
             invoice = await self._invoice_repo.create(
                 result, upload_row.id, review_status
             )
+            logger.debug(
+                "Invoice persisted: id=%d (%s)", invoice.id, type(invoice).__name__
+            )
+
             await self._audit_repo.log(
                 user.user_id,
                 "invoice_extracted",
@@ -142,6 +172,7 @@ class InvoiceExtractionService:
     # Extraction routing
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     async def _extract(
         self, filename: str, mime: str, content: bytes
     ) -> tuple[ExtractionResult, str, dict]:
@@ -153,6 +184,9 @@ class InvoiceExtractionService:
                 raise ExtractionError("Password-protected PDF cannot be processed")
 
             total_pages = pdf_page_count(content)
+            logger.debug(
+                "PDF page count: %d (%s)", total_pages, type(total_pages).__name__
+            )
             if total_pages > settings.openai_max_pdf_pages:
                 raise ExtractionError(
                     f"PDF has {total_pages} pages; maximum is {settings.openai_max_pdf_pages}"
@@ -162,6 +196,10 @@ class InvoiceExtractionService:
                 content,
                 max_pages=settings.openai_max_pdf_pages,
                 scale=settings.openai_pdf_render_scale,
+            )
+            logger.debug(
+                "Rendered PDF pages: count=%d (%s of (bytes, mime) tuples)",
+                len(images), type(images).__name__,
             )
             if not images:
                 raise ExtractionError("PDF has no readable pages")
@@ -210,6 +248,7 @@ class InvoiceExtractionService:
     # PDF multi-page extraction
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     async def _extract_pdf_pages(
         self,
         filename: str,
@@ -272,6 +311,7 @@ class InvoiceExtractionService:
         )
         return merged, model, "vision_batched_merge"
 
+    @debug_trace
     async def _merge_partial_extractions(
         self,
         partials: list[ExtractionResult],
@@ -299,6 +339,7 @@ class InvoiceExtractionService:
     # Retry with strong model
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     async def _maybe_retry_strong(
         self,
         filename: str,
@@ -310,9 +351,13 @@ class InvoiceExtractionService:
     ) -> tuple[ExtractionResult, str, dict]:
         result = self._ai_validation.sanitize_and_validate(result)
         missing = self._ai_validation.validate_required_fields(result)
-
-        # Also retry if a suspicious extraction is detected
         suspicious = self._ai_validation.detect_suspicious_values(result)
+        logger.debug(
+            "Retry check: confidence=%.3f (float) missing=%s (%s) suspicious=%s (%s)",
+            result.confidence_score,
+            missing, type(missing).__name__,
+            suspicious, type(suspicious).__name__,
+        )
 
         should_retry = (
             (missing or result.confidence_score < VISION_RETRY_CONFIDENCE or suspicious)
@@ -353,6 +398,7 @@ class InvoiceExtractionService:
     # Core Vision API call
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     async def _openai_vision_extract(
         self,
         images: list[tuple[bytes, str]],
@@ -472,10 +518,12 @@ class InvoiceExtractionService:
     # OpenAI API wrapper
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     def _vision_timeout(self, page_count: int) -> float:
         base = float(settings.openai_timeout_seconds)
         return min(300.0, base + page_count * 20.0)
 
+    @debug_trace
     async def _chat_completion(
         self, *, model: str, messages: list, timeout_seconds: float | None = None
     ):
@@ -511,6 +559,7 @@ class InvoiceExtractionService:
                 raise ExtractionError(f"OpenAI error: {exc}") from exc
         raise ExtractionError("OpenAI request failed") from last_exc
 
+    @debug_trace
     def _parse_response(self, raw: str) -> ExtractionResult:
         # Strip any accidental markdown fences from the response
         cleaned = raw.strip()
@@ -521,8 +570,18 @@ class InvoiceExtractionService:
             ).strip()
         try:
             data = json.loads(cleaned)
+            logger.debug(
+                "Parsed OpenAI JSON: keys=%s (%s, len=%d)",
+                list(data.keys()), type(data).__name__, len(data),
+            )
             if data.get("amount") is not None:
+                before_amount = data["amount"]
                 normalized = self._ai_validation._normalize_amount(data["amount"])
+                logger.debug(
+                    "Amount normalization: %r (%s) -> %r (%s)",
+                    before_amount, type(before_amount).__name__,
+                    normalized, type(normalized).__name__,
+                )
                 data["amount"] = normalized
             if data.get("confidence_score") is not None:
                 data["confidence_score"] = float(data["confidence_score"])

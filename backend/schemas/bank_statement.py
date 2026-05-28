@@ -17,6 +17,9 @@ class BankStatementUploadResponse(BaseModel):
     bank_statement_id: int
     row_count: int
     processing_status: str
+    # Rows whose date column couldn't be parsed — these can't be matched until
+    # the user backfills the date or re-uploads with a recognised format.
+    unparsed_date_rows: int = 0
     preview: list[BankTransactionPreview]
 
 

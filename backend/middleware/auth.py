@@ -4,7 +4,10 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import settings
+from core.debug_logger import debug_trace, get_logger
 from schemas.auth import UserContext
+
+logger = get_logger(__name__)
 
 PUBLIC_PATHS = frozenset(
     {
@@ -26,6 +29,7 @@ def _unauthorized() -> JSONResponse:
     )
 
 
+@debug_trace
 def _decode_token(token: str) -> UserContext | None:
     try:
         payload = jwt.decode(

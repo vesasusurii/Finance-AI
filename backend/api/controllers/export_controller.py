@@ -3,9 +3,12 @@ from datetime import date, datetime, timezone
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExportError
 from repositories.invoice_repository import InvoiceRepository
 from services.excel_service import ExcelService
+
+logger = get_logger(__name__)
 
 
 class ExportController:
@@ -17,6 +20,7 @@ class ExportController:
         self._invoice_repo = invoice_repo
         self._excel = excel_service
 
+    @debug_trace
     async def export_excel(
         self,
         invoice_date_from: date | None,

@@ -6,9 +6,12 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.debug_logger import get_logger
 from models.invoice import Invoice
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
 from utils.normalization import normalize_invoice_number
+
+logger = get_logger(__name__)
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -148,15 +151,76 @@ class InvoiceRepository:
         await self._session.refresh(row)
         return _to_response(row)
 
-    async def find_by_number(self, normalized: str) -> InvoiceResponse | None:
+    async def find_by_number(
+        self, normalized: str
+    ) -> tuple[InvoiceResponse | None, bool]:
+        """Look up an invoice by its normalized invoice number.
+
+        Returns a `(invoice, ambiguous)` tuple:
+          - `(invoice, False)` — exactly one row matched.
+          - `(None, False)`    — no rows matched.
+          - `(None, True)`     — 2+ rows share this normalized number; caller
+                                  must treat as ambiguous (the matching service
+                                  emits a `duplicate_invoice_in_db` review task
+                                  in this case).
+
+        We deliberately do NOT pick a winner when ambiguous — silently matching
+        a bank payment against an arbitrary one of several invoices with the
+        same number could mark the wrong invoice as paid.
+        """
         result = await self._session.execute(
-            select(Invoice).where(Invoice.invoice_number_normalized == normalized)
+            select(Invoice)
+            .where(Invoice.invoice_number_normalized == normalized)
+            .order_by(Invoice.id.asc())
+            .limit(2)
         )
-        row = result.scalar_one_or_none()
-        return _to_response(row) if row else None
+        rows = result.scalars().all()
+        if not rows:
+            return None, False
+        if len(rows) == 1:
+            return _to_response(rows[0]), False
+        logger.warning(
+            "find_by_number ambiguous: normalized=%r matches %d invoices "
+            "(ids: %s) — leaving unmatched, review task will be created",
+            normalized,
+            len(rows),
+            [r.id for r in rows],
+        )
+        return None, True
+
+    async def list_by_number(self, normalized: str) -> list[InvoiceResponse]:
+        """Return every invoice row whose normalized number equals `normalized`.
+
+        Used by the matching pipeline to enumerate duplicates when
+        `find_by_number` reports an ambiguous match.
+        """
+        result = await self._session.execute(
+            select(Invoice)
+            .where(Invoice.invoice_number_normalized == normalized)
+            .order_by(Invoice.id.asc())
+        )
+        return [_to_response(r) for r in result.scalars().all()]
 
     async def update_paid_at_date(self, invoice_id: int, paid_date: date) -> None:
         row = await self._session.get(Invoice, invoice_id)
         if row:
             row.paid_at_date = paid_date
             await self._session.flush()
+
+    async def clear_paid_at_date(self, invoice_id: int) -> None:
+        row = await self._session.get(Invoice, invoice_id)
+        if row:
+            row.paid_at_date = None
+            await self._session.flush()
+
+    async def update_match_status(self, invoice_id: int, match_status: str) -> None:
+        row = await self._session.get(Invoice, invoice_id)
+        if row:
+            row.match_status = match_status
+            await self._session.flush()
+
+    async def count_by_match_status(self, match_status: str) -> int:
+        q = select(func.count()).select_from(Invoice).where(
+            Invoice.match_status == match_status
+        )
+        return int((await self._session.execute(q)).scalar_one())

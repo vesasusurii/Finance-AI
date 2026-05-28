@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from schemas.invoice import ExtractionResult
 from utils.normalization import is_tax_or_client_id, normalize_invoice_number
+
+logger = get_logger(__name__)
 
 CONFIDENCE_AUTO_OK = 0.90
 CONFIDENCE_REVIEW = 0.70
@@ -34,11 +37,13 @@ class AIValidationService:
     # Public API
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     def determine_review_status(self, result: ExtractionResult) -> str:
         if result.confidence_score >= CONFIDENCE_AUTO_OK and not result.needs_review:
             return "pending"
         return "needs_review"
 
+    @debug_trace
     def validate_required_fields(self, result: ExtractionResult) -> list[str]:
         missing: list[str] = []
         if not result.invoice_number:
@@ -51,6 +56,7 @@ class AIValidationService:
             missing.append("invoice_date")
         return missing
 
+    @debug_trace
     def detect_suspicious_values(self, result: ExtractionResult) -> list[str]:
         """
         Heuristic checks for values that look plausible but are likely wrong.
@@ -86,9 +92,11 @@ class AIValidationService:
 
         return issues
 
+    @debug_trace
     def sanitize_and_validate(self, result: ExtractionResult) -> ExtractionResult:
         """Normalise all fields and apply code-level review rules after LLM parse."""
         data = result.model_dump()
+        log_typed_fields(logger, "sanitize: incoming", data)
 
         data["invoice_number"] = self._clean_invoice_number(data.get("invoice_number"))
         data["amount"] = self._normalize_amount(data.get("amount"))
@@ -103,17 +111,23 @@ class AIValidationService:
         data["client_employee_related"] = self._clean_text(data.get("client_employee_related"))
 
         if self._invoice_number_is_tax_id(data.get("invoice_number")):
+            logger.debug(
+                "Discarded invoice_number %r — looks like a tax/client ID",
+                data.get("invoice_number"),
+            )
             data["invoice_number"] = None
 
         data["needs_review"] = bool(data.get("needs_review"))
         data = self._apply_review_rules(data)
 
+        log_typed_fields(logger, "sanitize: outgoing", data)
         return ExtractionResult.model_validate(data)
 
     # ─────────────────────────────────────────────────────────────────────
     # Field normalisers
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     def _clean_text(self, raw: str | None) -> str | None:
         if not raw:
             return None
@@ -121,6 +135,7 @@ class AIValidationService:
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned if cleaned else None
 
+    @debug_trace
     def _clean_invoice_number(self, raw: str | None) -> str | None:
         if not raw:
             return None
@@ -141,6 +156,7 @@ class AIValidationService:
             return None
         return cleaned
 
+    @debug_trace
     def _invoice_number_is_tax_id(self, invoice_number: str | None) -> bool:
         if not invoice_number:
             return False
@@ -150,6 +166,7 @@ class AIValidationService:
         digits_only = re.sub(r"[^0-9]", "", invoice_number)
         return bool(_TAX_ID_PATTERN.match(digits_only))
 
+    @debug_trace
     def _normalize_amount(self, value: float | str | int | None) -> float | None:
         if value is None:
             return None
@@ -185,6 +202,7 @@ class AIValidationService:
 
         return amount if amount > 0 else None
 
+    @debug_trace
     def _normalize_currency(self, raw: str | None) -> str | None:
         if not raw:
             return None
@@ -206,6 +224,7 @@ class AIValidationService:
         }
         return aliases.get(code)
 
+    @debug_trace
     def _normalize_date(self, raw: str | None) -> str | None:
         if not raw:
             return None
@@ -250,6 +269,7 @@ class AIValidationService:
 
         return None
 
+    @debug_trace
     def _normalize_category(self, raw: str | None) -> str | None:
         if not raw:
             return None
@@ -303,6 +323,7 @@ class AIValidationService:
 
         return "Other"
 
+    @debug_trace
     def _clamp_confidence(self, value: float) -> float:
         try:
             score = float(value)
@@ -314,6 +335,7 @@ class AIValidationService:
     # Review rule engine
     # ─────────────────────────────────────────────────────────────────────
 
+    @debug_trace
     def _apply_review_rules(self, data: dict) -> dict:
         missing = []
         if not data.get("invoice_number"):

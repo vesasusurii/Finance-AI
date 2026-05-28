@@ -28,6 +28,17 @@ export function reconciliationStatusLabel(status: string): string {
   return map[status] ?? status;
 }
 
+export function reviewReasonLabel(reason: string): string {
+  const map: Record<string, string> = {
+    no_invoice_in_db: "Invoice not in DB",
+    duplicate_invoice_in_db: "Duplicate invoice in DB",
+    no_invoice_numbers_detected: "No invoice # detected",
+    missing_transaction_date: "Missing transaction date",
+    internal_error: "Internal error",
+  };
+  return map[reason] ?? reason;
+}
+
 export function processingStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pending: "Pending",

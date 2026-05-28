@@ -1,25 +1,69 @@
-"""Parse ProCredit-style bank statement Excel files (doc 10)."""
+"""Parse ProCredit-style bank statement Excel files (doc 10).
+
+Handles Albanian (Data / Komenti / Tipi) and German (Datum / Buchungsdatum /
+Valuta / Verwendungszweck) bank exports. Date cells may arrive as Python
+datetime, ISO/EU strings, or raw Excel serial numbers — all are accepted.
+"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
 from utils.invoice_number_parser import extract_invoice_numbers
+
+logger = get_logger(__name__)
 
 STOP_MARKERS = ("përmbledhje", "summary", "fsdk", "deposit insurance")
 HEADER_SCAN_ROWS = 15
 
+# Substring tokens accepted in header cells (case-insensitive). Add new bank
+# exports here rather than per-cell matching — one extra token covers every
+# row of the file.
 REQUIRED_HEADERS = {
-    "date": ("data", "date"),
-    "comment": ("komenti", "comment"),
+    "date": (
+        "data",        # Albanian / Italian / Spanish
+        "date",        # English
+        "datum",       # German / Dutch — also matches "buchungsdatum" / "valutadatum"
+        "valuta",      # German "Valuta(datum)"
+    ),
+    "comment": (
+        "komenti",            # Albanian
+        "comment",            # English
+        "verwendungszweck",   # German "purpose of transfer"
+        "beschreibung",       # German "description"
+        "betreff",            # German "subject"
+        "purpose",            # English alt
+    ),
 }
+
+# Excel stores dates as days since 1899-12-30 (the "-30" accounts for Lotus's
+# 1900 leap-year bug that Excel preserved for compatibility).
+_EXCEL_EPOCH = datetime(1899, 12, 30)
+
+_DATE_STRING_FORMATS: tuple[str, ...] = (
+    "%d.%m.%Y",
+    "%d/%m/%Y",
+    "%Y-%m-%d",
+    "%d-%m-%Y",
+    "%d.%m.%y",
+    "%d/%m/%y",
+    "%Y/%m/%d",
+    "%d.%m.%Y %H:%M",
+    "%d.%m.%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M",
+    "%d/%m/%Y %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S",
+)
 
 
 @dataclass
@@ -61,21 +105,71 @@ def _parse_amount(value: Any) -> Decimal | None:
         return None
 
 
+def _excel_serial_to_date(value: float) -> date | None:
+    """Convert an Excel serial date (days since 1899-12-30) to a `date`.
+
+    Returns None for obviously-out-of-range values so we don't write garbage
+    like year 4017 into the DB.
+    """
+    if value <= 0 or value > 80000:  # 80000 ≈ year 4118 — well beyond any real txn
+        return None
+    try:
+        return (_EXCEL_EPOCH + timedelta(days=float(value))).date()
+    except (OverflowError, ValueError):
+        return None
+
+
 def _parse_date(value: Any) -> date | None:
+    """Best-effort date parser for bank Excel cells.
+
+    Accepts: datetime / date objects, ISO/EU formatted strings (with or without
+    a trailing time), and raw Excel serial numbers (floats/ints emitted when a
+    cell is formatted as 'General' instead of 'Date'). Returns None on failure
+    and logs a warning so the upload service can surface a row count to the UI.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, bool):  # bool is a subclass of int — reject early
+        return None
+    if isinstance(value, (int, float)):
+        result = _excel_serial_to_date(float(value))
+        if result is None:
+            logger.warning(
+                "Could not parse date from numeric cell: %r (%s)",
+                value, type(value).__name__,
+            )
+        return result
+
     text = str(value).strip()
     if not text:
         return None
-    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%Y-%m-%d"):
+
+    # Try the full set of accepted string formats first.
+    for fmt in _DATE_STRING_FORMATS:
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+
+    # Some banks ship dates with extra trailing junk (timezone abbreviation,
+    # weekday, etc.). Strip everything after the first space and retry the
+    # date-only formats so e.g. "25.02.2026 Mo" still parses.
+    head = text.split(" ", 1)[0]
+    if head and head != text:
+        for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%y", "%d/%m/%y"):
+            try:
+                return datetime.strptime(head, fmt).date()
+            except ValueError:
+                continue
+
+    logger.warning(
+        "Could not parse date from string cell: %r (%s)",
+        text, type(value).__name__,
+    )
     return None
 
 
@@ -112,6 +206,7 @@ def _map_columns(header_row: list[Any]) -> dict[str, int]:
     return col_map
 
 
+@debug_trace
 def _find_header_row(rows: list[list[Any]]) -> tuple[int, dict[str, int]]:
     limit = min(HEADER_SCAN_ROWS, len(rows))
     for i in range(limit):
@@ -160,9 +255,29 @@ def _load_rows_xls(data: bytes) -> list[list[Any]]:
 
     book = xlrd.open_workbook(file_contents=data)
     sheet = book.sheet_by_index(0)
-    return [list(sheet.row_values(r)) for r in range(sheet.nrows)]
+    datemode = book.datemode
+    rows: list[list[Any]] = []
+    for r in range(sheet.nrows):
+        row_values: list[Any] = []
+        for c in range(sheet.ncols):
+            cell = sheet.cell(r, c)
+            # XL_CELL_DATE = 3. xlrd otherwise returns date cells as floats,
+            # which `_parse_date` would only partially recover via the Excel
+            # serial branch. Convert explicitly so downstream sees a datetime.
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                try:
+                    row_values.append(
+                        xlrd.xldate.xldate_as_datetime(cell.value, datemode)
+                    )
+                    continue
+                except Exception:
+                    pass
+            row_values.append(cell.value)
+        rows.append(row_values)
+    return rows
 
 
+@debug_trace
 def parse_bank_statement_excel(
     data: bytes,
     filename: str,
@@ -179,6 +294,10 @@ def parse_bank_statement_excel(
         raise ExcelParseError("No data rows found in the file.")
 
     header_idx, col_map = _find_header_row(rows)
+    logger.debug(
+        "Bank Excel header at row %d, col_map=%r (%s)",
+        header_idx, col_map, type(col_map).__name__,
+    )
     parsed: list[ParsedBankRow] = []
 
     for row in rows[header_idx + 1 :]:
@@ -187,6 +306,16 @@ def parse_bank_statement_excel(
         row_dict = _parse_row(row, col_map)
         if _is_empty_transaction(row_dict):
             continue
+        logger.debug(
+            "  bank row parsed: date=%r (%s) debited=%r (%s) credited=%r (%s) "
+            "type=%r (%s) detected=%r (%s)",
+            row_dict["transaction_date"], type(row_dict["transaction_date"]).__name__,
+            row_dict["debited_amount"], type(row_dict["debited_amount"]).__name__,
+            row_dict["credited_amount"], type(row_dict["credited_amount"]).__name__,
+            row_dict["transaction_type"], type(row_dict["transaction_type"]).__name__,
+            row_dict["detected_invoice_numbers"],
+            type(row_dict["detected_invoice_numbers"]).__name__,
+        )
         parsed.append(
             ParsedBankRow(
                 transaction_date=row_dict["transaction_date"],

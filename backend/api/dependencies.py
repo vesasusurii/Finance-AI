@@ -8,6 +8,8 @@ from api.controllers.auth_controller import AuthController
 from api.controllers.bank_statement_controller import BankStatementController
 from api.controllers.export_controller import ExportController
 from api.controllers.invoice_controller import InvoiceController
+from api.controllers.reconciliation_controller import ReconciliationController
+from api.controllers.review_controller import ReviewController
 from config import settings
 from db.pool import async_session
 from middleware.auth import get_current_user as _get_user_from_request
@@ -15,13 +17,17 @@ from repositories.audit_repository import AuditRepository
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
 from repositories.invoice_repository import InvoiceRepository
+from repositories.match_repository import MatchRepository
+from repositories.review_repository import ReviewRepository
 from repositories.upload_repository import UploadRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
 from services.ai_validation_service import AIValidationService
+from services.bank_comment_extraction_service import BankCommentExtractionService
 from services.bank_statement_service import BankStatementService
 from services.excel_service import ExcelService
 from services.invoice_extraction_service import InvoiceExtractionService
+from services.matching_service import MatchingService
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -144,3 +150,72 @@ async def get_bank_statement_controller(
     transaction_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
 ) -> BankStatementController:
     return BankStatementController(service, statement_repo, transaction_repo)
+
+
+async def get_match_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> MatchRepository:
+    return MatchRepository(session)
+
+
+async def get_review_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> ReviewRepository:
+    return ReviewRepository(session)
+
+
+def get_bank_comment_extraction_service(
+    request: Request,
+) -> BankCommentExtractionService | None:
+    """
+    Return the LLM-backed bank-comment extractor, or None when the LLM
+    fallback is disabled or OpenAI is not configured. The matching service
+    treats None as 'regex-only mode'.
+    """
+    if not settings.bank_comment_use_llm:
+        return None
+    client = getattr(request.app.state, "openai_client", None)
+    if client is None:
+        return None
+    return BankCommentExtractionService(
+        client,
+        model=settings.bank_comment_llm_model,
+        batch_size=settings.bank_comment_llm_batch_size,
+        timeout_seconds=settings.bank_comment_llm_timeout_seconds,
+        max_retries=settings.bank_comment_llm_max_retries,
+    )
+
+
+async def get_matching_service(
+    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    bank_txn_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
+    match_repo: MatchRepository = Depends(get_match_repo),
+    review_repo: ReviewRepository = Depends(get_review_repo),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+    comment_extractor: BankCommentExtractionService | None = Depends(
+        get_bank_comment_extraction_service
+    ),
+) -> MatchingService:
+    return MatchingService(
+        invoice_repo,
+        bank_txn_repo,
+        match_repo,
+        review_repo,
+        audit_repo,
+        comment_extractor=comment_extractor,
+    )
+
+
+async def get_reconciliation_controller(
+    matching: MatchingService = Depends(get_matching_service),
+    match_repo: MatchRepository = Depends(get_match_repo),
+    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> ReconciliationController:
+    return ReconciliationController(matching, match_repo, invoice_repo, audit_repo)
+
+
+async def get_review_controller(
+    review_repo: ReviewRepository = Depends(get_review_repo),
+) -> ReviewController:
+    return ReviewController(review_repo)

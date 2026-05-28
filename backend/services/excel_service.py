@@ -3,7 +3,10 @@ from datetime import date
 
 from openpyxl import Workbook
 
+from core.debug_logger import debug_trace, get_logger
 from schemas.invoice import InvoiceResponse
+
+logger = get_logger(__name__)
 
 HEADERS = [
     "Invoice Date",
@@ -22,9 +25,13 @@ HEADERS = [
 
 
 class ExcelService:
+    @debug_trace
     def write_purchase_invoices_workbook(
         self, invoices: list[InvoiceResponse]
     ) -> bytes:
+        logger.debug(
+            "Excel export: rows=%d (list[InvoiceResponse])", len(invoices)
+        )
         wb = Workbook()
         ws = wb.active
         ws.title = "Purchase Invoices"

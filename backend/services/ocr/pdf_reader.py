@@ -6,7 +6,12 @@ import io
 
 import pypdfium2 as pdfium
 
+from core.debug_logger import debug_trace, get_logger
 
+logger = get_logger(__name__)
+
+
+@debug_trace
 def pdf_page_count(content: bytes) -> int:
     doc = pdfium.PdfDocument(content)
     try:
@@ -15,6 +20,7 @@ def pdf_page_count(content: bytes) -> int:
         doc.close()
 
 
+@debug_trace
 def pdf_is_encrypted(content: bytes) -> bool:
     """Return True only when the PDF genuinely requires a password to open.
 
@@ -37,6 +43,7 @@ def pdf_is_encrypted(content: bytes) -> bool:
         return False
 
 
+@debug_trace
 def render_pdf_pages_as_images(
     content: bytes,
     *,
@@ -59,7 +66,13 @@ def render_pdf_pages_as_images(
             pil_image.thumbnail((max_dimension, max_dimension))
             buffer = io.BytesIO()
             pil_image.convert("RGB").save(buffer, format="JPEG", quality=jpeg_quality)
-            out.append((buffer.getvalue(), "image/jpeg"))
+            jpeg_bytes = buffer.getvalue()
+            logger.debug(
+                "  rendered page %d/%d: %d bytes (bytes) %dx%d (PIL)",
+                index + 1, page_count, len(jpeg_bytes),
+                pil_image.width, pil_image.height,
+            )
+            out.append((jpeg_bytes, "image/jpeg"))
 
         return out
     finally:

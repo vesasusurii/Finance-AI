@@ -51,10 +51,43 @@ class Settings(BaseSettings):
     openai_pdf_render_scale: float = Field(
         default=2.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
     )
+
+    # Bank comment hybrid extraction (doc 9). Regex always runs first; LLM is
+    # called only on comments where `needs_llm_fallback` returns True.
+    bank_comment_use_llm: bool = Field(
+        default=True, validation_alias="BANK_COMMENT_USE_LLM"
+    )
+    bank_comment_llm_model: str = Field(
+        default="gpt-4o-mini", validation_alias="BANK_COMMENT_LLM_MODEL"
+    )
+    bank_comment_llm_batch_size: int = Field(
+        default=25, validation_alias="BANK_COMMENT_LLM_BATCH_SIZE"
+    )
+    bank_comment_llm_timeout_seconds: int = Field(
+        default=60, validation_alias="BANK_COMMENT_LLM_TIMEOUT_SECONDS"
+    )
+    bank_comment_llm_max_retries: int = Field(
+        default=2, validation_alias="BANK_COMMENT_LLM_MAX_RETRIES"
+    )
+
     jwt_expire_minutes: int = Field(default=480, validation_alias="JWT_EXPIRE_MINUTES")
     cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
     cookie_samesite: str = Field(default="lax", validation_alias="COOKIE_SAMESITE")
     log_level: str = Field(default="info", validation_alias="LOG_LEVEL")
+
+    # Verbose function-trace logging — keep OFF in production. See core/debug_logger.py
+    debug: bool = Field(default=False, validation_alias="DEBUG")
+    debug_log_dir: str = Field(default="/var/log/borek", validation_alias="DEBUG_LOG_DIR")
+    debug_log_file: str = Field(
+        default="backend-debug.log", validation_alias="DEBUG_LOG_FILE"
+    )
+    debug_log_max_bytes: int = Field(
+        default=10 * 1024 * 1024, validation_alias="DEBUG_LOG_MAX_BYTES"
+    )
+    debug_log_backups: int = Field(default=5, validation_alias="DEBUG_LOG_BACKUPS")
+    debug_max_value_chars: int = Field(
+        default=400, validation_alias="DEBUG_MAX_VALUE_CHARS"
+    )
 
 
 settings = Settings()

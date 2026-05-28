@@ -1,5 +1,6 @@
 from fastapi import HTTPException, UploadFile
 
+from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
@@ -10,6 +11,8 @@ from schemas.bank_statement import (
     BankTransactionListResponse,
 )
 from services.bank_statement_service import BankStatementService
+
+logger = get_logger(__name__)
 
 
 class BankStatementController:
@@ -23,6 +26,7 @@ class BankStatementController:
         self._statement_repo = statement_repo
         self._transaction_repo = transaction_repo
 
+    @debug_trace
     async def upload(
         self, file: UploadFile, user: UserContext
     ) -> BankStatementUploadResponse:
@@ -48,6 +52,7 @@ class BankStatementController:
                 detail={"error": code, "message": str(exc)},
             ) from exc
 
+    @debug_trace
     async def list_statements(
         self, page: int, limit: int
     ) -> BankStatementListResponse:
@@ -56,6 +61,7 @@ class BankStatementController:
             items=items, total=total, page=page, limit=limit
         )
 
+    @debug_trace
     async def list_transactions(
         self,
         bank_statement_id: int | None,

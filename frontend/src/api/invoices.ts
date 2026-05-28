@@ -56,3 +56,7 @@ export async function approveInvoice(
 ): Promise<{ id: number; review_status: string }> {
   return apiFetch(`/api/invoices/${id}/approve`, { method: "POST" });
 }
+
+export async function deleteInvoice(id: number): Promise<void> {
+  return apiFetch(`/api/invoices/${id}`, { method: "DELETE" });
+}

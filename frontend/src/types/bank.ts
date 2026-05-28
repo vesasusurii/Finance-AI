@@ -11,6 +11,7 @@ export interface BankStatementUploadResponse {
   bank_statement_id: number;
   row_count: number;
   processing_status: string;
+  unparsed_date_rows?: number;
   preview: BankTransactionPreview[];
 }
 

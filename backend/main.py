@@ -17,8 +17,11 @@ from api.routers import (
     export_router,
     health_router,
     invoice_router,
+    reconciliation_router,
+    review_router,
 )
 from config import settings
+from core.debug_logger import get_logger, setup_debug_logging
 from core.exceptions import AppError, ExcelParseError, ExtractionError, ExportError
 from db.pool import engine
 from middleware.auth import AuthMiddleware
@@ -26,10 +29,17 @@ from middleware.cors import setup_cors
 from middleware.request_handler import RequestHandlerMiddleware
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+setup_debug_logging()
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info(
+        "Starting Borek Finance backend (debug=%s, log_dir=%s)",
+        settings.debug,
+        settings.debug_log_dir,
+    )
     os.makedirs(settings.storage_path, exist_ok=True)
     os.makedirs(os.path.join(settings.storage_path, "invoices"), exist_ok=True)
     os.makedirs(os.path.join(settings.storage_path, "bank_statements"), exist_ok=True)
@@ -39,7 +49,14 @@ async def lifespan(app: FastAPI):
         if settings.openai_api_key
         else None
     )
+    logger.debug(
+        "OpenAI client configured: %s (model=%s, strong=%s)",
+        app.state.openai_client is not None,
+        settings.openai_model,
+        settings.openai_model_strong,
+    )
     yield
+    logger.info("Shutting down Borek Finance backend")
     await app.state.http_client.aclose()
     if app.state.openai_client is not None:
         await app.state.openai_client.close()
@@ -114,3 +131,5 @@ app.include_router(auth_router.router, prefix="/api")
 app.include_router(invoice_router.router, prefix="/api")
 app.include_router(export_router.router, prefix="/api")
 app.include_router(bank_statement_router.router, prefix="/api")
+app.include_router(reconciliation_router.router, prefix="/api")
+app.include_router(review_router.router, prefix="/api")

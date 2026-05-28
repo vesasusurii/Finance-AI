@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Upload, FileSpreadsheet } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
@@ -23,6 +23,7 @@ import {
 type PreviewRow = BankTransactionPreview & { id: string };
 
 export function BankPage() {
+  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -193,6 +194,14 @@ export function BankPage() {
         eyebrow="Workflow · Step 2"
         title="Bank statements"
         description="Upload ProCredit-style Excel exports. Invoice numbers are parsed from Komenti / Comment."
+        actions={
+          <Link
+            to="/matching"
+            className="inline-flex h-9 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:bg-soft-navy"
+          >
+            Run Matching
+          </Link>
+        }
       />
 
       <section
@@ -259,7 +268,32 @@ export function BankPage() {
             >
               View all rows
             </Link>
+            {" · "}
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={() =>
+                navigate(
+                  `/matching?bank_statement_id=${uploadResult.bank_statement_id}`,
+                )
+              }
+            >
+              Run matching for this statement
+            </button>
           </p>
+          {uploadResult.unparsed_date_rows ? (
+            <div
+              className="rounded-md border border-amber-400/40 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
+              role="alert"
+            >
+              <strong>{uploadResult.unparsed_date_rows}</strong> of{" "}
+              {uploadResult.row_count} rows have an unparsable date and will be
+              skipped by matching (reason: <em>missing_transaction_date</em>).
+              Re-format the date column to <code>dd.mm.yyyy</code>,{" "}
+              <code>dd/mm/yyyy</code>, or <code>yyyy-mm-dd</code> and re-upload,
+              or backfill the dates in the DB.
+            </div>
+          ) : null}
           {previewRows.length > 0 && (
             <DataTable
               columns={previewColumns}

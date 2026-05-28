@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /data/uploads
+RUN mkdir -p /data/uploads /var/log/borek
 
 EXPOSE 8000
 

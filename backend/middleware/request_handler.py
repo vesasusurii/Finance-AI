@@ -1,4 +1,3 @@
-import logging
 import time
 import uuid
 
@@ -6,9 +5,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from core.debug_logger import get_logger
 from core.exceptions import AppError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RequestHandlerMiddleware(BaseHTTPMiddleware):

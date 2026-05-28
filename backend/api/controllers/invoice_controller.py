@@ -2,6 +2,7 @@ from datetime import date
 
 from fastapi import HTTPException, UploadFile
 
+from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExtractionError
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_repository import InvoiceRepository
@@ -16,6 +17,8 @@ from schemas.invoice import (
 )
 from services.invoice_extraction_service import InvoiceExtractionService
 
+logger = get_logger(__name__)
+
 
 class InvoiceController:
     def __init__(
@@ -28,6 +31,7 @@ class InvoiceController:
         self._invoice_repo = invoice_repo
         self._audit_repo = audit_repo
 
+    @debug_trace
     async def upload(
         self, files: list[UploadFile], user: UserContext
     ) -> InvoiceUploadResponse:
@@ -54,6 +58,7 @@ class InvoiceController:
 
         return InvoiceUploadResponse(uploaded=len(items), items=items)
 
+    @debug_trace
     async def list(
         self,
         review_status: str | None,
@@ -82,6 +87,7 @@ class InvoiceController:
             items=items, total=total, page=page, limit=limit
         )
 
+    @debug_trace
     async def get(self, invoice_id: int) -> InvoiceResponse:
         invoice = await self._invoice_repo.get(invoice_id)
         if not invoice:
@@ -94,6 +100,7 @@ class InvoiceController:
             )
         return invoice
 
+    @debug_trace
     async def update(
         self, invoice_id: int, data: InvoiceUpdate, user: UserContext
     ) -> InvoiceResponse:
@@ -118,6 +125,7 @@ class InvoiceController:
             )
         return updated  # type: ignore[return-value]
 
+    @debug_trace
     async def delete(self, invoice_id: int) -> None:
         if not await self._invoice_repo.delete(invoice_id):
             raise HTTPException(
@@ -128,6 +136,7 @@ class InvoiceController:
                 },
             )
 
+    @debug_trace
     async def approve(
         self, invoice_id: int, user: UserContext
     ) -> InvoiceApproveResponse:

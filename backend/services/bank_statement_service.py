@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
+from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
@@ -13,6 +14,8 @@ from schemas.bank_statement import (
 )
 from utils.bank_excel_parser import parse_bank_statement_excel
 from utils.file_storage import get_file_path, save_upload
+
+logger = get_logger(__name__)
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".xlsm"}
 ALLOWED_MIME = {
@@ -32,11 +35,16 @@ class BankStatementService:
         self._statement_repo = statement_repo
         self._transaction_repo = transaction_repo
 
+    @debug_trace
     async def upload(
         self, file: UploadFile, user: UserContext
     ) -> BankStatementUploadResponse:
         filename = file.filename or "statement.xlsx"
         ext = Path(filename).suffix.lower()
+        logger.debug(
+            "Bank statement upload start: filename=%r (str) ext=%r (str) user_id=%d (int)",
+            filename, ext, user.user_id,
+        )
         if ext not in ALLOWED_EXTENSIONS:
             raise ExcelParseError(
                 "Unsupported file type. Upload .xlsx or .xls."
@@ -54,7 +62,14 @@ class BankStatementService:
 
         try:
             data = get_file_path(storage_path).read_bytes()
+            logger.debug(
+                "Read bank Excel bytes: size=%d (%s)", len(data), type(data).__name__
+            )
             parsed_rows = parse_bank_statement_excel(data, filename)
+            logger.debug(
+                "Parsed bank rows: count=%d (%s)",
+                len(parsed_rows), type(parsed_rows).__name__,
+            )
         except ExcelParseError:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise
@@ -95,9 +110,20 @@ class BankStatementService:
             for r in parsed_rows[:10]
         ]
 
+        unparsed_date_rows = sum(
+            1 for r in parsed_rows if r.transaction_date is None
+        )
+        if unparsed_date_rows:
+            logger.warning(
+                "Bank upload %s: %d/%d rows have unparsable transaction_date "
+                "— matching will skip them with reason=missing_transaction_date",
+                filename, unparsed_date_rows, len(parsed_rows),
+            )
+
         return BankStatementUploadResponse(
             bank_statement_id=statement.id,
             row_count=len(row_dicts),
             processing_status="processed",
+            unparsed_date_rows=unparsed_date_rows,
             preview=preview,
         )
