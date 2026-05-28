@@ -4,7 +4,7 @@ export function reviewStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pending: "Pending",
     approved: "Approved",
-    needs_review: "Needs Review",
+    needs_review: "Requires Immediate Review",
   };
   return map[status] ?? status;
 }

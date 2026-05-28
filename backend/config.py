@@ -70,9 +70,27 @@ class Settings(BaseSettings):
         default=2, validation_alias="BANK_COMMENT_LLM_MAX_RETRIES"
     )
 
-    jwt_expire_minutes: int = Field(default=480, validation_alias="JWT_EXPIRE_MINUTES")
+    jwt_access_expire_minutes: int = Field(
+        default=1, validation_alias="JWT_ACCESS_EXPIRE_MINUTES"
+    )
+    jwt_refresh_expire_days: int = Field(
+        default=7, validation_alias="JWT_REFRESH_EXPIRE_DAYS"
+    )
+    # Legacy alias — maps to access token lifetime if set without JWT_ACCESS_EXPIRE_MINUTES
+    jwt_expire_minutes: int | None = Field(
+        default=None, validation_alias="JWT_EXPIRE_MINUTES"
+    )
     cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
     cookie_samesite: str = Field(default="lax", validation_alias="COOKIE_SAMESITE")
+    smtp_host: str = Field(default="", validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_username: str = Field(default="", validation_alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", validation_alias="SMTP_PASSWORD")
+    smtp_from_email: str = Field(
+        default="no-reply@borek.com",
+        validation_alias="SMTP_FROM_EMAIL",
+    )
+    smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
     log_level: str = Field(default="info", validation_alias="LOG_LEVEL")
 
     # Verbose function-trace logging — keep OFF in production. See core/debug_logger.py

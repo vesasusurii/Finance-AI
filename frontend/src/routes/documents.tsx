@@ -6,6 +6,7 @@ import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator";
 import { FilterBar } from "@/components/ui-finance/FilterBar";
+import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
 import { useInvoices } from "@/hooks/useInvoices";
 import {
   approveInvoice,
@@ -176,7 +177,7 @@ export function DocumentsPage() {
       />
 
       {selected && (
-        <ReviewDrawer
+        <DocumentDrawer
           invoice={selected}
           onClose={() => setSelected(null)}
           onSaved={async (updated) => {
@@ -188,7 +189,6 @@ export function DocumentsPage() {
             setSelected(null);
           }}
           onApproved={async () => {
-            await approveInvoice(selected.id);
             await reload();
             setSelected(null);
           }}
@@ -198,7 +198,7 @@ export function DocumentsPage() {
   );
 }
 
-function ReviewDrawer({
+function DocumentDrawer({
   invoice,
   onClose,
   onSaved,
@@ -273,14 +273,14 @@ function ReviewDrawer({
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-foreground/20" onClick={onClose} />
-      <aside className="absolute right-0 top-0 flex h-full w-full max-w-[520px] flex-col border-l border-border bg-background shadow-xl">
+      <aside className="absolute right-0 top-0 flex h-full w-full max-w-[1180px] flex-col border-l border-border bg-background shadow-xl">
         <div className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Invoice detail
+              Document detail
             </div>
             <div className="mt-0.5 font-mono text-[13px] font-medium text-foreground">
-              {invoice.invoice_number ?? "—"}
+              {invoice.source_filename ?? invoice.invoice_number ?? "Invoice"}
             </div>
           </div>
           <button

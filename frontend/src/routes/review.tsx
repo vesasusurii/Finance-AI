@@ -1,17 +1,10 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Check, FileText } from "lucide-react";
+import { useCallback, useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
-import { StatusBadge } from "@/components/ui-finance/StatusBadge";
-import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator";
 import { EmptyState } from "@/components/EmptyState";
+import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
 import { useInvoices } from "@/hooks/useInvoices";
-import { approveInvoice } from "@/api/invoices";
-import {
-  formatCurrency,
-  formatDate,
-  reviewStatusLabel,
-} from "@/lib/labels";
 
 export function ReviewPage() {
   const { items, loading, error, reload } = useInvoices({
@@ -19,49 +12,56 @@ export function ReviewPage() {
     limit: 100,
   });
   const [idx, setIdx] = useState(0);
-  const inv = items[idx];
+  const inv = items[idx] ?? null;
+
+  const goTo = useCallback(
+    (next: number) => {
+      setIdx(Math.max(0, Math.min(next, items.length - 1)));
+    },
+    [items.length],
+  );
 
   if (!loading && items.length === 0) {
     return (
       <div>
         <PageHeader
           eyebrow="OCR review"
-          title="Document validation"
-          description="Invoices that need human review after extraction."
+          title="Immediate review queue"
+          description="Invoices below 95% OCR confidence or missing critical fields."
         />
         <EmptyState
           title="Review queue is empty"
-          description="Upload invoices or check the purchase invoices table. Rows with low confidence are routed here automatically."
+          description="Documents at 95% confidence or higher can be checked and edited from Purchase invoices."
         />
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="flex flex-col">
       <PageHeader
         eyebrow={
-          inv
-            ? `OCR review · ${idx + 1} of ${items.length}`
-            : "OCR review"
+          inv ? `OCR review · ${idx + 1} of ${items.length}` : "OCR review"
         }
-        title="Document validation"
-        description="Review extracted fields before matching. Approve when values are correct."
+        title="Immediate review queue"
+        description="Review AI-extracted fields alongside the original document. Correct any errors, then approve."
         actions={
           items.length > 1 ? (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <Button
                 variant="secondary"
+                size="sm"
                 disabled={idx === 0}
-                onClick={() => setIdx((i) => Math.max(0, i - 1))}
+                onClick={() => goTo(idx - 1)}
                 icon={<ChevronLeft className="h-3.5 w-3.5" />}
               >
                 Prev
               </Button>
               <Button
                 variant="secondary"
+                size="sm"
                 disabled={idx >= items.length - 1}
-                onClick={() => setIdx((i) => Math.min(items.length - 1, i + 1))}
+                onClick={() => goTo(idx + 1)}
               >
                 Next <ChevronRight className="h-3.5 w-3.5" />
               </Button>
@@ -70,87 +70,26 @@ export function ReviewPage() {
         }
       />
 
-      {error && (
-        <p className="mb-4 text-[13px] text-destructive">{error}</p>
-      )}
+      {error && <p className="mb-4 text-[13px] text-destructive">{error}</p>}
 
       {loading || !inv ? (
-        <p className="text-[13px] text-muted-foreground">Loading…</p>
+        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading review queue...
+        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <div className="rounded-lg border border-border bg-card p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="font-mono text-[12px]">
-                {inv.invoice_number ?? "—"}
-              </span>
-            </div>
-            <p className="text-[13px] text-muted-foreground">
-              Original file preview is not wired yet. Use purchase invoices for
-              full detail; source file id: {inv.source_file_id ?? "—"}.
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-5">
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <StatusBadge value={reviewStatusLabel(inv.review_status)} />
-              <ConfidenceIndicator
-                value={
-                  inv.extraction_confidence != null
-                    ? Number(inv.extraction_confidence)
-                    : 0
-                }
-              />
-            </div>
-            <dl className="space-y-3 text-[13px]">
-              <Row label="Company" value={inv.name_of_company} />
-              <Row label="Date" value={formatDate(inv.invoice_date)} />
-              <Row label="Invoice #" value={inv.invoice_number} mono />
-              <Row
-                label="Amount"
-                value={formatCurrency(
-                  inv.amount != null ? Number(inv.amount) : null,
-                  inv.currency,
-                )}
-              />
-              <Row label="Category" value={inv.category} />
-              <Row label="IBAN" value={inv.account_details} mono />
-            </dl>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button
-                variant="success"
-                icon={<Check className="h-3.5 w-3.5" />}
-                onClick={async () => {
-                  await approveInvoice(inv.id);
-                  await reload();
-                  setIdx((i) => Math.min(i, Math.max(0, items.length - 2)));
-                }}
-              >
-                Approve
-              </Button>
-            </div>
-          </div>
+        <div className="mt-4">
+          <InvoiceDocumentEditor
+            key={inv.id}
+            invoice={inv}
+            onApproved={async () => {
+              await reload();
+              goTo(Math.min(idx, items.length - 2));
+            }}
+            onSaved={() => void reload()}
+          />
         </div>
       )}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string | null | undefined;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-border pb-2 last:border-0">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={mono ? "font-mono text-foreground" : "text-foreground"}>
-        {value ?? "—"}
-      </dd>
     </div>
   );
 }

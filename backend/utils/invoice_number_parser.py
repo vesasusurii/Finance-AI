@@ -26,6 +26,15 @@ from utils.normalization import is_tax_or_client_id, normalize_invoice_number
 
 logger = get_logger(__name__)
 
+PATTERNS = [
+    r"\b(?:invoices?|fatur[aëe]?|fatures?|faturat?)\s+([\d\s,./-]+)",
+    r"\b(\d{1,4}/\d{4}/\d{2,6})\b",
+    r"\bpagesa\b(?:\s+(?:per|për|par))?(?:\s+(?:invoice|fatur[aëe]?))?\s*[:#]?\s*([A-Z0-9][\w./-]{2,})",
+    r"\b(?:invoice|fatur[aëe]?|inv|ref|nr\.?)\b\s*[:#]?\s*([A-Z0-9][\w./-]{2,})",
+    r"\b([A-Z0-9]{4,}[-/][A-Z0-9]{2,})\b",
+    r"\b(\d{4,})\b",
+]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Patterns — ordered by confidence (highest first). Each captures group(1).
@@ -160,6 +169,20 @@ def extract_invoice_numbers(comment: str | None) -> list[str]:
                     continue
                 chunk_yielded_valid_token = True
                 if norm not in candidates:
+                    if any(
+                        existing.isdigit() and norm.isdigit() and norm in existing
+                        for existing in candidates
+                    ):
+                        continue
+                    candidates = [
+                        existing
+                        for existing in candidates
+                        if not (
+                            existing.isdigit()
+                            and norm.isdigit()
+                            and existing in norm
+                        )
+                    ]
                     candidates.append(norm)
             # Record the span whenever the chunk yielded *any* valid token
             # (even if it was already in `candidates`), so substring matches

@@ -21,6 +21,7 @@ const map: Record<string, Tone> = {
   Failed: "danger",
   failed: "danger",
   "Needs Review": "warning",
+  "Requires Immediate Review": "warning",
   needs_review: "warning",
   Approved: "success",
   approved: "success",
