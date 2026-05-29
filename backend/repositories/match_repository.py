@@ -4,7 +4,9 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.bank_statement import BankStatement
 from models.bank_transaction import BankTransaction
+from models.invoice import Invoice
 from models.invoice_payment_match import InvoicePaymentMatch
 from schemas.reconciliation import MatchResultResponse
 
@@ -82,23 +84,56 @@ class MatchRepository:
         bank_statement_id: int | None,
         page: int,
         limit: int,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[list[MatchResultResponse], int]:
         query = select(InvoicePaymentMatch)
         count_q = select(func.count()).select_from(InvoicePaymentMatch)
+        txn_joined = False
+
+        if owner_user_id is not None:
+            query = query.join(
+                Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
+            ).where(Invoice.uploaded_by == owner_user_id)
+            count_q = count_q.join(
+                Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
+            ).where(Invoice.uploaded_by == owner_user_id)
+            query = query.join(
+                BankTransaction,
+                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+            )
+            count_q = count_q.join(
+                BankTransaction,
+                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+            )
+            txn_joined = True
+            query = query.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            ).where(BankStatement.uploaded_by == owner_user_id)
+            count_q = count_q.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            ).where(BankStatement.uploaded_by == owner_user_id)
 
         if status:
             query = query.where(InvoicePaymentMatch.status == status)
             count_q = count_q.where(InvoicePaymentMatch.status == status)
 
         if bank_statement_id is not None:
-            query = query.join(
-                BankTransaction,
-                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
-            ).where(BankTransaction.bank_statement_id == bank_statement_id)
-            count_q = count_q.join(
-                BankTransaction,
-                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
-            ).where(BankTransaction.bank_statement_id == bank_statement_id)
+            if not txn_joined:
+                query = query.join(
+                    BankTransaction,
+                    InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+                )
+                count_q = count_q.join(
+                    BankTransaction,
+                    InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+                )
+            query = query.where(BankTransaction.bank_statement_id == bank_statement_id)
+            count_q = count_q.where(
+                BankTransaction.bank_statement_id == bank_statement_id
+            )
 
         total = (await self._session.execute(count_q)).scalar_one()
         offset = (page - 1) * limit
@@ -117,4 +152,5 @@ class MatchRepository:
             InvoicePaymentMatch.invoice_id == invoice_id,
             InvoicePaymentMatch.bank_transaction_id == bank_transaction_id,
         )
-        return (await self._session.execute(q)).scalar_one_or_none() is not None
+        row_id = (await self._session.execute(q)).scalar_one_or_none()
+        return row_id is not None

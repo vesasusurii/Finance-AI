@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getInvoice, uploadInvoices } from "@/api/invoices";
+import { getInvoice } from "@/api/invoices";
+import {
+  uploadDocumentWithProgress,
+  validateClientFile,
+  type DocumentUploadItem,
+} from "@/api/documents";
 import {
   MOCK_PIPELINE,
   STAGE_LABELS,
@@ -9,7 +14,6 @@ import {
 } from "@/lib/uploadQueueStages";
 import { uploadProgressEvents } from "@/services/uploadProgressEvents";
 import type {
-  BatchProgressStats,
   ProcessingLogEntry,
   UploadQueueItem,
   InvoiceQueueStatus,
@@ -29,26 +33,21 @@ function logEntry(
   return { at: new Date().toISOString(), stage, message };
 }
 
-function computeStats(items: UploadQueueItem[]): BatchProgressStats {
-  const total = items.length;
-  const processing = items.filter((i) => isProcessingStatus(i.status)).length;
-  const completed = items.filter((i) => i.status === "completed").length;
-  const failed = items.filter((i) => i.status === "failed").length;
-  const requiresReview = items.filter((i) => i.status === "requires_review").length;
-  const overallProgress =
-    total === 0
-      ? 0
-      : Math.round(
-          items.reduce((sum, item) => sum + item.progress, 0) / total,
-        );
-  return {
-    total,
-    processing,
-    completed,
-    failed,
-    requiresReview,
-    overallProgress,
-  };
+function finalStatusFromDocumentResult(
+  result: DocumentUploadItem,
+  reviewStatus?: string | null,
+): { status: InvoiceQueueStatus; stageLabel: string } {
+  if (result.upload_status === "failed" || result.error) {
+    return { status: "failed", stageLabel: STAGE_LABELS.failed };
+  }
+  if (result.upload_status === "pending") {
+    return {
+      status: "completed",
+      stageLabel: "Stored — awaiting OCR",
+    };
+  }
+  const status = statusFromUploadResult(result.upload_status, reviewStatus);
+  return { status, stageLabel: STAGE_LABELS[status] };
 }
 
 export function useUploadQueue() {
@@ -104,6 +103,18 @@ export function useUploadQueue() {
 
   const processOne = useCallback(
     async (item: UploadQueueItem) => {
+      const clientError = validateClientFile(item.file);
+      if (clientError) {
+        patchItem(item.id, {
+          status: "failed",
+          progress: 100,
+          stageLabel: STAGE_LABELS.failed,
+          error: clientError,
+        });
+        appendLog(item.id, "failed", clientError);
+        return;
+      }
+
       let stageIndex = 0;
       let cancelled = false;
 
@@ -124,12 +135,23 @@ export function useUploadQueue() {
         progress: STAGE_PROGRESS.uploading,
         stageLabel: STAGE_LABELS.uploading,
       });
-      appendLog(item.id, "uploading", "Sending file to server");
+      appendLog(item.id, "uploading", "Sending file to storage");
 
       const timer = window.setInterval(advanceStage, STAGE_INTERVAL_MS);
 
       try {
-        const res = await uploadInvoices([item.file]);
+        const res = await uploadDocumentWithProgress(item.file, (pct) => {
+          const uploadProgress = Math.min(
+            90,
+            STAGE_PROGRESS.uploading +
+              Math.round((pct / 100) * (STAGE_PROGRESS.saving - STAGE_PROGRESS.uploading)),
+          );
+          patchItem(item.id, {
+            progress: uploadProgress,
+            stageLabel: pct < 100 ? `Uploading ${pct}%` : STAGE_LABELS.saving,
+          });
+        });
+
         const result = res.items[0];
         if (!result) {
           throw new Error("No upload result returned");
@@ -141,28 +163,32 @@ export function useUploadQueue() {
           try {
             invoice = await getInvoice(result.invoice_id);
           } catch (err) {
-            getInvoiceError = err instanceof Error ? err.message : "getInvoice failed";
-            invoice = null;
+            getInvoiceError =
+              err instanceof Error ? err.message : "Could not load invoice";
           }
         }
 
-        const finalStatus =
-          getInvoiceError && result.processing_status === "processed"
-            ? "requires_review"
-            : statusFromUploadResult(
-                result.processing_status,
-                invoice?.review_status,
-              );
+        const { status: finalStatus, stageLabel } = finalStatusFromDocumentResult(
+          result,
+          invoice?.review_status,
+        );
 
         const detailError =
+          result.error ??
           getInvoiceError ??
-          (result.processing_status === "failed" ? result.error ?? null : null);
+          (result.upload_status === "failed" ? "Processing failed" : null);
 
         patchItem(item.id, {
-          status: finalStatus,
+          status:
+            getInvoiceError && result.upload_status === "processed"
+              ? "requires_review"
+              : finalStatus,
           progress: 100,
-          stageLabel: STAGE_LABELS[finalStatus],
-          uploadId: result.upload_id || undefined,
+          stageLabel:
+            getInvoiceError && result.upload_status === "processed"
+              ? STAGE_LABELS.requires_review
+              : stageLabel,
+          uploadId: result.document_id || undefined,
           invoiceId: result.invoice_id ?? null,
           confidence: invoice?.extraction_confidence ?? null,
           error: detailError,
@@ -172,9 +198,7 @@ export function useUploadQueue() {
         appendLog(
           item.id,
           finalStatus,
-          finalStatus === "failed"
-            ? result.error ?? "Processing failed"
-            : STAGE_LABELS[finalStatus],
+          detailError ?? stageLabel,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Upload failed";
@@ -208,7 +232,6 @@ export function useUploadQueue() {
       }
 
       pendingRef.current.shift();
-
       activeWorkersRef.current += 1;
       setActiveWorkers(activeWorkersRef.current);
 
@@ -237,11 +260,9 @@ export function useUploadQueue() {
       }));
 
       pendingRef.current.push(...queued.map((item) => item.id));
-      setItems((prev) => {
-        const next = [...queued, ...prev];
-        itemsRef.current = next;
-        return next;
-      });
+      const next = [...queued, ...itemsRef.current];
+      itemsRef.current = next;
+      setItems(next);
       schedule();
     },
     [schedule],
@@ -282,7 +303,6 @@ export function useUploadQueue() {
     setItems([]);
   }, []);
 
-  const stats = useMemo(() => computeStats(items), [items]);
   const isRunning = useMemo(
     () =>
       activeWorkers > 0 ||
@@ -292,7 +312,6 @@ export function useUploadQueue() {
 
   return {
     items,
-    stats,
     isRunning,
     enqueueFiles,
     retryItem,

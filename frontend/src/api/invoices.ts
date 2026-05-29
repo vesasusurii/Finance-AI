@@ -70,9 +70,41 @@ export async function deleteInvoice(id: number): Promise<void> {
 }
 
 /**
- * Authenticated URL for inline document preview (PDF / JPEG / PNG).
- * Uses GET only — do not probe with HEAD (not supported by the dev proxy).
+ * Fetch invoice source file with session cookies (for preview blob URLs).
  */
+export async function fetchInvoiceFile(invoiceId: number): Promise<Blob> {
+  const path = `/api/invoices/${invoiceId}/file`;
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+  let res = await doFetch();
+
+  if (res.status === 401) {
+    const body = (await res.clone().json().catch(() => ({}))) as {
+      error?: string;
+    };
+    if (body.error === "token_expired" || body.error === "invalid_token") {
+      const refresh = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (refresh.ok) {
+        res = await doFetch();
+      }
+    }
+  }
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(body.message ?? "Could not load invoice file");
+  }
+
+  return res.blob();
+}
+
+/** Direct URL — only works when the browser sends session cookies (e.g. Open link). */
 export function invoiceFileUrl(invoiceId: number): string {
   return `${API_BASE}/api/invoices/${invoiceId}/file`;
 }

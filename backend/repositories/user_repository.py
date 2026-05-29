@@ -1,8 +1,15 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.audit_log import AuditLog
+from models.bank_statement import BankStatement
+from models.bank_transaction import BankTransaction
+from models.invoice import Invoice
+from models.invoice_payment_match import InvoicePaymentMatch
+from models.review_task import ReviewTask
+from models.uploaded_file import UploadedFile
 from models.user import User
 
 
@@ -80,5 +87,59 @@ class UserRepository:
         return user
 
     async def delete(self, user: User) -> None:
+        await self.delete_user_and_related_data(user.id)
+
+    async def delete_user_and_related_data(self, user_id: int) -> None:
+        """Remove a user and all rows that block FK deletion."""
+        user = await self._session.get(User, user_id)
+        if user is None:
+            return
+
+        invoice_ids = select(Invoice.id).where(Invoice.uploaded_by == user_id)
+        statement_ids = select(BankStatement.id).where(
+            BankStatement.uploaded_by == user_id
+        )
+        transaction_ids = select(BankTransaction.id).where(
+            BankTransaction.bank_statement_id.in_(statement_ids)
+        )
+
+        await self._session.execute(
+            delete(InvoicePaymentMatch).where(
+                InvoicePaymentMatch.invoice_id.in_(invoice_ids)
+            )
+        )
+        await self._session.execute(
+            delete(InvoicePaymentMatch).where(
+                InvoicePaymentMatch.bank_transaction_id.in_(transaction_ids)
+            )
+        )
+        await self._session.execute(
+            delete(ReviewTask).where(ReviewTask.invoice_id.in_(invoice_ids))
+        )
+        await self._session.execute(
+            delete(ReviewTask).where(
+                ReviewTask.bank_transaction_id.in_(transaction_ids)
+            )
+        )
+        await self._session.execute(
+            delete(Invoice).where(Invoice.uploaded_by == user_id)
+        )
+        await self._session.execute(
+            delete(BankStatement).where(BankStatement.uploaded_by == user_id)
+        )
+        await self._session.execute(
+            delete(UploadedFile).where(UploadedFile.uploaded_by == user_id)
+        )
+        await self._session.execute(
+            update(AuditLog)
+            .where(AuditLog.user_id == user_id)
+            .values(user_id=None)
+        )
+        await self._session.execute(
+            update(ReviewTask)
+            .where(ReviewTask.assigned_to == user_id)
+            .values(assigned_to=None)
+        )
+
         await self._session.delete(user)
         await self._session.flush()

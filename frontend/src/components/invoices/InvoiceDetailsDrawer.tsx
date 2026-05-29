@@ -1,6 +1,4 @@
-import { ExternalLink } from "lucide-react";
-import { invoiceFileUrl } from "@/api/invoices";
-import { Button } from "@/components/ui-finance/Button";
+import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator";
 import {
   Sheet,
@@ -40,8 +38,7 @@ export function InvoiceDetailsDrawer({
 
   const invoice = item.invoice;
   const validation = validationRows(item);
-  const previewUrl = item.invoiceId ? invoiceFileUrl(item.invoiceId) : null;
-  const isPdf = invoice?.source_mime_type === "application/pdf";
+  const previewInvoiceId = item.invoiceId;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -150,37 +147,16 @@ export function InvoiceDetailsDrawer({
             </ul>
           </section>
 
-          {previewUrl && (
+          {previewInvoiceId && (
             <section>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Original invoice preview
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  icon={<ExternalLink className="h-3.5 w-3.5" />}
-                  onClick={() => window.open(previewUrl, "_blank", "noopener")}
-                >
-                  Open
-                </Button>
-              </div>
-              <div className="overflow-hidden rounded-lg border border-border bg-surface-muted">
-                {isPdf ? (
-                  <iframe
-                    title={`Preview ${item.fileName}`}
-                    src={previewUrl}
-                    className="h-[420px] w-full bg-background"
-                  />
-                ) : (
-                  <img
-                    src={previewUrl}
-                    alt={item.fileName}
-                    className="max-h-[420px] w-full object-contain"
-                  />
-                )}
-              </div>
+              <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Original invoice preview
+              </p>
+              <InvoiceFilePreview
+                invoiceId={previewInvoiceId}
+                displayName={item.fileName}
+                mimeType={invoice?.source_mime_type}
+              />
             </section>
           )}
         </div>

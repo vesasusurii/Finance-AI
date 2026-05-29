@@ -13,7 +13,7 @@ from schemas.bank_statement import (
     BankTransactionPreview,
 )
 from utils.bank_excel_parser import parse_bank_statement_excel
-from utils.file_storage import get_file_path, save_upload
+from utils.file_storage import read_bytes, save_bytes
 
 logger = get_logger(__name__)
 
@@ -50,7 +50,13 @@ class BankStatementService:
                 "Unsupported file type. Upload .xlsx or .xls."
             )
 
-        storage_path = await save_upload(file, "bank_statements")
+        content = await file.read()
+        storage_path, file_size = await save_bytes(
+            content,
+            user_id=user.user_id,
+            filename=filename,
+            mime_type=file.content_type,
+        )
         upload_row = await self._upload_repo.create(
             file_kind="bank_statement",
             filename=filename,
@@ -58,10 +64,11 @@ class BankStatementService:
             mime_type=file.content_type,
             user_id=user.user_id,
             processing_status="processing",
+            file_size=file_size,
         )
 
         try:
-            data = get_file_path(storage_path).read_bytes()
+            data = await read_bytes(storage_path)
             logger.debug(
                 "Read bank Excel bytes: size=%d (%s)", len(data), type(data).__name__
             )

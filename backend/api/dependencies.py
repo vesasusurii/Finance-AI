@@ -9,6 +9,7 @@ from api.controllers.bank_statement_controller import BankStatementController
 from api.controllers.export_controller import ExportController
 from api.controllers.invoice_controller import InvoiceController
 from api.controllers.reconciliation_controller import ReconciliationController
+from api.controllers.document_controller import DocumentController
 from api.controllers.review_controller import ReviewController
 from api.controllers.user_controller import UserController
 from config import settings
@@ -27,6 +28,7 @@ from schemas.auth import UserContext
 from services.ai_validation_service import AIValidationService
 from services.bank_comment_extraction_service import BankCommentExtractionService
 from services.bank_statement_service import BankStatementService
+from services.document_service import DocumentService
 from services.excel_service import ExcelService
 from services.invoice_extraction_service import InvoiceExtractionService
 from services.matching_service import MatchingService
@@ -230,9 +232,25 @@ async def get_reconciliation_controller(
     matching: MatchingService = Depends(get_matching_service),
     match_repo: MatchRepository = Depends(get_match_repo),
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> ReconciliationController:
-    return ReconciliationController(matching, match_repo, invoice_repo, audit_repo)
+    return ReconciliationController(
+        matching, match_repo, invoice_repo, statement_repo, audit_repo
+    )
+
+
+async def get_document_service(
+    upload_repo: UploadRepository = Depends(get_upload_repo),
+    extraction: InvoiceExtractionService = Depends(get_invoice_extraction_service),
+) -> DocumentService:
+    return DocumentService(upload_repo, extraction)
+
+
+async def get_document_controller(
+    service: DocumentService = Depends(get_document_service),
+) -> DocumentController:
+    return DocumentController(service)
 
 
 async def get_review_controller(

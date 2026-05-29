@@ -16,4 +16,4 @@ async def list_review_tasks(
     user: UserContext = Depends(get_current_user),
     ctrl: ReviewController = Depends(get_review_controller),
 ):
-    return await ctrl.list_open(task_type, page, limit)
+    return await ctrl.list_open(user, task_type, page, limit)

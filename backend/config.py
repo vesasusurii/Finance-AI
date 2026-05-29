@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     database_url: str = Field(validation_alias="DATABASE_URL")
     jwt_secret: str = Field(validation_alias="JWT_SECRET")
     storage_path: str = Field(validation_alias="STORAGE_PATH")
+    storage_backend: str = Field(default="local", validation_alias="STORAGE_BACKEND")
+    supabase_url: str = Field(default="", validation_alias="SUPABASE_URL")
+    supabase_service_role_key: str = Field(
+        default="", validation_alias="SUPABASE_SERVICE_ROLE_KEY"
+    )
+    supabase_storage_bucket: str = Field(
+        default="invoices", validation_alias="SUPABASE_STORAGE_BUCKET"
+    )
     cors_origins: str = Field(validation_alias="CORS_ORIGINS")
 
     environment: str = Field(default="local", validation_alias="ENVIRONMENT")

@@ -34,7 +34,7 @@ async def reconciliation_results(
     user: UserContext = Depends(get_current_user),
     ctrl: ReconciliationController = Depends(get_reconciliation_controller),
 ):
-    return await ctrl.results(status, bank_statement_id, page, limit)
+    return await ctrl.results(user, status, bank_statement_id, page, limit)
 
 
 @router.post("/approve-match", response_model=MatchActionResponse)

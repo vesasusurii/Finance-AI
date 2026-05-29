@@ -20,7 +20,6 @@ import type { BankTransaction } from "@/types/bank";
 import type { ReviewTask } from "@/types/review";
 import type { Invoice } from "@/types/invoice";
 import {
-  formatCurrency,
   formatDate,
   matchStatusLabel,
   reconciliationStatusLabel,
@@ -35,6 +34,28 @@ export function MatchingPage() {
 
   useEffect(() => {
     const sid = searchParams.get("bank_statement_id");
+    // #region agent log
+    fetch("http://127.0.0.1:7520/ingest/7c44f417-cc83-4e33-b21b-766d2400d7f7", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "841234",
+      },
+      body: JSON.stringify({
+        sessionId: "841234",
+        hypothesisId: "D",
+        location: "matching.tsx:searchParamsEffect",
+        message: "bank_statement_id param sync",
+        data: {
+          paramValue: sid,
+          currentStatementId: statementId,
+          willClearWhenMissing: false,
+        },
+        timestamp: Date.now(),
+        runId: "pre-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
     if (sid) setStatementId(sid);
   }, [searchParams]);
   const [running, setRunning] = useState(false);
@@ -54,6 +75,24 @@ export function MatchingPage() {
   const refresh = useCallback(async () => {
     const sid = statementId ? parseInt(statementId, 10) : undefined;
     const filters = Number.isFinite(sid) ? { bank_statement_id: sid } : {};
+    // #region agent log
+    fetch("http://127.0.0.1:7520/ingest/7c44f417-cc83-4e33-b21b-766d2400d7f7", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "841234",
+      },
+      body: JSON.stringify({
+        sessionId: "841234",
+        hypothesisId: "D",
+        location: "matching.tsx:refresh",
+        message: "refresh filters",
+        data: { statementId, parsedSid: sid, filters },
+        timestamp: Date.now(),
+        runId: "pre-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
 
     const [matchRes, reviewRes, txnRes] = await Promise.all([
       getReconciliationResults({ ...filters, limit: 100 }),

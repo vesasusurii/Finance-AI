@@ -1,7 +1,10 @@
 from fastapi import HTTPException
 
 from core.debug_logger import debug_trace, get_logger
+from core.invoice_access import invoice_owner_user_id, upload_owner_user_id
+from models.invoice_payment_match import InvoicePaymentMatch
 from repositories.audit_repository import AuditRepository
+from repositories.bank_statement_repository import BankStatementRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.match_repository import MatchRepository
 from schemas.auth import UserContext
@@ -17,6 +20,14 @@ from services.matching_service import MatchingService
 
 logger = get_logger(__name__)
 
+_MATCH_NOT_FOUND = HTTPException(
+    status_code=404,
+    detail={
+        "error": "match_not_found",
+        "message": "Match not found.",
+    },
+)
+
 
 class ReconciliationController:
     def __init__(
@@ -24,29 +35,68 @@ class ReconciliationController:
         matching_service: MatchingService,
         match_repo: MatchRepository,
         invoice_repo: InvoiceRepository,
+        statement_repo: BankStatementRepository,
         audit_repo: AuditRepository,
     ) -> None:
         self._matching = matching_service
         self._match_repo = match_repo
         self._invoice_repo = invoice_repo
+        self._statement_repo = statement_repo
         self._audit_repo = audit_repo
+
+    async def _require_owned_match(
+        self, match_id: int, user: UserContext
+    ) -> InvoicePaymentMatch:
+        row = await self._match_repo.get(match_id)
+        if not row:
+            raise _MATCH_NOT_FOUND
+        owner = invoice_owner_user_id(user)
+        invoice = await self._invoice_repo.get_owned_row(
+            row.invoice_id,
+            owner_user_id=owner,
+        )
+        if not invoice:
+            raise _MATCH_NOT_FOUND
+        return row
 
     @debug_trace
     async def run(
         self, request: ReconciliationRunRequest, user: UserContext
     ) -> ReconciliationSummary:
-        return await self._matching.run(request.bank_statement_id)
+        owner = upload_owner_user_id(user)
+        if request.bank_statement_id is not None and owner is not None:
+            stmt = await self._statement_repo.get(
+                request.bank_statement_id,
+                owner_user_id=owner,
+            )
+            if stmt is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "bank_statement_not_found",
+                        "message": "Bank statement not found.",
+                    },
+                )
+        return await self._matching.run(
+            request.bank_statement_id,
+            owner_user_id=invoice_owner_user_id(user),
+        )
 
     @debug_trace
     async def results(
         self,
+        user: UserContext,
         status: str | None,
         bank_statement_id: int | None,
         page: int,
         limit: int,
     ) -> MatchListResponse:
         items, total = await self._match_repo.list_matches(
-            status, bank_statement_id, page, limit
+            status,
+            bank_statement_id,
+            page,
+            limit,
+            owner_user_id=invoice_owner_user_id(user),
         )
         return MatchListResponse(
             items=items, total=total, page=page, limit=limit
@@ -56,15 +106,7 @@ class ReconciliationController:
     async def approve_match(
         self, body: ApproveMatchRequest, user: UserContext
     ) -> MatchActionResponse:
-        row = await self._match_repo.get(body.match_id)
-        if not row:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "match_not_found",
-                    "message": "Match not found.",
-                },
-            )
+        row = await self._require_owned_match(body.match_id, user)
         if row.status in ("approved", "rejected"):
             raise HTTPException(
                 status_code=409,
@@ -93,15 +135,7 @@ class ReconciliationController:
     async def reject_match(
         self, body: RejectMatchRequest, user: UserContext
     ) -> MatchActionResponse:
-        row = await self._match_repo.get(body.match_id)
-        if not row:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "match_not_found",
-                    "message": "Match not found.",
-                },
-            )
+        row = await self._require_owned_match(body.match_id, user)
         if row.status in ("approved", "rejected"):
             raise HTTPException(
                 status_code=409,
@@ -110,7 +144,11 @@ class ReconciliationController:
                     "message": "Match already approved or rejected.",
                 },
             )
-        before_paid = await self._invoice_repo.get(row.invoice_id)
+        owner = invoice_owner_user_id(user)
+        before_paid = await self._invoice_repo.get(
+            row.invoice_id,
+            owner_user_id=owner,
+        )
         await self._match_repo.reject(body.match_id)
         await self._invoice_repo.clear_paid_at_date(row.invoice_id)
         await self._invoice_repo.update_match_status(row.invoice_id, "needs_review")

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import bcrypt
 from fastapi import HTTPException, status
-from sqlalchemy.exc import IntegrityError
 
 from core.roles import ROLE_FINANCE
 from repositories.user_repository import UserRepository
@@ -60,15 +59,6 @@ class UserController:
         )
 
     async def delete_user(self, user_id: int, admin: UserContext) -> dict:
-        if user_id == admin.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": "cannot_delete_self",
-                    "message": "You cannot delete your own account.",
-                },
-            )
-
         user = await self._user_repo.get(user_id)
         if user is None:
             raise HTTPException(
@@ -79,18 +69,5 @@ class UserController:
                 },
             )
 
-        try:
-            await self._user_repo.delete(user)
-        except IntegrityError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "user_has_related_records",
-                    "message": (
-                        "This user has related records and cannot be permanently "
-                        "deleted safely."
-                    ),
-                },
-            ) from exc
-
+        await self._user_repo.delete_user_and_related_data(user_id)
         return {"message": "User deleted."}

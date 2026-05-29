@@ -1,6 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.bank_statement import BankStatement
 from models.bank_transaction import BankTransaction
 from schemas.bank_statement import BankTransactionResponse
 
@@ -28,6 +29,23 @@ def _to_response(row: BankTransaction) -> BankTransactionResponse:
 class BankTransactionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    def _apply_statement_owner(
+        self,
+        query,
+        *,
+        owner_user_id: int | None,
+        joined: bool,
+    ):
+        if owner_user_id is None:
+            return query, joined
+        if not joined:
+            query = query.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            )
+            joined = True
+        return query.where(BankStatement.uploaded_by == owner_user_id), joined
 
     async def create_bulk(
         self, bank_statement_id: int, rows: list[dict]
@@ -57,8 +75,15 @@ class BankTransactionRepository:
         reconciliation_status: str | None,
         page: int,
         limit: int,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[list[BankTransactionResponse], int]:
         filters = []
+        stmt_joined = False
+        if owner_user_id is not None:
+            filters.append(BankStatement.uploaded_by == owner_user_id)
+            stmt_joined = True
+
         if bank_statement_id is not None:
             filters.append(BankTransaction.bank_statement_id == bank_statement_id)
         if reconciliation_status:
@@ -67,12 +92,22 @@ class BankTransactionRepository:
             )
 
         count_q = select(func.count()).select_from(BankTransaction)
+        if stmt_joined:
+            count_q = count_q.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            )
         if filters:
             count_q = count_q.where(*filters)
         total = (await self._session.execute(count_q)).scalar_one()
 
         offset = (page - 1) * limit
         q = select(BankTransaction).order_by(BankTransaction.id.asc())
+        if stmt_joined:
+            q = q.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            )
         if filters:
             q = q.where(*filters)
         q = q.offset(offset).limit(limit)
@@ -81,18 +116,28 @@ class BankTransactionRepository:
         return [_to_response(r) for r in rows], total
 
     async def list_pending(
-        self, bank_statement_id: int | None = None
+        self,
+        bank_statement_id: int | None = None,
+        *,
+        owner_user_id: int | None = None,
     ) -> list[BankTransaction]:
         q = select(BankTransaction).where(
             BankTransaction.reconciliation_status == "pending"
         )
+        joined = False
         if bank_statement_id is not None:
             q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        q, joined = self._apply_statement_owner(
+            q, owner_user_id=owner_user_id, joined=joined
+        )
         result = await self._session.execute(q)
         return list(result.scalars().all())
 
     async def list_unresolved(
-        self, bank_statement_id: int | None = None
+        self,
+        bank_statement_id: int | None = None,
+        *,
+        owner_user_id: int | None = None,
     ) -> list[BankTransaction]:
         """Transactions still eligible for matching: pending, needs_review, partial.
 
@@ -104,8 +149,12 @@ class BankTransactionRepository:
                 ("pending", "needs_review", "partial")
             )
         )
+        joined = False
         if bank_statement_id is not None:
             q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        q, joined = self._apply_statement_owner(
+            q, owner_user_id=owner_user_id, joined=joined
+        )
         result = await self._session.execute(q)
         return list(result.scalars().all())
 
@@ -126,25 +175,39 @@ class BankTransactionRepository:
             await self._session.flush()
 
     async def list_needs_review(
-        self, bank_statement_id: int | None = None
+        self,
+        bank_statement_id: int | None = None,
+        *,
+        owner_user_id: int | None = None,
     ) -> list[BankTransactionResponse]:
         q = select(BankTransaction).where(
             BankTransaction.reconciliation_status == "needs_review"
         )
+        joined = False
         if bank_statement_id is not None:
             q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        q, joined = self._apply_statement_owner(
+            q, owner_user_id=owner_user_id, joined=joined
+        )
         result = await self._session.execute(q)
         return [_to_response(r) for r in result.scalars().all()]
 
     async def list_multi_invoice_matches(
-        self, bank_statement_id: int | None = None
+        self,
+        bank_statement_id: int | None = None,
+        *,
+        owner_user_id: int | None = None,
     ) -> list[BankTransactionResponse]:
         """Transactions with more than one detected invoice number."""
         q = select(BankTransaction).where(
             BankTransaction.reconciliation_status.in_(("matched", "partial"))
         )
+        joined = False
         if bank_statement_id is not None:
             q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        q, joined = self._apply_statement_owner(
+            q, owner_user_id=owner_user_id, joined=joined
+        )
         result = await self._session.execute(q)
         rows = []
         for r in result.scalars().all():

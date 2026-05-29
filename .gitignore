@@ -68,6 +68,10 @@ samples/
 .cursor/projects/
 agent-transcripts/
 
+# Graphify generated outputs
+graphify-out/
+raw/
+
 # Terraform / secrets
 *.pem
 *.key

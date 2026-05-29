@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
-  ExternalLink,
-  FileText,
   Loader2,
   Save,
 } from "lucide-react";
@@ -11,9 +9,9 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui-finance/Button";
 import {
   approveInvoice,
-  invoiceFileUrl,
   updateInvoice,
 } from "@/api/invoices";
+import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import { formatDate } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
@@ -150,7 +148,27 @@ export function InvoiceDocumentEditor({
         embedded ? "min-h-[640px]" : "min-h-[calc(100vh-11rem)]",
       )}
     >
-      <DocumentPreview invoice={invoice} />
+      {invoice.source_file_id ? (
+        <InvoiceFilePreview
+          invoiceId={invoice.id}
+          displayName={
+            invoice.source_filename ??
+            invoice.invoice_number ??
+            invoice.name_of_company ??
+            `Invoice #${invoice.id}`
+          }
+          mimeType={invoice.source_mime_type}
+          minHeightClass="min-h-[480px] lg:min-h-0"
+        />
+      ) : (
+        <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
+          <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 px-6 text-center">
+            <p className="text-[13px] text-muted-foreground">
+              No source file attached to this invoice.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
@@ -319,98 +337,6 @@ export function InvoiceDocumentEditor({
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function mimeFromInvoice(invoice: Invoice): string | null {
-  if (invoice.source_mime_type) return invoice.source_mime_type;
-  const name = invoice.source_filename?.toLowerCase() ?? "";
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  return null;
-}
-
-function DocumentPreview({ invoice }: { invoice: Invoice }) {
-  const [imgError, setImgError] = useState(false);
-
-  const fileSrc = invoice.source_file_id ? invoiceFileUrl(invoice.id) : null;
-  const mimeType = mimeFromInvoice(invoice);
-  const isImage = mimeType?.startsWith("image/") && !imgError;
-  const isPdf =
-    mimeType === "application/pdf" || mimeType?.includes("pdf") || !isImage;
-  const typeLabel =
-    isPdf && !isImage
-      ? "PDF"
-      : isImage
-        ? mimeType?.split("/")[1]?.toUpperCase() ?? "IMAGE"
-        : mimeType
-          ? "FILE"
-          : null;
-  const displayName =
-    invoice.source_filename ??
-    invoice.invoice_number ??
-    invoice.name_of_company ??
-    `Invoice #${invoice.id}`;
-
-  return (
-    <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span
-          className="truncate font-mono text-[12px] text-foreground"
-          title={displayName}
-        >
-          {displayName}
-        </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {typeLabel && (
-            <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              {typeLabel}
-            </span>
-          )}
-          {fileSrc && (
-            <a
-              href={fileSrc}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-            >
-              Open
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-        </div>
-      </div>
-
-      <div className="relative min-h-[420px] flex-1 overflow-hidden bg-muted/30">
-        {!invoice.source_file_id && (
-          <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 px-6 text-center">
-            <FileText className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-[13px] text-muted-foreground">
-              No source file attached to this invoice.
-            </p>
-          </div>
-        )}
-        {fileSrc && isImage && (
-          <div className="h-full min-h-[420px] overflow-auto p-2">
-            <img
-              src={fileSrc}
-              alt={displayName}
-              className="mx-auto h-auto max-w-full object-contain"
-              onError={() => setImgError(true)}
-            />
-          </div>
-        )}
-        {fileSrc && !isImage && (
-          <iframe
-            src={fileSrc}
-            title={displayName}
-            className="h-full min-h-[420px] w-full border-0"
-          />
-        )}
       </div>
     </div>
   );

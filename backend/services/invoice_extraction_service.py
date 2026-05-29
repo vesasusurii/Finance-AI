@@ -31,7 +31,7 @@ from services.ocr.pdf_reader import (
     pdf_page_count,
     render_pdf_pages_as_images,
 )
-from utils.file_storage import save_upload
+from utils.file_storage import save_bytes
 
 logger = get_logger(__name__)
 
@@ -98,7 +98,12 @@ class InvoiceExtractionService:
             )
 
         await file.seek(0)
-        storage_path = await save_upload(file, "invoices")
+        storage_path, file_size = await save_bytes(
+            content,
+            user_id=user.user_id,
+            filename=file.filename,
+            mime_type=mime,
+        )
         upload_row = await self._upload_repo.create(
             file_kind="invoice",
             filename=file.filename,
@@ -106,6 +111,7 @@ class InvoiceExtractionService:
             mime_type=mime,
             user_id=user.user_id,
             processing_status="processing",
+            file_size=file_size,
         )
         logger.debug(
             "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
