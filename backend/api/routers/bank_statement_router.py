@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from api.controllers.bank_statement_controller import BankStatementController
 from api.dependencies import get_bank_statement_controller, get_current_user
@@ -32,6 +32,15 @@ async def list_bank_statements(
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
     return await ctrl.list_statements(user, page, limit)
+
+
+@router.delete("/bank-statements/{statement_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bank_statement(
+    statement_id: int,
+    user: UserContext = Depends(get_current_user),
+    ctrl: BankStatementController = Depends(get_bank_statement_controller),
+):
+    await ctrl.delete_statement(statement_id, user)
 
 
 @router.get("/bank-transactions", response_model=BankTransactionListResponse)

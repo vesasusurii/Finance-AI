@@ -76,20 +76,6 @@ class BankStatementController:
         limit: int,
     ) -> BankTransactionListResponse:
         owner = upload_owner_user_id(user)
-        if bank_statement_id is not None and owner is not None:
-            stmt = await self._statement_repo.get(
-                bank_statement_id,
-                owner_user_id=owner,
-            )
-            if stmt is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": "bank_statement_not_found",
-                        "message": "Bank statement not found.",
-                    },
-                )
-
         items, total = await self._transaction_repo.list_transactions(
             bank_statement_id,
             reconciliation_status,
@@ -100,3 +86,9 @@ class BankStatementController:
         return BankTransactionListResponse(
             items=items, total=total, page=page, limit=limit
         )
+
+    @debug_trace
+    async def delete_statement(
+        self, statement_id: int, user: UserContext
+    ) -> None:
+        await self._service.delete_statement(statement_id, user)

@@ -2,7 +2,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 /** Access token lifetime on server (minutes) — keep refresh interval below this. */
 const ACCESS_TOKEN_MINUTES = Number(
-  import.meta.env.VITE_JWT_ACCESS_EXPIRE_MINUTES ?? "1",
+  import.meta.env.VITE_JWT_ACCESS_EXPIRE_MINUTES ?? "15",
 );
 const REFRESH_INTERVAL_MS = Math.max(
   15_000,
@@ -22,8 +22,8 @@ export class ApiError extends Error {
 
 let refreshInFlight: Promise<void> | null = null;
 
-/** Raw refresh call — avoids circular import with auth.ts */
-async function refreshAccessToken(): Promise<void> {
+/** Refresh access token using the httpOnly refresh cookie. */
+export async function refreshAccessToken(): Promise<void> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const res = await fetch(`${API_BASE}/api/auth/refresh`, {
@@ -48,6 +48,12 @@ async function refreshAccessToken(): Promise<void> {
   }
   await refreshInFlight;
 }
+
+const AUTH_NO_RETRY_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/refresh",
+  "/api/auth/logout",
+]);
 
 type ApiFetchOptions = RequestInit & {
   /** Internal: skip refresh retry (refresh endpoint itself). */
@@ -77,24 +83,17 @@ export async function apiFetch<T>(
   if (
     res.status === 401 &&
     !_skipAuthRetry &&
-    path !== "/api/auth/login" &&
-    path !== "/api/auth/refresh" &&
-    path !== "/api/auth/logout"
+    !AUTH_NO_RETRY_PATHS.has(path)
   ) {
-    const body = (await res.clone().json().catch(() => ({}))) as {
-      error?: string;
-    };
-    if (body.error === "token_expired" || body.error === "invalid_token") {
-      try {
-        await refreshAccessToken();
-        res = await doFetch();
-      } catch {
-        throw new ApiError(
-          "Session expired. Please sign in again.",
-          401,
-          "session_expired",
-        );
-      }
+    try {
+      await refreshAccessToken();
+      res = await doFetch();
+    } catch {
+      throw new ApiError(
+        "Session expired. Please sign in again.",
+        401,
+        "session_expired",
+      );
     }
   }
 

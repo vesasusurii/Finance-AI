@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     )
 
     jwt_access_expire_minutes: int = Field(
-        default=1, validation_alias="JWT_ACCESS_EXPIRE_MINUTES"
+        default=15, validation_alias="JWT_ACCESS_EXPIRE_MINUTES"
     )
     jwt_refresh_expire_days: int = Field(
         default=7, validation_alias="JWT_REFRESH_EXPIRE_DAYS"

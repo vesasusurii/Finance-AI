@@ -27,6 +27,10 @@ export async function listBankStatements(
   );
 }
 
+export async function deleteBankStatement(id: number): Promise<void> {
+  return apiFetch(`/api/bank-statements/${id}`, { method: "DELETE" });
+}
+
 export async function listBankTransactions(
   filters: BankTransactionFilters = {},
 ): Promise<BankTransactionListResponse> {
