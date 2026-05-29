@@ -2,6 +2,7 @@ from fastapi import HTTPException, UploadFile
 
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
+from core.invoice_access import upload_owner_user_id
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
 from schemas.auth import UserContext
@@ -54,9 +55,13 @@ class BankStatementController:
 
     @debug_trace
     async def list_statements(
-        self, page: int, limit: int
+        self, user: UserContext, page: int, limit: int
     ) -> BankStatementListResponse:
-        items, total = await self._statement_repo.list_statements(page, limit)
+        items, total = await self._statement_repo.list_statements(
+            page,
+            limit,
+            owner_user_id=upload_owner_user_id(user),
+        )
         return BankStatementListResponse(
             items=items, total=total, page=page, limit=limit
         )
@@ -64,13 +69,33 @@ class BankStatementController:
     @debug_trace
     async def list_transactions(
         self,
+        user: UserContext,
         bank_statement_id: int | None,
         reconciliation_status: str | None,
         page: int,
         limit: int,
     ) -> BankTransactionListResponse:
+        owner = upload_owner_user_id(user)
+        if bank_statement_id is not None and owner is not None:
+            stmt = await self._statement_repo.get(
+                bank_statement_id,
+                owner_user_id=owner,
+            )
+            if stmt is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "bank_statement_not_found",
+                        "message": "Bank statement not found.",
+                    },
+                )
+
         items, total = await self._transaction_repo.list_transactions(
-            bank_statement_id, reconciliation_status, page, limit
+            bank_statement_id,
+            reconciliation_status,
+            page,
+            limit,
+            owner_user_id=owner,
         )
         return BankTransactionListResponse(
             items=items, total=total, page=page, limit=limit

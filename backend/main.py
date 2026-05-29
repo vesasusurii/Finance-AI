@@ -15,6 +15,7 @@ from api.routers import (
     admin_user_router,
     auth_router,
     bank_statement_router,
+    document_router,
     export_router,
     health_router,
     invoice_router,
@@ -28,6 +29,7 @@ from db.pool import engine
 from middleware.auth import AuthMiddleware
 from middleware.cors import setup_cors
 from middleware.request_handler import RequestHandlerMiddleware
+from utils.file_storage import bind_http_client
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 setup_debug_logging()
@@ -45,6 +47,13 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.storage_path, "invoices"), exist_ok=True)
     os.makedirs(os.path.join(settings.storage_path, "bank_statements"), exist_ok=True)
     app.state.http_client = httpx.AsyncClient(timeout=30.0)
+    bind_http_client(app.state.http_client)
+    if settings.storage_backend == "supabase":
+        if not settings.supabase_url or not settings.supabase_service_role_key:
+            logger.warning(
+                "STORAGE_BACKEND=supabase but SUPABASE_URL or "
+                "SUPABASE_SERVICE_ROLE_KEY is missing — uploads may fail."
+            )
     app.state.openai_client = (
         AsyncOpenAI(api_key=settings.openai_api_key)
         if settings.openai_api_key
@@ -131,6 +140,7 @@ app.include_router(health_router.router, prefix="/api")
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(admin_user_router.router, prefix="/api")
 app.include_router(invoice_router.router, prefix="/api")
+app.include_router(document_router.router, prefix="/api")
 app.include_router(export_router.router, prefix="/api")
 app.include_router(bank_statement_router.router, prefix="/api")
 app.include_router(reconciliation_router.router, prefix="/api")

@@ -4,6 +4,8 @@ from models.uploaded_file import UploadedFile
 
 
 class UploadRepository:
+    DOCUMENT_KINDS = ("invoice", "document")
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -15,6 +17,7 @@ class UploadRepository:
         mime_type: str | None,
         user_id: int,
         processing_status: str = "pending",
+        file_size: int | None = None,
     ) -> UploadedFile:
         row = UploadedFile(
             original_filename=filename,
@@ -23,6 +26,7 @@ class UploadRepository:
             file_kind=file_kind,
             uploaded_by=user_id,
             processing_status=processing_status,
+            file_size=file_size,
         )
         self._session.add(row)
         await self._session.flush()

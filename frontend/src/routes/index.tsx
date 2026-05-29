@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { Upload, RefreshCw } from "lucide-react";
-import { PageHeader } from "@/components/ui-finance/PageHeader";
-import { Button } from "@/components/ui-finance/Button";
+import { validateClientFile } from "@/api/documents";
 import { InvoiceDetailsDrawer } from "@/components/invoices/InvoiceDetailsDrawer";
 import { ProcessingQueueTable } from "@/components/invoices/ProcessingQueueTable";
+import { PageHeader } from "@/components/ui-finance/PageHeader";
+import { Button } from "@/components/ui-finance/Button";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
 import type { UploadQueueItem } from "@/types/uploadQueue";
 
@@ -26,6 +27,15 @@ export function UploadPage() {
   const onFiles = (files: FileList | null) => {
     if (!files?.length) return;
     setError(null);
+
+    const invalid = Array.from(files)
+      .map((f) => ({ f, err: validateClientFile(f) }))
+      .find((x) => x.err);
+    if (invalid?.err) {
+      setError(invalid.err);
+      return;
+    }
+
     enqueueFiles(files);
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -40,7 +50,7 @@ export function UploadPage() {
       <PageHeader
         eyebrow="Workflow · Step 1"
         title="Upload invoices"
-        description="Upload supplier invoices and scans. OpenAI Vision reads each document and extracts structured data; uncertain rows go to review."
+        description="Upload supplier invoices, scans, and documents. Files are stored under your user folder; PDF and images are processed with OpenAI Vision."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -66,7 +76,7 @@ export function UploadPage() {
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+        accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
         onChange={(e) => onFiles(e.target.files)}
       />
@@ -91,10 +101,10 @@ export function UploadPage() {
           <Upload className="h-5 w-5 text-primary" />
         </div>
         <h3 className="mt-4 text-[15px] font-semibold text-foreground">
-          Drop invoices here to upload
+          Drop files here to upload
         </h3>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          PDF, JPG, PNG · scanned PDFs supported · up to 20 MB each · bulk batches supported
+          PDF, JPG, PNG, DOCX · up to 20 MB each · bulk batches supported
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
           <Button

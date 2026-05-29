@@ -1,8 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.bank_statement import BankStatement
+from models.bank_transaction import BankTransaction
+from models.invoice import Invoice
 from models.review_task import ReviewTask
 from schemas.review import ReviewTaskResponse
 
@@ -58,6 +61,8 @@ class ReviewRepository:
         task_type: str | None,
         page: int,
         limit: int,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[list[ReviewTaskResponse], int]:
         query = select(ReviewTask).where(ReviewTask.status == "open")
         count_q = select(func.count()).select_from(ReviewTask).where(
@@ -66,6 +71,36 @@ class ReviewRepository:
         if task_type:
             query = query.where(ReviewTask.task_type == task_type)
             count_q = count_q.where(ReviewTask.task_type == task_type)
+
+        if owner_user_id is not None:
+            owner_filter = or_(
+                Invoice.uploaded_by == owner_user_id,
+                BankStatement.uploaded_by == owner_user_id,
+            )
+            query = (
+                query.outerjoin(Invoice, ReviewTask.invoice_id == Invoice.id)
+                .outerjoin(
+                    BankTransaction,
+                    ReviewTask.bank_transaction_id == BankTransaction.id,
+                )
+                .outerjoin(
+                    BankStatement,
+                    BankTransaction.bank_statement_id == BankStatement.id,
+                )
+                .where(owner_filter)
+            )
+            count_q = (
+                count_q.outerjoin(Invoice, ReviewTask.invoice_id == Invoice.id)
+                .outerjoin(
+                    BankTransaction,
+                    ReviewTask.bank_transaction_id == BankTransaction.id,
+                )
+                .outerjoin(
+                    BankStatement,
+                    BankTransaction.bank_statement_id == BankStatement.id,
+                )
+                .where(owner_filter)
+            )
 
         total = (await self._session.execute(count_q)).scalar_one()
         offset = (page - 1) * limit

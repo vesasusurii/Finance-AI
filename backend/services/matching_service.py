@@ -36,7 +36,10 @@ class MatchingService:
 
     @debug_trace
     async def run(
-        self, bank_statement_id: int | None = None
+        self,
+        bank_statement_id: int | None = None,
+        *,
+        owner_user_id: int | None = None,
     ) -> ReconciliationSummary:
         now = datetime.now(timezone.utc)
         summary = ReconciliationSummary(
@@ -55,7 +58,10 @@ class MatchingService:
 
         # Re-scan everything not yet fully matched so edits to invoice numbers
         # take effect on later runs (pending + needs_review + partial).
-        transactions = await self._bank_txn_repo.list_unresolved(bank_statement_id)
+        transactions = await self._bank_txn_repo.list_unresolved(
+            bank_statement_id,
+            owner_user_id=owner_user_id,
+        )
         logger.debug(
             "Loaded unresolved transactions: count=%d (%s)",
             len(transactions),
@@ -102,6 +108,7 @@ class MatchingService:
                         llm_extra.get(txn.id, []),
                         summary,
                         now,
+                        owner_user_id=owner_user_id,
                     )
             except Exception as exc:
                 logger.exception(
@@ -128,7 +135,8 @@ class MatchingService:
                     )
 
         summary.unmatched_invoices = await self._invoice_repo.count_by_match_status(
-            "unmatched"
+            "unmatched",
+            owner_user_id=owner_user_id,
         )
 
         log_typed_fields(logger, "Matching run summary", summary)
@@ -142,6 +150,8 @@ class MatchingService:
         from_llm: list[str],
         summary: ReconciliationSummary,
         now: datetime,
+        *,
+        owner_user_id: int | None = None,
     ) -> None:
         log_typed_fields(logger, f"Matching txn id={txn.id}", txn)
         candidates = merge_candidates(regex_only, from_llm)
@@ -198,7 +208,10 @@ class MatchingService:
             if not key:
                 continue
 
-            invoice, ambiguous = await self._invoice_repo.find_by_number(key)
+            invoice, ambiguous = await self._invoice_repo.find_by_number(
+                key,
+                owner_user_id=owner_user_id,
+            )
             if ambiguous:
                 logger.debug(
                     "    invoice lookup for %r: AMBIGUOUS (multiple matches in DB)",

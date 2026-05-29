@@ -2,7 +2,7 @@ import mimetypes
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from api.controllers.invoice_controller import InvoiceController
 from api.dependencies import get_current_user, get_invoice_controller
@@ -99,6 +99,6 @@ async def get_invoice_file(
     invoice_id: int,
     user: UserContext = Depends(get_current_user),
     ctrl: InvoiceController = Depends(get_invoice_controller),
-) -> FileResponse:
+) -> Response:
     """Serve the original uploaded file for an invoice (PDF or image)."""
     return await ctrl.serve_file(invoice_id, user)

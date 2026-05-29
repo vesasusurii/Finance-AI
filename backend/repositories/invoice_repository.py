@@ -212,7 +212,10 @@ class InvoiceRepository:
         return await self.get(invoice_id, owner_user_id=owner_user_id)
 
     async def find_by_number(
-        self, normalized: str
+        self,
+        normalized: str,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[InvoiceResponse | None, bool]:
         """Look up an invoice by its normalized invoice number.
 
@@ -228,12 +231,14 @@ class InvoiceRepository:
         a bank payment against an arbitrary one of several invoices with the
         same number could mark the wrong invoice as paid.
         """
-        result = await self._session.execute(
+        query = (
             select(Invoice)
             .where(Invoice.invoice_number_normalized == normalized)
             .order_by(Invoice.id.asc())
             .limit(2)
         )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
         rows = result.scalars().all()
         if not rows:
             return None, False
@@ -248,17 +253,24 @@ class InvoiceRepository:
         )
         return None, True
 
-    async def list_by_number(self, normalized: str) -> list[InvoiceResponse]:
+    async def list_by_number(
+        self,
+        normalized: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> list[InvoiceResponse]:
         """Return every invoice row whose normalized number equals `normalized`.
 
         Used by the matching pipeline to enumerate duplicates when
         `find_by_number` reports an ambiguous match.
         """
-        result = await self._session.execute(
+        query = (
             select(Invoice)
             .where(Invoice.invoice_number_normalized == normalized)
             .order_by(Invoice.id.asc())
         )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
         return [_to_response(r) for r in result.scalars().all()]
 
     async def update_paid_at_date(self, invoice_id: int, paid_date: date) -> None:
@@ -279,10 +291,16 @@ class InvoiceRepository:
             row.match_status = match_status
             await self._session.flush()
 
-    async def count_by_match_status(self, match_status: str) -> int:
+    async def count_by_match_status(
+        self,
+        match_status: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> int:
         q = select(func.count()).select_from(Invoice).where(
             Invoice.match_status == match_status
         )
+        q = _apply_owner_scope(q, owner_user_id)
         return int((await self._session.execute(q)).scalar_one())
 
     async def get_owned_row(

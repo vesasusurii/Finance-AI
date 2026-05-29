@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Download, Trash2, X } from "lucide-react";
+import { Download, Loader2, Trash2, X } from "lucide-react";
 import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
+import { ExportFiltersPanel } from "@/components/invoices/ExportFiltersPanel";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -12,6 +13,11 @@ import { deleteInvoice } from "@/api/invoices";
 import { downloadPurchaseInvoicesExcel } from "@/api/export";
 import type { Invoice } from "@/types/invoice";
 import {
+  EMPTY_EXPORT_FILTERS,
+  exportFiltersToParams,
+  type PurchaseInvoiceExportFilters,
+} from "@/types/export";
+import {
   formatCurrency,
   formatDate,
   matchStatusLabel,
@@ -21,6 +27,11 @@ import {
 export function DocumentsPage() {
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [search, setSearch] = useState("");
+  const [showExportFilters, setShowExportFilters] = useState(false);
+  const [exportFilters, setExportFilters] =
+    useState<PurchaseInvoiceExportFilters>(EMPTY_EXPORT_FILTERS);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const { items, total, loading, error, reload } = useInvoices({ limit: 100 });
 
   const filtered = useMemo(() => {
@@ -102,6 +113,18 @@ export function DocumentsPage() {
     },
   ];
 
+  async function handleExport() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadPurchaseInvoicesExcel(exportFiltersToParams(exportFilters));
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -111,13 +134,52 @@ export function DocumentsPage() {
         actions={
           <Button
             variant="secondary"
-            icon={<Download className="h-3.5 w-3.5" />}
-            onClick={() => void downloadPurchaseInvoicesExcel()}
+            icon={
+              exporting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )
+            }
+            disabled={exporting}
+            onClick={() => {
+              setShowExportFilters((v) => !v);
+              setExportError(null);
+            }}
           >
-            Export Excel
+            {showExportFilters ? "Hide export filters" : "Export Excel"}
           </Button>
         }
       />
+
+      {exportError && (
+        <p className="mb-4 text-[13px] text-destructive">{exportError}</p>
+      )}
+
+      {showExportFilters && (
+        <div className="mb-4 space-y-3">
+          <ExportFiltersPanel
+            filters={exportFilters}
+            onChange={setExportFilters}
+            onClear={() => setExportFilters(EMPTY_EXPORT_FILTERS)}
+          />
+          <div className="flex justify-end">
+            <Button
+              disabled={exporting}
+              icon={
+                exporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleExport()}
+            >
+              {exporting ? "Exporting…" : "Download filtered Excel"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <p className="mb-4 text-[13px] text-destructive">{error}</p>

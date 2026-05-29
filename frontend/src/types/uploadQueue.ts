@@ -31,12 +31,3 @@ export interface UploadQueueItem {
   logs: ProcessingLogEntry[];
   addedAt: string;
 }
-
-export interface BatchProgressStats {
-  total: number;
-  processing: number;
-  completed: number;
-  failed: number;
-  requiresReview: number;
-  overallProgress: number;
-}

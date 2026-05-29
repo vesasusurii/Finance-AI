@@ -57,7 +57,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await refreshSession();
       if (mounted.current) setUser(me);
-    } catch {
+    } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7520/ingest/7c44f417-cc83-4e33-b21b-766d2400d7f7", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "841234",
+        },
+        body: JSON.stringify({
+          sessionId: "841234",
+          hypothesisId: "E",
+          location: "AuthContext.tsx:refresh",
+          message: "refreshSession failed — user cleared",
+          data: {
+            error: e instanceof Error ? e.message : String(e),
+            clearsUser: true,
+          },
+          timestamp: Date.now(),
+          runId: "pre-fix",
+        }),
+      }).catch(() => {});
+      // #endregion
       if (mounted.current) setUser(null);
     }
   }, []);

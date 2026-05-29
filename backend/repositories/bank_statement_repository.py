@@ -1,8 +1,15 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from models.bank_statement import BankStatement
 from models.uploaded_file import UploadedFile
 from schemas.bank_statement import BankStatementListItem
+
+
+def _apply_owner_scope(query, owner_user_id: int | None):
+    if owner_user_id is not None:
+        return query.where(BankStatement.uploaded_by == owner_user_id)
+    return query
 
 
 class BankStatementRepository:
@@ -27,8 +34,16 @@ class BankStatementRepository:
         await self._session.refresh(row)
         return row
 
-    async def get(self, statement_id: int) -> BankStatement | None:
-        return await self._session.get(BankStatement, statement_id)
+    async def get(
+        self,
+        statement_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> BankStatement | None:
+        query = select(BankStatement).where(BankStatement.id == statement_id)
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
 
     async def update_status(
         self, statement_id: int, status: str, row_count: int | None = None
@@ -41,9 +56,14 @@ class BankStatementRepository:
             await self._session.flush()
 
     async def list_statements(
-        self, page: int, limit: int
+        self,
+        page: int,
+        limit: int,
+        *,
+        owner_user_id: int | None = None,
     ) -> tuple[list[BankStatementListItem], int]:
         count_q = select(func.count()).select_from(BankStatement)
+        count_q = _apply_owner_scope(count_q, owner_user_id)
         total = (await self._session.execute(count_q)).scalar_one()
 
         offset = (page - 1) * limit
@@ -54,6 +74,7 @@ class BankStatementRepository:
             .offset(offset)
             .limit(limit)
         )
+        q = _apply_owner_scope(q, owner_user_id)
         result = await self._session.execute(q)
         items = [
             BankStatementListItem(

@@ -10,7 +10,10 @@ export async function downloadPurchaseInvoicesExcel(
     { credentials: "include" },
   );
   if (!res.ok) {
-    throw new Error("Export failed");
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(body.message ?? "Export failed");
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

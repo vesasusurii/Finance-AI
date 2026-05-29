@@ -31,7 +31,7 @@ async def list_bank_statements(
     user: UserContext = Depends(get_current_user),
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
-    return await ctrl.list_statements(page, limit)
+    return await ctrl.list_statements(user, page, limit)
 
 
 @router.get("/bank-transactions", response_model=BankTransactionListResponse)
@@ -44,5 +44,5 @@ async def list_bank_transactions(
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
     return await ctrl.list_transactions(
-        bank_statement_id, reconciliation_status, page, limit
+        user, bank_statement_id, reconciliation_status, page, limit
     )
