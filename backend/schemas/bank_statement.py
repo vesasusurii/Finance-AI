@@ -15,11 +15,11 @@ class BankTransactionPreview(BaseModel):
 
 class BankStatementUploadResponse(BaseModel):
     bank_statement_id: int
+    statement_date: date
     row_count: int
     processing_status: str
-    # Rows whose date column couldn't be parsed — these can't be matched until
-    # the user backfills the date or re-uploads with a recognised format.
     unparsed_date_rows: int = 0
+    duplicate_rows_skipped: int = 0
     preview: list[BankTransactionPreview]
 
 
@@ -27,6 +27,7 @@ class BankStatementListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    statement_date: date | None
     original_filename: str
     uploaded_at: datetime
     uploaded_by: int

@@ -41,3 +41,9 @@ class UploadRepository:
         if row:
             row.processing_status = status
             await self._session.flush()
+
+    async def delete(self, upload_id: int) -> None:
+        row = await self.get(upload_id)
+        if row:
+            await self._session.delete(row)
+            await self._session.flush()

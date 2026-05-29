@@ -6,10 +6,19 @@ contained either Excel serial numbers or unsupported string formats.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
-from utils.bank_excel_parser import _parse_date, _excel_serial_to_date
+from core.exceptions import ExcelParseError
+from utils.bank_excel_parser import (
+    ParsedBankRow,
+    _parse_date,
+    _excel_serial_to_date,
+    dedupe_parsed_rows,
+    extract_statement_date,
+    statement_id_from_date,
+)
 
 
 # ── Pass-through for native datetime/date objects ─────────────────────────────
@@ -75,3 +84,54 @@ def test_invalid_returns_none(value):
 def test_out_of_range_serial_returns_none():
     # Far-future serial (year > 4000) is almost certainly bad input, not data.
     assert _parse_date(999999) is None
+
+
+def _sample_row(
+    *,
+    txn_date: date | None = date(2026, 2, 25),
+    debited: str | None = "100.00",
+    credited: str | None = None,
+    comment: str = "Invoice 123",
+    txn_type: str | None = "Transfer",
+) -> ParsedBankRow:
+    return ParsedBankRow(
+        transaction_date=txn_date,
+        debited_amount=Decimal(debited) if debited else None,
+        credited_amount=Decimal(credited) if credited else None,
+        transaction_type=txn_type,
+        comment=comment,
+        detected_invoice_numbers=["123"],
+    )
+
+
+def test_dedupe_parsed_rows_removes_duplicates():
+    rows = [
+        _sample_row(),
+        _sample_row(),
+        _sample_row(comment="Different"),
+    ]
+    unique, skipped = dedupe_parsed_rows(rows)
+    assert len(unique) == 2
+    assert skipped == 1
+
+
+def test_extract_statement_date_from_filename():
+    rows = [_sample_row(txn_date=date(2026, 2, 1))]
+    assert extract_statement_date("statement_20260228.xlsx", rows) == date(2026, 2, 28)
+
+
+def test_extract_statement_date_from_transactions_when_filename_has_no_date():
+    rows = [
+        _sample_row(txn_date=date(2026, 2, 10)),
+        _sample_row(txn_date=date(2026, 2, 28)),
+    ]
+    assert extract_statement_date("procredit_export.xlsx", rows) == date(2026, 2, 28)
+
+
+def test_extract_statement_date_raises_when_unknown():
+    with pytest.raises(ExcelParseError):
+        extract_statement_date("export.xlsx", [_sample_row(txn_date=None)])
+
+
+def test_statement_id_from_date():
+    assert statement_id_from_date(date(2026, 2, 28)) == 20260228

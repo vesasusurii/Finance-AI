@@ -187,6 +187,76 @@ def _is_empty_transaction(row: dict[str, Any]) -> bool:
     )
 
 
+def _transaction_dedupe_key(row: ParsedBankRow) -> tuple:
+    return (
+        row.transaction_date,
+        row.debited_amount,
+        row.credited_amount,
+        (row.comment or "").strip().casefold(),
+        (row.transaction_type or "").strip().casefold(),
+    )
+
+
+def dedupe_parsed_rows(rows: list[ParsedBankRow]) -> tuple[list[ParsedBankRow], int]:
+    """Remove duplicate transaction rows within a single statement upload."""
+    seen: set[tuple] = set()
+    unique: list[ParsedBankRow] = []
+    skipped = 0
+    for row in rows:
+        key = _transaction_dedupe_key(row)
+        if key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique, skipped
+
+
+_FILENAME_DATE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(\d{4})(\d{2})(\d{2})"), "%Y%m%d"),
+    (re.compile(r"(\d{4})[-_](\d{2})[-_](\d{2})"), "%Y-%m-%d"),
+    (re.compile(r"(\d{4})[-_](\d{2})(?:[^0-9]|$)"), "%Y-%m"),
+)
+
+
+def extract_statement_date(
+    filename: str,
+    rows: list[ParsedBankRow],
+) -> date:
+    """Derive the statement period date from filename or transaction rows."""
+    name = Path(filename).stem
+    for pattern, fmt in _FILENAME_DATE_PATTERNS:
+        match = pattern.search(name)
+        if not match:
+            continue
+        if fmt == "%Y-%m":
+            year, month = match.group(1), match.group(2)
+            text = f"{year}-{month}-01"
+            try:
+                return datetime.strptime(text, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+        text = match.group(0).replace("_", "-")
+        for parse_fmt in ("%Y%m%d", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text, parse_fmt).date()
+            except ValueError:
+                continue
+
+    txn_dates = [r.transaction_date for r in rows if r.transaction_date is not None]
+    if txn_dates:
+        return max(txn_dates)
+
+    raise ExcelParseError(
+        "Could not determine statement date from the file name or transaction rows."
+    )
+
+
+def statement_id_from_date(statement_date: date) -> int:
+    """Business statement ID shown in the UI (YYYYMMDD)."""
+    return int(statement_date.strftime("%Y%m%d"))
+
+
 def _map_columns(header_row: list[Any]) -> dict[str, int]:
     col_map: dict[str, int] = {}
     for idx, cell in enumerate(header_row):

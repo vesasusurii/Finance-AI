@@ -21,6 +21,7 @@ from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.match_repository import MatchRepository
+from repositories.report_repository import ReportRepository
 from repositories.review_repository import ReviewRepository
 from repositories.upload_repository import UploadRepository
 from repositories.user_repository import UserRepository
@@ -30,6 +31,7 @@ from services.bank_comment_extraction_service import BankCommentExtractionServic
 from services.bank_statement_service import BankStatementService
 from services.document_service import DocumentService
 from services.excel_service import ExcelService
+from services.export_service import ExportService
 from services.invoice_extraction_service import InvoiceExtractionService
 from services.matching_service import MatchingService
 
@@ -139,11 +141,23 @@ async def get_invoice_controller(
     return InvoiceController(extraction, invoice_repo, audit_repo)
 
 
+async def get_report_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> ReportRepository:
+    return ReportRepository(session)
+
+
+async def get_export_service(
+    report_repo: ReportRepository = Depends(get_report_repo),
+) -> ExportService:
+    return ExportService(report_repo)
+
+
 async def get_export_controller(
-    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
     excel: ExcelService = Depends(get_excel_service),
+    export_service: ExportService = Depends(get_export_service),
 ) -> ExportController:
-    return ExportController(invoice_repo, excel)
+    return ExportController(excel, export_service)
 
 
 async def get_bank_statement_repo(

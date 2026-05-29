@@ -66,3 +66,16 @@ export function formatDate(value: string | null): string {
   if (!value) return "—";
   return value.slice(0, 10);
 }
+
+export function formatStatementId(
+  statement: {
+    id?: number;
+    bank_statement_id?: number;
+    statement_date?: string | null;
+  },
+): string {
+  if (statement.statement_date) {
+    return statement.statement_date.replace(/-/g, "");
+  }
+  return String(statement.id ?? statement.bank_statement_id ?? "");
+}

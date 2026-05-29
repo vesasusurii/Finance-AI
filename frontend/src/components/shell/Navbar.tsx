@@ -12,7 +12,7 @@ const financeNav = [
   { to: "/bank-statements", label: "Bank Statements" },
   { to: "/matching", label: "Matching" },
   { to: "/manual-review", label: "Manual Review" },
-  { to: "/exports", label: "Exports" },
+  { to: "/exports", label: "Reports" },
 ];
 
 const adminNav = [

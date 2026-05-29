@@ -65,10 +65,18 @@ class SupabaseStorageBackend(StorageBackend):
     async def delete(self, storage_path: str) -> None:
         url = self._object_url(storage_path)
         resp = await self._client.delete(url, headers=self._headers())
-        if resp.status_code not in (200, 204, 404):
-            raise RuntimeError(
-                f"Storage delete failed ({resp.status_code}): {resp.text[:200]}"
+        if resp.status_code in (200, 204, 404):
+            return
+        # Supabase sometimes returns HTTP 400 with a not_found payload.
+        if resp.status_code == 400 and "not_found" in resp.text.lower():
+            logger.debug(
+                "Supabase storage delete: object already absent at %s",
+                storage_path,
             )
+            return
+        raise RuntimeError(
+            f"Storage delete failed ({resp.status_code}): {resp.text[:200]}"
+        )
 
     async def exists(self, storage_path: str) -> bool:
         url = self._object_url(storage_path)

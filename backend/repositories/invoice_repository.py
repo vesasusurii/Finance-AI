@@ -151,20 +151,6 @@ class InvoiceRepository:
         rows = (await self._session.execute(query)).scalars().all()
         return [_to_response(r) for r in rows], int(total)
 
-    async def list_for_export(
-        self,
-        filters: dict,
-        *,
-        owner_user_id: int | None = None,
-    ) -> list[InvoiceResponse]:
-        items, _ = await self.list_invoices(
-            filters,
-            page=1,
-            limit=10_000,
-            owner_user_id=owner_user_id,
-        )
-        return items
-
     async def update(
         self,
         invoice_id: int,

@@ -9,14 +9,17 @@ export interface BankTransactionPreview {
 
 export interface BankStatementUploadResponse {
   bank_statement_id: number;
+  statement_date: string;
   row_count: number;
   processing_status: string;
   unparsed_date_rows?: number;
+  duplicate_rows_skipped?: number;
   preview: BankTransactionPreview[];
 }
 
 export interface BankStatement {
   id: number;
+  statement_date: string | null;
   original_filename: string;
   uploaded_at: string;
   uploaded_by: number;

@@ -12,16 +12,16 @@ from schemas.bank_statement import (
     BankStatementUploadResponse,
     BankTransactionPreview,
 )
-from utils.bank_excel_parser import parse_bank_statement_excel
-from utils.file_storage import read_bytes, save_bytes
+from utils.bank_excel_parser import (
+    dedupe_parsed_rows,
+    extract_statement_date,
+    parse_bank_statement_excel,
+)
+from utils.file_storage import delete_storage_object, read_bytes, save_bytes
 
 logger = get_logger(__name__)
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".xlsm"}
-ALLOWED_MIME = {
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-}
 
 
 class BankStatementService:
@@ -42,8 +42,10 @@ class BankStatementService:
         filename = file.filename or "statement.xlsx"
         ext = Path(filename).suffix.lower()
         logger.debug(
-            "Bank statement upload start: filename=%r (str) ext=%r (str) user_id=%d (int)",
-            filename, ext, user.user_id,
+            "Bank statement upload start: filename=%r ext=%r user_id=%d",
+            filename,
+            ext,
+            user.user_id,
         )
         if ext not in ALLOWED_EXTENSIONS:
             raise ExcelParseError(
@@ -69,17 +71,19 @@ class BankStatementService:
 
         try:
             data = await read_bytes(storage_path)
-            logger.debug(
-                "Read bank Excel bytes: size=%d (%s)", len(data), type(data).__name__
-            )
             parsed_rows = parse_bank_statement_excel(data, filename)
-            logger.debug(
-                "Parsed bank rows: count=%d (%s)",
-                len(parsed_rows), type(parsed_rows).__name__,
-            )
+            parsed_rows, duplicate_rows_skipped = dedupe_parsed_rows(parsed_rows)
+            if not parsed_rows:
+                raise ExcelParseError(
+                    "No transaction rows found after removing duplicates."
+                )
+            statement_date = extract_statement_date(filename, parsed_rows)
         except ExcelParseError:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise
+        except ValueError as exc:
+            await self._upload_repo.update_status(upload_row.id, "failed")
+            raise ExcelParseError(str(exc)) from exc
         except Exception as exc:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise ExcelParseError(str(exc)) from exc
@@ -96,12 +100,18 @@ class BankStatementService:
             for r in parsed_rows
         ]
 
-        statement = await self._statement_repo.create(
-            source_file_id=upload_row.id,
-            uploaded_by=user.user_id,
-            row_count=len(row_dicts),
-            processing_status="processed",
-        )
+        try:
+            statement = await self._statement_repo.create(
+                source_file_id=upload_row.id,
+                uploaded_by=user.user_id,
+                row_count=len(row_dicts),
+                statement_date=statement_date,
+                processing_status="processed",
+            )
+        except ValueError as exc:
+            await self._upload_repo.update_status(upload_row.id, "failed")
+            raise ExcelParseError(str(exc)) from exc
+
         await self._transaction_repo.create_bulk(statement.id, row_dicts)
         await self._upload_repo.update_status(upload_row.id, "processed")
 
@@ -122,15 +132,52 @@ class BankStatementService:
         )
         if unparsed_date_rows:
             logger.warning(
-                "Bank upload %s: %d/%d rows have unparsable transaction_date "
-                "— matching will skip them with reason=missing_transaction_date",
-                filename, unparsed_date_rows, len(parsed_rows),
+                "Bank upload %s: %d/%d rows have unparsable transaction_date",
+                filename,
+                unparsed_date_rows,
+                len(parsed_rows),
             )
 
         return BankStatementUploadResponse(
             bank_statement_id=statement.id,
+            statement_date=statement_date,
             row_count=len(row_dicts),
             processing_status="processed",
             unparsed_date_rows=unparsed_date_rows,
+            duplicate_rows_skipped=duplicate_rows_skipped,
             preview=preview,
         )
+
+    @debug_trace
+    async def delete_statement(
+        self, statement_id: int, user: UserContext
+    ) -> None:
+        from core.invoice_access import upload_owner_user_id
+
+        owner = upload_owner_user_id(user)
+        row = await self._statement_repo.delete_statement(
+            statement_id,
+            owner_user_id=owner,
+        )
+        if row is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "bank_statement_not_found",
+                    "message": "Bank statement not found.",
+                },
+            )
+
+        upload = await self._upload_repo.get(row.source_file_id)
+        if upload:
+            try:
+                await delete_storage_object(upload.storage_path)
+            except (FileNotFoundError, RuntimeError) as exc:
+                logger.warning(
+                    "Storage cleanup skipped for bank statement upload %s: %s",
+                    upload.id,
+                    exc,
+                )
+            await self._upload_repo.delete(upload.id)

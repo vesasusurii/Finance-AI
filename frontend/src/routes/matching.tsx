@@ -11,53 +11,40 @@ import {
   rejectMatch,
   runReconciliation,
 } from "@/api/reconciliation";
-import { ApiError } from "@/api/client";
+import { ApiError, apiFetch } from "@/api/client";
+import { refreshSession } from "@/api/auth";
 import { listReviewTasks } from "@/api/review";
-import { listBankTransactions } from "@/api/bankStatements";
+import { listBankStatements, listBankTransactions } from "@/api/bankStatements";
 import { useInvoices } from "@/hooks/useInvoices";
 import type { InvoicePaymentMatch, ReconciliationSummary } from "@/types/match";
-import type { BankTransaction } from "@/types/bank";
+import type { BankStatement, BankTransaction } from "@/types/bank";
 import type { ReviewTask } from "@/types/review";
 import type { Invoice } from "@/types/invoice";
 import {
   formatDate,
+  formatStatementId,
   matchStatusLabel,
   reconciliationStatusLabel,
   reviewReasonLabel,
 } from "@/lib/labels";
 
 export function MatchingPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [statementId, setStatementId] = useState(
     () => searchParams.get("bank_statement_id") ?? "",
   );
+  const [statements, setStatements] = useState<BankStatement[]>([]);
 
   useEffect(() => {
     const sid = searchParams.get("bank_statement_id");
-    // #region agent log
-    fetch("http://127.0.0.1:7520/ingest/7c44f417-cc83-4e33-b21b-766d2400d7f7", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "841234",
-      },
-      body: JSON.stringify({
-        sessionId: "841234",
-        hypothesisId: "D",
-        location: "matching.tsx:searchParamsEffect",
-        message: "bank_statement_id param sync",
-        data: {
-          paramValue: sid,
-          currentStatementId: statementId,
-          willClearWhenMissing: false,
-        },
-        timestamp: Date.now(),
-        runId: "pre-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     if (sid) setStatementId(sid);
   }, [searchParams]);
+
+  useEffect(() => {
+    void listBankStatements(1, 100)
+      .then((res) => setStatements(res.items))
+      .catch(() => setStatements([]));
+  }, []);
   const [running, setRunning] = useState(false);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,26 +62,8 @@ export function MatchingPage() {
   const refresh = useCallback(async () => {
     const sid = statementId ? parseInt(statementId, 10) : undefined;
     const filters = Number.isFinite(sid) ? { bank_statement_id: sid } : {};
-    // #region agent log
-    fetch("http://127.0.0.1:7520/ingest/7c44f417-cc83-4e33-b21b-766d2400d7f7", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "841234",
-      },
-      body: JSON.stringify({
-        sessionId: "841234",
-        hypothesisId: "D",
-        location: "matching.tsx:refresh",
-        message: "refresh filters",
-        data: { statementId, parsedSid: sid, filters },
-        timestamp: Date.now(),
-        runId: "pre-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
 
-    const [matchRes, reviewRes, txnRes] = await Promise.all([
+    const [matchRes, reviewRes, txnRes, allTxnRes] = await Promise.all([
       getReconciliationResults({ ...filters, limit: 100 }),
       listReviewTasks({ task_type: "bank_match", limit: 100 }),
       listBankTransactions({
@@ -102,6 +71,7 @@ export function MatchingPage() {
         reconciliation_status: "needs_review",
         limit: 200,
       }),
+      listBankTransactions({ ...filters, limit: 200 }),
     ]);
 
     setMatches(matchRes.items);
@@ -117,10 +87,8 @@ export function MatchingPage() {
       ),
     );
     setUnmatchedTxns(txnRes.items);
-
-    const allTxns = await listBankTransactions({ ...filters, limit: 200 });
     setMultiTxns(
-      allTxns.items.filter((t) => t.detected_invoice_numbers.length > 1),
+      allTxnRes.items.filter((t) => t.detected_invoice_numbers.length > 1),
     );
     await reloadInvoices();
   }, [statementId, reloadInvoices]);
@@ -135,14 +103,20 @@ export function MatchingPage() {
     setRunning(true);
     setError(null);
     try {
+      await refreshSession();
       const sid = statementId ? parseInt(statementId, 10) : undefined;
       const res = await runReconciliation(
         Number.isFinite(sid) ? sid : undefined,
       );
       setSummary(res);
+      await refreshSession();
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Matching failed");
+      if (e instanceof ApiError && e.code === "session_expired") {
+        setError("Session expired. Please sign in again.");
+      } else {
+        setError(e instanceof Error ? e.message : "Matching failed");
+      }
     } finally {
       setRunning(false);
     }
@@ -187,6 +161,24 @@ export function MatchingPage() {
     }
     await refresh();
   };
+
+  const onStatementChange = (value: string) => {
+    setStatementId(value);
+    if (value) {
+      setSearchParams({ bank_statement_id: value });
+    } else {
+      setSearchParams({});
+    }
+  };
+
+  const selectedStatement = statements.find(
+    (s) => String(s.id) === statementId,
+  );
+  const staleStatementFilter =
+    statementId !== "" &&
+    !selectedStatement &&
+    statements.length > 0 &&
+    Number.isFinite(parseInt(statementId, 10));
 
   const matchColumns: Column<InvoicePaymentMatch>[] = [
     {
@@ -301,13 +293,18 @@ export function MatchingPage() {
         description="Match bank transactions to purchase invoices by invoice number in comments."
         actions={
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              placeholder="Statement ID (optional)"
+            <select
               value={statementId}
-              onChange={(e) => setStatementId(e.target.value)}
-              className="h-9 w-36 rounded-md border border-input bg-background px-2 text-[13px]"
-            />
+              onChange={(e) => onStatementChange(e.target.value)}
+              className="h-9 max-w-[220px] rounded-md border border-input bg-background px-2 text-[13px]"
+            >
+              <option value="">All statements</option>
+              {statements.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {formatStatementId(s)} — {s.original_filename}
+                </option>
+              ))}
+            </select>
             <Button
               variant="primary"
               icon={<Play className="h-3.5 w-3.5" />}
@@ -319,6 +316,13 @@ export function MatchingPage() {
           </div>
         }
       />
+
+      {staleStatementFilter && (
+        <p className="text-[13px] text-muted-foreground" role="status">
+          Statement ID {statementId} is no longer available. Choose a statement
+          from the list or clear the filter.
+        </p>
+      )}
 
       {error && (
         <p className="text-[13px] text-destructive" role="alert">

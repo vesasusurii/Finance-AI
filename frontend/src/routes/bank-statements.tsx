@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Upload, FileSpreadsheet } from "lucide-react";
+import { Trash2, Upload, FileSpreadsheet } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import {
+  deleteBankStatement,
   listBankStatements,
   uploadBankStatement,
 } from "@/api/bankStatements";
@@ -17,6 +18,7 @@ import type {
 import {
   formatCurrency,
   formatDate,
+  formatStatementId,
   processingStatusLabel,
 } from "@/lib/labels";
 
@@ -33,6 +35,7 @@ export function BankPage() {
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [statements, setStatements] = useState<BankStatement[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const loadStatements = useCallback(async () => {
     setLoadingList(true);
@@ -80,6 +83,34 @@ export function BankPage() {
   const onFiles = (files: FileList | null) => {
     if (files?.length) void runUpload(files);
   };
+
+  const handleDelete = useCallback(
+    async (statement: BankStatement) => {
+      const label = formatStatementId(statement);
+      if (
+        !window.confirm(
+          `Delete bank statement ${label} (${statement.original_filename})? This cannot be undone.`,
+        )
+      ) {
+        return;
+      }
+      setDeletingId(statement.id);
+      setError(null);
+      try {
+        await deleteBankStatement(statement.id);
+        if (uploadResult?.bank_statement_id === statement.id) {
+          setUploadResult(null);
+          setPreviewRows([]);
+        }
+        await loadStatements();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Delete failed");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [loadStatements, uploadResult?.bank_statement_id],
+  );
 
   const previewColumns: Column<PreviewRow>[] = [
     {
@@ -144,6 +175,13 @@ export function BankPage() {
 
   const statementColumns: Column<BankStatement>[] = [
     {
+      key: "id",
+      header: "Statement ID",
+      cell: (r) => (
+        <span className="font-mono tabular-nums">{formatStatementId(r)}</span>
+      ),
+    },
+    {
       key: "file",
       header: "File",
       cell: (r) => (
@@ -178,12 +216,23 @@ export function BankPage() {
       key: "view",
       header: "",
       cell: (r) => (
-        <Link
-          to={`/bank-transactions?bank_statement_id=${r.id}`}
-          className="text-[12px] font-medium text-primary hover:underline"
-        >
-          View transactions
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            to={`/bank-transactions?bank_statement_id=${r.id}`}
+            className="text-[12px] font-medium text-primary hover:underline"
+          >
+            View transactions
+          </Link>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+            disabled={deletingId === r.id}
+            onClick={() => void handleDelete(r)}
+          >
+            {deletingId === r.id ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -260,8 +309,8 @@ export function BankPage() {
         <section className="space-y-3">
           <p className="text-[13px] text-foreground">
             Imported{" "}
-            <strong>{uploadResult.row_count}</strong> transactions (statement #
-            {uploadResult.bank_statement_id}).{" "}
+            <strong>{uploadResult.row_count}</strong> transactions (statement ID{" "}
+            <strong>{formatStatementId(uploadResult)}</strong>).{" "}
             <Link
               to={`/bank-transactions?bank_statement_id=${uploadResult.bank_statement_id}`}
               className="text-primary hover:underline"
@@ -281,6 +330,15 @@ export function BankPage() {
               Run matching for this statement
             </button>
           </p>
+          {uploadResult.duplicate_rows_skipped ? (
+            <p className="text-[13px] text-muted-foreground">
+              Skipped{" "}
+              <strong>{uploadResult.duplicate_rows_skipped}</strong> duplicate
+              row
+              {uploadResult.duplicate_rows_skipped === 1 ? "" : "s"} during
+              import.
+            </p>
+          ) : null}
           {uploadResult.unparsed_date_rows ? (
             <div
               className="rounded-md border border-amber-400/40 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
