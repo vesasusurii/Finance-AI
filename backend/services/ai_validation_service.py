@@ -10,10 +10,12 @@ from schemas.invoice import ExtractionResult
 from utils.normalization import is_tax_or_client_id, normalize_invoice_number
 
 logger = get_logger(__name__)
-# At or above this score: skip the immediate OCR Review queue by default.
-# Below this score: route to OCR Review as "needs_review".
-CONFIDENCE_AUTO_OK = 0.95
-CONFIDENCE_REVIEW = 0.70
+# At or above this score with no review flags: auto-save (pending).
+CONFIDENCE_AUTO_OK = 0.90
+# Below this score: require manual review before finalising.
+CONFIDENCE_MANUAL_REVIEW = 0.70
+# Per-field score below this is treated as "unclear".
+FIELD_UNCLEAR_THRESHOLD = 0.75
 
 # Default when no contact person is extracted from the document
 DEFAULT_CLIENT_RELATED = "Borek Solutions"
@@ -67,14 +69,51 @@ class AIValidationService:
     @debug_trace
     def determine_review_status(self, result: ExtractionResult) -> str:
         """
-        Route invoices to the OCR Review queue by confidence.
+        Route invoices by confidence tier (DOCS/8).
 
-        - Score >= 95% and no review flags -> pending (no immediate review).
-        - Score < 95%, or needs_review, or missing critical fields -> needs_review.
+        - Score >= 90% and no review flags -> pending (auto-save).
+        - Score 70–89%, or flagged with score >= 70% -> needs_review.
+        - Score < 70% -> manual_review (do not finalise until reviewed).
         """
-        if result.confidence_score >= CONFIDENCE_AUTO_OK and not result.needs_review:
+        score = result.confidence_score
+        if score >= CONFIDENCE_AUTO_OK and not result.needs_review:
             return "pending"
+        if score < CONFIDENCE_MANUAL_REVIEW:
+            return "manual_review"
         return "needs_review"
+
+    @debug_trace
+    def collect_review_reasons(self, data: dict) -> list[str]:
+        """Structured reasons for Needs Review / Manual Review UI."""
+        reasons: list[str] = []
+        if not data.get("invoice_number"):
+            reasons.append("missing_invoice_number")
+        if data.get("amount") is None:
+            reasons.append("missing_amount")
+        if not data.get("name_of_company"):
+            reasons.append("missing_company_name")
+        elif self._field_unclear(data.get("field_confidences") or {}, "name_of_company"):
+            reasons.append("unclear_company_name")
+        if not data.get("invoice_date"):
+            reasons.append("missing_invoice_date")
+        elif self._field_unclear(data.get("field_confidences") or {}, "invoice_date"):
+            reasons.append("unclear_invoice_date")
+
+        score = float(data.get("confidence_score") or 0.0)
+        if score < CONFIDENCE_MANUAL_REVIEW:
+            reasons.append("low_ai_confidence")
+
+        return reasons
+
+    @staticmethod
+    def _field_unclear(field_confidences: dict, field: str) -> bool:
+        raw = field_confidences.get(field)
+        if raw is None:
+            return False
+        try:
+            return float(raw) < FIELD_UNCLEAR_THRESHOLD
+        except (TypeError, ValueError):
+            return False
 
     @debug_trace
     def validate_required_fields(self, result: ExtractionResult) -> list[str]:
@@ -173,6 +212,7 @@ class AIValidationService:
         data["needs_review"] = bool(data.get("needs_review"))
         data = self._apply_utility_document_rules(data)
         data = self._apply_review_rules(data)
+        data["review_reasons"] = self.collect_review_reasons(data)
 
         inv = data.get("invoice_number")
         if inv:
@@ -682,11 +722,10 @@ class AIValidationService:
 
         if missing:
             data["needs_review"] = True
-            if score >= CONFIDENCE_AUTO_OK:
-                data["confidence_score"] = CONFIDENCE_AUTO_OK
+            data["confidence_score"] = min(score, CONFIDENCE_MANUAL_REVIEW - 0.01)
         elif score < CONFIDENCE_AUTO_OK:
             data["needs_review"] = True
-        elif score < CONFIDENCE_REVIEW:
+        elif score < CONFIDENCE_MANUAL_REVIEW:
             data["needs_review"] = True
 
         # Zero/negative amounts are invalid

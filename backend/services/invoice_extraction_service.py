@@ -1,14 +1,16 @@
 """
 Invoice extraction — OpenAI Vision only (DOCS/8).
 
-All invoice files (PDF, JPEG, JPG, PNG) are rasterised when needed and sent to
-OpenAI Vision. No pdfplumber, Document AI, Tesseract, or other OCR providers.
+PDFs are rasterised page-by-page for OpenAI Vision. JPEG, JPG, and PNG uploads
+are sent directly to Vision without conversion. No pdfplumber, Document AI,
+Tesseract, or other OCR providers.
 """
 
 import base64
 import json
-import mimetypes
+from dataclasses import dataclass
 
+from core.document_types import resolve_document_mime
 from fastapi import UploadFile
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
@@ -33,7 +35,8 @@ from services.ocr.pdf_reader import (
     pdf_page_count,
     render_pdf_pages_as_images,
 )
-from utils.file_storage import save_bytes
+from utils.file_storage import resolve_upload_bytes, save_bytes
+from utils.openai_chat import chat_completion_kwargs
 
 logger = get_logger(__name__)
 
@@ -53,6 +56,15 @@ VISION_RETRY_CONFIDENCE = 0.82
 
 # Max tokens for extraction response — enough for full JSON, prevents truncation
 _MAX_TOKENS = 2400  # Raised from 1800 — multi-page docs with multiple IBANs need headroom
+
+
+@dataclass(frozen=True)
+class PreparedUpload:
+    upload_id: int
+    stored_filename: str
+    mime: str
+    storage_path: str
+    file_size: int
 
 
 class InvoiceExtractionService:
@@ -80,8 +92,19 @@ class InvoiceExtractionService:
     async def process_upload(
         self, file: UploadFile, user: UserContext
     ) -> UploadItemResponse:
+        """Synchronous upload + extraction (legacy invoice upload endpoint)."""
+        prepared = await self.prepare_upload(file, user)
+        if isinstance(prepared, UploadItemResponse):
+            return prepared
+        return await self.complete_upload(prepared.upload_id, user.user_id)
+
+    @debug_trace
+    async def prepare_upload(
+        self, file: UploadFile, user: UserContext
+    ) -> PreparedUpload | UploadItemResponse:
+        """Store file bytes and create an upload row — fast path for async OCR."""
         logger.debug(
-            "OCR upload start: filename=%r content_type=%r user_id=%r",
+            "OCR upload prepare: filename=%r content_type=%r user_id=%r",
             file.filename, file.content_type, user.user_id,
         )
         if not file.filename:
@@ -94,7 +117,7 @@ class InvoiceExtractionService:
         if len(content) > MAX_FILE_BYTES:
             raise ExtractionError("File exceeds 20 MB limit")
 
-        mime = file.content_type or mimetypes.guess_type(file.filename)[0] or ""
+        mime = resolve_document_mime(file.filename or "", file.content_type)
         logger.debug("Resolved mime: %r (%s)", mime, type(mime).__name__)
         if mime not in ALLOWED_MIME:
             raise ExtractionError(
@@ -120,16 +143,17 @@ class InvoiceExtractionService:
                 existing_upload, file.filename, mime, content, user
             )
 
-        await file.seek(0)
+        stored_filename = file.filename or "upload"
+
         storage_path, file_size = await save_bytes(
             content,
             user_id=user.user_id,
-            filename=file.filename,
+            filename=stored_filename,
             mime_type=mime,
         )
         upload_row = await self._upload_repo.create(
             file_kind="invoice",
-            filename=file.filename,
+            filename=stored_filename,
             storage_path=storage_path,
             mime_type=mime,
             user_id=user.user_id,
@@ -140,10 +164,38 @@ class InvoiceExtractionService:
         logger.debug(
             "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
         )
+        return PreparedUpload(
+            upload_id=upload_row.id,
+            stored_filename=stored_filename,
+            mime=mime,
+            storage_path=storage_path,
+            file_size=file_size,
+        )
+
+    @debug_trace
+    async def complete_upload(
+        self, upload_id: int, user_id: int
+    ) -> UploadItemResponse:
+        """Run OCR and persist invoice data for a prepared upload row."""
+        upload_row = await self._upload_repo.get(upload_id)
+        if upload_row is None:
+            raise ExtractionError(f"Upload {upload_id} not found")
+
+        content = await resolve_upload_bytes(
+            upload_row.storage_path,
+            original_filename=upload_row.original_filename,
+        )
+        if content is None:
+            raise ExtractionError("Stored upload file could not be read")
+
+        mime = upload_row.mime_type or "application/pdf"
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        stored_filename = upload_row.original_filename
 
         try:
             result, model_used, meta = await self._extract(
-                file.filename, mime, content
+                stored_filename, mime, content
             )
             log_typed_fields(logger, "OCR raw extraction", result)
             logger.debug("OCR meta: %r model_used=%r", meta, model_used)
@@ -167,14 +219,14 @@ class InvoiceExtractionService:
             )
 
             invoice = await self._invoice_repo.create(
-                result, upload_row.id, review_status, uploaded_by=user.user_id
+                result, upload_row.id, review_status, uploaded_by=user_id
             )
             logger.debug(
                 "Invoice persisted: id=%d (%s)", invoice.id, type(invoice).__name__
             )
 
             await self._audit_repo.log(
-                user.user_id,
+                user_id,
                 "invoice_extracted",
                 "invoice",
                 invoice.id,
@@ -189,12 +241,12 @@ class InvoiceExtractionService:
             await self._upload_repo.update_status(upload_row.id, "processed")
             return UploadItemResponse(
                 upload_id=upload_row.id,
-                original_filename=file.filename,
+                original_filename=stored_filename,
                 processing_status="processed",
                 invoice_id=invoice.id,
             )
         except Exception as exc:
-            logger.exception("Extraction failed for %s", file.filename)
+            logger.exception("Extraction failed for upload_id=%d", upload_id)
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise ExtractionError(str(exc)) from exc
 
@@ -707,11 +759,14 @@ class InvoiceExtractionService:
             try:
                 return await self._openai.chat.completions.create(
                     model=model,
-                    temperature=0,
-                    max_tokens=_MAX_TOKENS,
-                    response_format={"type": "json_object"},
                     timeout=timeout,
                     messages=messages,
+                    **chat_completion_kwargs(
+                        model,
+                        max_output_tokens=_MAX_TOKENS,
+                        temperature=0,
+                        response_format={"type": "json_object"},
+                    ),
                 )
             except RateLimitError as exc:
                 last_exc = exc

@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
+from config import settings
 from fastapi import HTTPException
-
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.invoice_access import invoice_owner_user_id
 from schemas.auth import UserContext
@@ -16,6 +17,14 @@ from services.bank_comment_extraction_service import (
     BankCommentExtractionService,
     merge_candidates,
 )
+from utils.batch_payment_matching import (
+    REASON_BATCH_AMOUNT_SUGGESTED,
+    REASON_BATCH_INCOMPLETE,
+    find_invoice_amount_combination,
+    no_candidates_reason,
+    normalize_supplier_key,
+    reconcile_batch_status,
+)
 from utils.invoice_number_parser import extract_invoice_numbers, needs_llm_fallback
 from utils.normalization import normalize_invoice_number
 
@@ -23,6 +32,14 @@ logger = get_logger(__name__)
 
 
 class MatchingService:
+    """
+    Match bank transactions to invoices.
+
+    - Regex + optional LLM extraction from bank comments.
+    - One transaction may pay multiple invoices when several numbers are present.
+    - Amount-combination suggestions when numbers are absent but debit matches
+      a sum of unpaid invoices (same supplier, date window) — human approval required.
+    """
     def __init__(
         self,
         invoice_repo: InvoiceRepository,
@@ -167,11 +184,19 @@ class MatchingService:
         await self._bank_txn_repo.save_detected_numbers(txn.id, candidates)
 
         if not candidates:
-            if not await self._review_repo.has_open_bank_task(
-                txn.id, "no_invoice_numbers_detected"
+            if txn.transaction_date and await self._try_batch_amount_suggestion(
+                txn, summary, owner_user_id=owner_user_id
             ):
+                summary.unmatched_transactions += 1
+                await self._bank_txn_repo.update_reconciliation_status(
+                    txn.id, "needs_review"
+                )
+                return
+
+            reason = no_candidates_reason(txn.comment)
+            if not await self._review_repo.has_open_bank_task(txn.id, reason):
                 await self._review_repo.create_bank_unmatched(
-                    txn.id, "", "no_invoice_numbers_detected"
+                    txn.id, "", reason
                 )
                 summary.review_tasks_created += 1
             summary.unmatched_transactions += 1
@@ -196,17 +221,22 @@ class MatchingService:
 
         matched_any = False
         matched_count = 0
+        not_in_db_count = 0
+        ambiguous_count = 0
         matched_numbers: list[str] = []
         # Dedupe by invoice_id within the same txn so two candidates that
         # resolve to the same invoice can't trip the (invoice_id, txn_id)
         # unique constraint via two create() calls in one run.
         matched_invoice_ids: set[int] = set()
+        candidate_keys: list[str] = []
         for raw in candidates:
             key = normalize_invoice_number(raw) or raw
+            if key and key not in candidate_keys:
+                candidate_keys.append(key)
+
+        for key in candidate_keys:
             logger.debug(
-                "    candidate raw=%r (%s) -> normalized key=%r (%s)",
-                raw,
-                type(raw).__name__,
+                "    candidate key=%r (%s)",
                 key,
                 type(key).__name__,
             )
@@ -218,6 +248,7 @@ class MatchingService:
                 owner_user_id=owner_user_id,
             )
             if ambiguous:
+                ambiguous_count += 1
                 logger.debug(
                     "    invoice lookup for %r: AMBIGUOUS (multiple matches in DB)",
                     key,
@@ -229,6 +260,15 @@ class MatchingService:
                         txn.id, key, "duplicate_invoice_in_db"
                     )
                     summary.review_tasks_created += 1
+                dupes = await self._invoice_repo.list_by_number(
+                    key, owner_user_id=owner_user_id
+                )
+                for dup in dupes:
+                    await self._invoice_repo.flag_for_review(
+                        dup.id,
+                        "multiple_matches",
+                        match_status="needs_review",
+                    )
                 continue
 
             logger.debug(
@@ -264,7 +304,11 @@ class MatchingService:
                     invoice_id=invoice.id,
                     bank_transaction_id=txn.id,
                     invoice_number=key,
-                    match_type="invoice_number",
+                    match_type=(
+                        "batch_invoice_number"
+                        if len(candidate_keys) > 1
+                        else "invoice_number"
+                    ),
                     match_confidence=1.0,
                     paid_at_date=txn.transaction_date,
                     status="matched",
@@ -292,6 +336,7 @@ class MatchingService:
                 matched_numbers.append(key)
                 matched_invoice_ids.add(invoice.id)
             else:
+                not_in_db_count += 1
                 if not await self._review_repo.has_open_bank_task(
                     txn.id, "no_invoice_in_db", invoice_number=key
                 ):
@@ -312,15 +357,32 @@ class MatchingService:
             )
 
         if matched_any:
-            status = (
-                "partial"
-                if matched_count < len(candidates)
-                else "matched"
+            status, batch_reason = reconcile_batch_status(
+                candidate_count=len(candidate_keys),
+                matched_invoice_count=len(matched_invoice_ids),
+                not_in_db_count=not_in_db_count,
+                ambiguous_count=ambiguous_count,
             )
+            if batch_reason == REASON_BATCH_INCOMPLETE:
+                if not await self._review_repo.has_open_bank_task(
+                    txn.id, REASON_BATCH_INCOMPLETE
+                ):
+                    await self._review_repo.create_bank_unmatched(
+                        txn.id, "", REASON_BATCH_INCOMPLETE
+                    )
+                    summary.review_tasks_created += 1
+                for invoice_id in matched_invoice_ids:
+                    await self._invoice_repo.flag_for_review(
+                        invoice_id,
+                        REASON_BATCH_INCOMPLETE,
+                    )
             await self._bank_txn_repo.update_reconciliation_status(
                 txn.id, status
             )
         else:
+            await self._try_batch_amount_suggestion(
+                txn, summary, owner_user_id=owner_user_id
+            )
             summary.unmatched_transactions += 1
             await self._bank_txn_repo.update_reconciliation_status(
                 txn.id, "needs_review"
@@ -434,7 +496,9 @@ class MatchingService:
                 },
             )
 
-        before_paid = {"paid_at_date": str(invoice.paid_at_date) if invoice.paid_at_date else None}
+        before_paid = {
+            "paid_at_date": str(invoice.paid_at_date) if invoice.paid_at_date else None
+        }
         await self._invoice_repo.update_paid_at_date(invoice_id, paid_date)
         await self._invoice_repo.update_match_status(invoice_id, "matched")
         await self._audit_repo.log(
@@ -474,3 +538,107 @@ class MatchingService:
             bank_transaction_id=bank_transaction_id,
             review_task_id=review_task_id,
         )
+
+    async def _try_batch_amount_suggestion(
+        self,
+        txn,
+        summary: ReconciliationSummary,
+        *,
+        owner_user_id: int | None,
+    ) -> bool:
+        """Suggest invoices whose amounts sum to the debit — requires human approval."""
+        if not settings.batch_amount_matching_enabled:
+            return False
+        if txn.debited_amount is None or txn.transaction_date is None:
+            return False
+
+        debit = Decimal(str(txn.debited_amount))
+        if debit <= 0:
+            return False
+
+        if await self._review_repo.has_open_bank_task(
+            txn.id, REASON_BATCH_AMOUNT_SUGGESTED
+        ):
+            return True
+
+        window = settings.batch_amount_date_window_days
+        date_from = txn.transaction_date - timedelta(days=window)
+
+        rows = await self._invoice_repo.list_unpaid_for_amount_matching(
+            owner_user_id=owner_user_id,
+            invoice_date_from=date_from,
+            invoice_date_to=txn.transaction_date,
+        )
+        if not rows:
+            return False
+
+        tolerance = Decimal(str(settings.match_amount_tolerance_eur))
+        by_supplier: dict[str, list[tuple[int, Decimal, str]]] = {}
+        for row in rows:
+            supplier = normalize_supplier_key(row.name_of_company) or "__unknown__"
+            by_supplier.setdefault(supplier, []).append(
+                (
+                    row.id,
+                    Decimal(str(row.amount)),
+                    row.invoice_number or str(row.id),
+                )
+            )
+
+        best_ids: list[int] | None = None
+        best_supplier = ""
+        for supplier, group in by_supplier.items():
+            combo = find_invoice_amount_combination(group, debit, tolerance)
+            if combo and (best_ids is None or len(combo) < len(best_ids)):
+                best_ids = combo
+                best_supplier = supplier
+
+        if not best_ids:
+            return False
+
+        invoice_details: list[dict] = []
+        for inv_id in best_ids:
+            inv = await self._invoice_repo.get(inv_id, owner_user_id=owner_user_id)
+            if inv is None:
+                continue
+            if await self._match_repo.exists(inv_id, txn.id):
+                continue
+            await self._match_repo.create(
+                invoice_id=inv_id,
+                bank_transaction_id=txn.id,
+                invoice_number=inv.invoice_number or str(inv_id),
+                match_type="batch_amount",
+                match_confidence=0.95,
+                paid_at_date=txn.transaction_date,
+                status="suggested",
+            )
+            invoice_details.append(
+                {
+                    "invoice_id": inv_id,
+                    "invoice_number": inv.invoice_number,
+                }
+            )
+
+        if not invoice_details:
+            return False
+
+        await self._review_repo.create_bank_unmatched(
+            txn.id,
+            "",
+            REASON_BATCH_AMOUNT_SUGGESTED,
+            payload={
+                "invoice_ids": [d["invoice_id"] for d in invoice_details],
+                "invoices": invoice_details,
+                "debited_amount": str(debit),
+                "supplier": (
+                    best_supplier if best_supplier != "__unknown__" else None
+                ),
+            },
+        )
+        summary.review_tasks_created += 1
+        logger.debug(
+            "    batch amount suggestion: txn_id=%d invoices=%s debit=%s",
+            txn.id,
+            [d["invoice_id"] for d in invoice_details],
+            debit,
+        )
+        return True

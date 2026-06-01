@@ -45,6 +45,7 @@ class ExtractionResult(BaseModel):
     needs_review: bool = False
     # Per-field confidence scores, e.g. {"name_of_company": 0.95, "amount": 0.72}
     field_confidences: dict[str, float] | None = None
+    review_reasons: list[str] = Field(default_factory=list)
 
 
 class InvoiceUpdate(BaseModel):
@@ -93,6 +94,7 @@ class InvoiceResponse(BaseModel):
     category: str | None
     extraction_confidence: Decimal | None
     field_confidences: dict | None
+    review_reasons: list[str] | None = None
     review_status: str
     match_status: str
     uploaded_by: int

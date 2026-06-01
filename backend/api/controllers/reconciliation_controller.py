@@ -134,6 +134,11 @@ class ReconciliationController:
                 status_code=500,
                 detail={"error": "approve_failed", "message": "Could not approve match."},
             )
+        if row.status == "suggested":
+            await self._invoice_repo.update_paid_at_date(
+                row.invoice_id, row.paid_at_date
+            )
+            await self._invoice_repo.update_match_status(row.invoice_id, "matched")
         await self._audit_repo.log(
             user.user_id,
             "match_approved",
@@ -163,8 +168,23 @@ class ReconciliationController:
             owner_user_id=owner,
         )
         await self._match_repo.reject(body.match_id)
+        if row.status == "suggested":
+            await self._audit_repo.log(
+                user.user_id,
+                "match_rejected",
+                "invoice_payment_match",
+                body.match_id,
+                {"status": "suggested"},
+                {"status": "rejected", "reason": body.reason},
+            )
+            return MatchActionResponse(match_id=body.match_id, status="rejected")
         await self._invoice_repo.clear_paid_at_date(row.invoice_id)
         await self._invoice_repo.update_match_status(row.invoice_id, "needs_review")
+        await self._invoice_repo.flag_for_review(
+            row.invoice_id,
+            "bank_match_failed",
+            match_status="needs_review",
+        )
         await self._audit_repo.log(
             user.user_id,
             "match_rejected",

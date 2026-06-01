@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.audit_log import AuditLog
@@ -71,6 +71,21 @@ class UserRepository:
         await self._session.flush()
         await self._session.refresh(user)
         return user
+
+    async def update_role(self, user: User, role: str) -> User:
+        user.role = role
+        await self._session.flush()
+        await self._session.refresh(user)
+        return user
+
+    async def count_admins(self, *, exclude_user_id: int | None = None) -> int:
+        q = select(func.count()).select_from(User).where(
+            User.role == "admin",
+            User.is_active.is_(True),
+        )
+        if exclude_user_id is not None:
+            q = q.where(User.id != exclude_user_id)
+        return int((await self._session.execute(q)).scalar_one())
 
     async def set_email_verification_code(
         self,

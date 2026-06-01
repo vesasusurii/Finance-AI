@@ -13,7 +13,7 @@ import {
   updateInvoice,
 } from "@/api/invoices";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
-import { formatDate } from "@/lib/labels";
+import { formatDate, reviewReasonLabel } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
 const CATEGORIES = [
@@ -213,12 +213,30 @@ export function InvoiceDocumentEditor({
             </span>
             {overall != null && <OverallConfidence value={overall} />}
           </div>
+          {invoice.review_status === "manual_review" && (
+            <span className="rounded-full bg-destructive/15 px-2.5 py-0.5 text-[11px] font-medium text-destructive">
+              Manual review required
+            </span>
+          )}
           {invoice.review_status === "needs_review" && (
             <span className="rounded-full bg-warning/15 px-2.5 py-0.5 text-[11px] font-medium text-warning">
-              Requires immediate review
+              Needs review
             </span>
           )}
         </div>
+
+        {(invoice.review_reasons ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b border-border px-5 py-2">
+            {(invoice.review_reasons ?? []).map((reason) => (
+              <span
+                key={reason}
+                className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground"
+              >
+                {reviewReasonLabel(reason)}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="space-y-3">

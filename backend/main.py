@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 
 from api.routers import (
+    admin_audit_router,
+    admin_router,
     admin_user_router,
     auth_router,
     bank_statement_router,
@@ -139,6 +141,8 @@ setup_cors(app)
 app.include_router(health_router.router, prefix="/api")
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(admin_user_router.router, prefix="/api")
+app.include_router(admin_router.router, prefix="/api")
+app.include_router(admin_audit_router.router, prefix="/api")
 app.include_router(invoice_router.router, prefix="/api")
 app.include_router(document_router.router, prefix="/api")
 app.include_router(export_router.router, prefix="/api")

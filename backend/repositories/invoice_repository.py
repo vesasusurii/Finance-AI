@@ -69,6 +69,7 @@ class InvoiceRepository:
             category=data.category,
             extraction_confidence=Decimal(str(round(data.confidence_score, 4))),
             field_confidences=data.field_confidences,
+            review_reasons=data.review_reasons or None,
             review_status=review_status,
             match_status="unmatched",
             source_file_id=source_file_id,
@@ -77,6 +78,15 @@ class InvoiceRepository:
         self._session.add(row)
         await self._session.flush()
         return await self.get(row.id, owner_user_id=None)  # type: ignore[return-value]
+
+    async def get_id_by_source_file(self, source_file_id: int) -> int | None:
+        query = (
+            select(Invoice.id)
+            .where(Invoice.source_file_id == source_file_id)
+            .limit(1)
+        )
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get(
         self,
@@ -197,6 +207,7 @@ class InvoiceRepository:
         if not row:
             return None
         row.review_status = "approved"
+        row.review_reasons = None
         await self._session.flush()
         return await self.get(invoice_id, owner_user_id=owner_user_id)
 
@@ -279,6 +290,57 @@ class InvoiceRepository:
         if row:
             row.match_status = match_status
             await self._session.flush()
+
+    async def flag_for_review(
+        self,
+        invoice_id: int,
+        reason: str,
+        *,
+        match_status: str | None = None,
+        force_manual: bool = False,
+    ) -> None:
+        row = await self._session.get(Invoice, invoice_id)
+        if row is None:
+            return
+        reasons = list(row.review_reasons or [])
+        if reason not in reasons:
+            reasons.append(reason)
+        row.review_reasons = reasons
+        if match_status:
+            row.match_status = match_status
+        if row.review_status == "approved":
+            row.review_status = "manual_review" if force_manual else "needs_review"
+        elif force_manual:
+            row.review_status = "manual_review"
+        elif row.review_status == "pending":
+            row.review_status = "needs_review"
+        await self._session.flush()
+
+    async def list_unpaid_for_amount_matching(
+        self,
+        *,
+        owner_user_id: int | None = None,
+        invoice_date_from: date | None = None,
+        invoice_date_to: date | None = None,
+        limit: int = 200,
+    ) -> list[Invoice]:
+        q = (
+            select(Invoice)
+            .where(
+                Invoice.paid_at_date.is_(None),
+                Invoice.amount.is_not(None),
+                Invoice.amount > 0,
+            )
+            .order_by(Invoice.invoice_date.desc().nullslast(), Invoice.id.desc())
+            .limit(limit)
+        )
+        if invoice_date_from is not None:
+            q = q.where(Invoice.invoice_date >= invoice_date_from)
+        if invoice_date_to is not None:
+            q = q.where(Invoice.invoice_date <= invoice_date_to)
+        q = _apply_owner_scope(q, owner_user_id)
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
 
     async def count_by_match_status(
         self,

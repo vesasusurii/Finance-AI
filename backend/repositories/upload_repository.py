@@ -40,6 +40,9 @@ class UploadRepository:
     async def get(self, upload_id: int) -> UploadedFile | None:
         return await self._session.get(UploadedFile, upload_id)
 
+    async def commit(self) -> None:
+        await self._session.commit()
+
     async def update_status(self, upload_id: int, status: str) -> None:
         row = await self.get(upload_id)
         if row:

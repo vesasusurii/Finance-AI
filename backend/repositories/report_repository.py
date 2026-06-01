@@ -42,9 +42,14 @@ class ReportRepository:
             func.count(case((Invoice.match_status == "unmatched", 1))).label(
                 "unmatched"
             ),
-            func.count(case((Invoice.review_status == "needs_review", 1))).label(
-                "needs_review"
-            ),
+            func.count(
+                case(
+                    (
+                        Invoice.review_status.in_(("needs_review", "manual_review")),
+                        1,
+                    )
+                )
+            ).label("needs_review"),
         ).where(*filters)
 
         row = (await self._session.execute(base)).one()

@@ -1,6 +1,6 @@
 /** Phase 3: Documents drawer Save sends partial Invoice (writable fields only). */
 
-export type ReviewStatus = "pending" | "approved" | "needs_review";
+export type ReviewStatus = "pending" | "approved" | "needs_review" | "manual_review";
 export type MatchStatus = "unmatched" | "matched" | "needs_review";
 
 export interface Invoice {
@@ -22,6 +22,8 @@ export interface Invoice {
   extraction_confidence: number | null;
   /** Per-field confidence map, e.g. { name_of_company: 0.95, amount: 0.72 } */
   field_confidences: Record<string, number> | null;
+  /** Why this invoice needs human review (extraction or matching). */
+  review_reasons: string[] | null;
   review_status: ReviewStatus;
   match_status: MatchStatus;
   uploaded_by: number;

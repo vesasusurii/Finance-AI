@@ -78,6 +78,16 @@ class Settings(BaseSettings):
         default=2, validation_alias="BANK_COMMENT_LLM_MAX_RETRIES"
     )
 
+    match_amount_tolerance_eur: float = Field(
+        default=0.02, validation_alias="MATCH_AMOUNT_TOLERANCE_EUR"
+    )
+    batch_amount_matching_enabled: bool = Field(
+        default=True, validation_alias="BATCH_AMOUNT_MATCHING_ENABLED"
+    )
+    batch_amount_date_window_days: int = Field(
+        default=90, validation_alias="BATCH_AMOUNT_DATE_WINDOW_DAYS"
+    )
+
     jwt_access_expire_minutes: int = Field(
         default=15, validation_alias="JWT_ACCESS_EXPIRE_MINUTES"
     )
