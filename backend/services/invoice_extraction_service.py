@@ -10,6 +10,8 @@ import base64
 import json
 from dataclasses import dataclass
 
+from sqlalchemy.exc import IntegrityError
+
 from core.document_types import resolve_document_mime
 from fastapi import UploadFile
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
@@ -125,23 +127,11 @@ class InvoiceExtractionService:
             )
 
         content_hash = sha256_hex(content)
-        duplicate = await self._handle_duplicate_upload(
-            content_hash, file.filename, user
+        existing = await self._handle_duplicate_upload(
+            content_hash, file.filename, mime, user
         )
-        if duplicate is not None:
-            return duplicate
-
-        existing_upload, existing_invoice, _ = (
-            await self._upload_repo.find_invoice_upload_by_hash(content_hash)
-        )
-        if (
-            existing_upload is not None
-            and existing_invoice is None
-            and existing_upload.processing_status == "failed"
-        ):
-            return await self._reprocess_failed_upload(
-                existing_upload, file.filename, mime, content, user
-            )
+        if existing is not None:
+            return existing
 
         stored_filename = file.filename or "upload"
 
@@ -151,16 +141,31 @@ class InvoiceExtractionService:
             filename=stored_filename,
             mime_type=mime,
         )
-        upload_row = await self._upload_repo.create(
-            file_kind="invoice",
-            filename=stored_filename,
-            storage_path=storage_path,
-            mime_type=mime,
-            user_id=user.user_id,
-            processing_status="processing",
-            file_size=file_size,
-            content_sha256=content_hash,
-        )
+        try:
+            upload_row = await self._upload_repo.create(
+                file_kind="invoice",
+                filename=stored_filename,
+                storage_path=storage_path,
+                mime_type=mime,
+                user_id=user.user_id,
+                processing_status="processing",
+                file_size=file_size,
+                content_sha256=content_hash,
+            )
+        except IntegrityError:
+            logger.warning(
+                "Duplicate content_sha256 on insert for %r — resolving existing row",
+                stored_filename,
+            )
+            await self._upload_repo.rollback()
+            existing = await self._handle_duplicate_upload(
+                content_hash, stored_filename, mime, user
+            )
+            if existing is not None:
+                return existing
+            raise ExtractionError(
+                "This file was already uploaded. Check your documents list."
+            ) from None
         logger.debug(
             "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
         )
@@ -250,13 +255,26 @@ class InvoiceExtractionService:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise ExtractionError(str(exc)) from exc
 
+    def _prepared_from_row(self, upload_row, mime: str) -> PreparedUpload:
+        resolved_mime = mime or upload_row.mime_type or "application/pdf"
+        if resolved_mime == "image/jpg":
+            resolved_mime = "image/jpeg"
+        return PreparedUpload(
+            upload_id=upload_row.id,
+            stored_filename=upload_row.original_filename,
+            mime=resolved_mime,
+            storage_path=upload_row.storage_path,
+            file_size=int(upload_row.file_size or 0),
+        )
+
     async def _handle_duplicate_upload(
         self,
         content_hash: str,
         filename: str,
+        mime: str,
         user: UserContext,
-    ) -> UploadItemResponse | None:
-        """If this file was uploaded before, link the user to the existing invoice."""
+    ) -> UploadItemResponse | PreparedUpload | None:
+        """If this file was uploaded before, link or reuse the existing upload row."""
         upload_row, invoice_row, owner_user = (
             await self._upload_repo.find_invoice_upload_by_hash(content_hash)
         )
@@ -301,16 +319,30 @@ class InvoiceExtractionService:
                 original_uploader_email=owner_email,
             )
 
-        if upload_row.processing_status == "processing":
+        status = upload_row.processing_status
+        if status in ("processing", "pending"):
+            if upload_row.uploaded_by == user.user_id:
+                return UploadItemResponse(
+                    upload_id=upload_row.id,
+                    original_filename=filename,
+                    processing_status="processing",
+                    message=(
+                        "This file is already being processed. "
+                        "Check the upload queue for progress."
+                    ),
+                )
             raise ExtractionError(
-                "This file is already being processed. Please wait a moment and "
-                "check your documents list instead of uploading again."
+                "This file is already being processed by another user. "
+                "Wait for them to finish or ask them to share the invoice."
             )
 
-        if upload_row.processing_status == "failed":
-            return None
+        if status in ("failed", "processed"):
+            await self._upload_repo.update_status(upload_row.id, "processing")
+            return self._prepared_from_row(upload_row, mime)
 
-        return None
+        raise ExtractionError(
+            "This file was already uploaded. Check your documents list."
+        )
 
     async def _reprocess_failed_upload(
         self,

@@ -43,6 +43,9 @@ class UploadRepository:
     async def commit(self) -> None:
         await self._session.commit()
 
+    async def rollback(self) -> None:
+        await self._session.rollback()
+
     async def update_status(self, upload_id: int, status: str) -> None:
         row = await self.get(upload_id)
         if row:

@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from core.debug_logger import get_logger
 from db.pool import async_session
 from repositories.audit_repository import AuditRepository
+from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
 from services.ai_validation_service import AIValidationService
@@ -69,6 +70,7 @@ async def _run_invoice_extraction(
         extraction = InvoiceExtractionService(
             UploadRepository(session),
             InvoiceRepository(session),
+            InvoiceAccessRepository(session),
             AuditRepository(session),
             AIValidationService(),
             openai_client,
