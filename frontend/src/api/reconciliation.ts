@@ -30,6 +30,23 @@ export async function getReconciliationResults(filters: {
   );
 }
 
+export async function manualMatch(body: {
+  invoice_id: number;
+  bank_transaction_id: number;
+  review_task_id?: number;
+}): Promise<{
+  match_id: number;
+  status: string;
+  invoice_id: number;
+  bank_transaction_id: number;
+  review_task_id: number | null;
+}> {
+  return apiFetch("/api/reconciliation/manual-match", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function approveMatch(matchId: number): Promise<{
   match_id: number;
   status: string;

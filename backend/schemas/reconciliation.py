@@ -37,6 +37,20 @@ class MatchListResponse(BaseModel):
     limit: int
 
 
+class ManualMatchRequest(BaseModel):
+    invoice_id: int = Field(..., ge=1)
+    bank_transaction_id: int = Field(..., ge=1)
+    review_task_id: int | None = Field(default=None, ge=1)
+
+
+class ManualMatchResponse(BaseModel):
+    match_id: int
+    status: str
+    invoice_id: int
+    bank_transaction_id: int
+    review_task_id: int | None = None
+
+
 class ApproveMatchRequest(BaseModel):
     match_id: int = Field(..., ge=1)
 

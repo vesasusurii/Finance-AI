@@ -5,6 +5,8 @@ from api.dependencies import get_current_user, get_reconciliation_controller
 from schemas.auth import UserContext
 from schemas.reconciliation import (
     ApproveMatchRequest,
+    ManualMatchRequest,
+    ManualMatchResponse,
     MatchActionResponse,
     MatchListResponse,
     ReconciliationRunRequest,
@@ -35,6 +37,15 @@ async def reconciliation_results(
     ctrl: ReconciliationController = Depends(get_reconciliation_controller),
 ):
     return await ctrl.results(user, status, bank_statement_id, page, limit)
+
+
+@router.post("/manual-match", response_model=ManualMatchResponse)
+async def manual_match(
+    body: ManualMatchRequest,
+    user: UserContext = Depends(get_current_user),
+    ctrl: ReconciliationController = Depends(get_reconciliation_controller),
+):
+    return await ctrl.manual_match(body, user)
 
 
 @router.post("/approve-match", response_model=MatchActionResponse)

@@ -16,8 +16,10 @@ from config import settings
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.exceptions import ExtractionError
 from repositories.audit_repository import AuditRepository
+from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
+from utils.content_hash import sha256_hex
 from schemas.auth import UserContext
 from schemas.invoice import ExtractionResult, UploadItemResponse
 from services.ai_validation_service import AIValidationService
@@ -58,12 +60,14 @@ class InvoiceExtractionService:
         self,
         upload_repo: UploadRepository,
         invoice_repo: InvoiceRepository,
+        invoice_access_repo: InvoiceAccessRepository,
         audit_repo: AuditRepository,
         ai_validation: AIValidationService,
         openai_client: AsyncOpenAI | None,
     ) -> None:
         self._upload_repo = upload_repo
         self._invoice_repo = invoice_repo
+        self._invoice_access_repo = invoice_access_repo
         self._audit_repo = audit_repo
         self._ai_validation = ai_validation
         self._openai = openai_client
@@ -97,6 +101,25 @@ class InvoiceExtractionService:
                 f"Unsupported file type: {mime}. Supported: PDF, JPEG, JPG, PNG."
             )
 
+        content_hash = sha256_hex(content)
+        duplicate = await self._handle_duplicate_upload(
+            content_hash, file.filename, user
+        )
+        if duplicate is not None:
+            return duplicate
+
+        existing_upload, existing_invoice, _ = (
+            await self._upload_repo.find_invoice_upload_by_hash(content_hash)
+        )
+        if (
+            existing_upload is not None
+            and existing_invoice is None
+            and existing_upload.processing_status == "failed"
+        ):
+            return await self._reprocess_failed_upload(
+                existing_upload, file.filename, mime, content, user
+            )
+
         await file.seek(0)
         storage_path, file_size = await save_bytes(
             content,
@@ -112,6 +135,7 @@ class InvoiceExtractionService:
             user_id=user.user_id,
             processing_status="processing",
             file_size=file_size,
+            content_sha256=content_hash,
         )
         logger.debug(
             "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
@@ -171,6 +195,118 @@ class InvoiceExtractionService:
             )
         except Exception as exc:
             logger.exception("Extraction failed for %s", file.filename)
+            await self._upload_repo.update_status(upload_row.id, "failed")
+            raise ExtractionError(str(exc)) from exc
+
+    async def _handle_duplicate_upload(
+        self,
+        content_hash: str,
+        filename: str,
+        user: UserContext,
+    ) -> UploadItemResponse | None:
+        """If this file was uploaded before, link the user to the existing invoice."""
+        upload_row, invoice_row, owner_user = (
+            await self._upload_repo.find_invoice_upload_by_hash(content_hash)
+        )
+        if upload_row is None:
+            return None
+
+        if invoice_row is not None:
+            owner_email = owner_user.email if owner_user else "another user"
+            if invoice_row.uploaded_by != user.user_id:
+                await self._invoice_access_repo.grant(
+                    invoice_row.id,
+                    user.user_id,
+                    grant_reason="duplicate_upload",
+                )
+            await self._audit_repo.log(
+                user.user_id,
+                "invoice_linked_duplicate",
+                "invoice",
+                invoice_row.id,
+                None,
+                {
+                    "content_sha256": content_hash,
+                    "original_uploader_id": invoice_row.uploaded_by,
+                    "original_uploader_email": owner_email,
+                },
+            )
+            message = (
+                f"This invoice was first uploaded by {owner_email}. "
+                "It is now available in your documents list."
+            )
+            if invoice_row.uploaded_by == user.user_id:
+                message = (
+                    f"You already uploaded this file (as {owner_email}). "
+                    "Open the existing invoice in your documents list."
+                )
+            return UploadItemResponse(
+                upload_id=upload_row.id,
+                original_filename=filename,
+                processing_status="linked",
+                invoice_id=invoice_row.id,
+                message=message,
+                original_uploader_email=owner_email,
+            )
+
+        if upload_row.processing_status == "processing":
+            raise ExtractionError(
+                "This file is already being processed. Please wait a moment and "
+                "check your documents list instead of uploading again."
+            )
+
+        if upload_row.processing_status == "failed":
+            return None
+
+        return None
+
+    async def _reprocess_failed_upload(
+        self,
+        upload_row,
+        filename: str,
+        mime: str,
+        content: bytes,
+        user: UserContext,
+    ) -> UploadItemResponse:
+        """Retry OCR on a failed upload row (same file hash, no invoice yet)."""
+        await self._upload_repo.update_status(upload_row.id, "processing")
+        try:
+            result, model_used, meta = await self._extract(filename, mime, content)
+            result = self._ai_validation.sanitize_and_validate(result)
+            missing = self._ai_validation.validate_required_fields(result)
+            if missing:
+                result.needs_review = True
+                result.confidence_score = min(result.confidence_score, 0.69)
+            review_status = self._ai_validation.determine_review_status(result)
+            invoice = await self._invoice_repo.create(
+                result,
+                upload_row.id,
+                review_status,
+                uploaded_by=user.user_id,
+            )
+            await self._audit_repo.log(
+                user.user_id,
+                "invoice_extracted",
+                "invoice",
+                invoice.id,
+                None,
+                {
+                    **result.model_dump(),
+                    "provider": EXTRACTION_PROVIDER,
+                    "model": model_used,
+                    "reprocessed_upload_id": upload_row.id,
+                    **meta,
+                },
+            )
+            await self._upload_repo.update_status(upload_row.id, "processed")
+            return UploadItemResponse(
+                upload_id=upload_row.id,
+                original_filename=filename,
+                processing_status="processed",
+                invoice_id=invoice.id,
+            )
+        except Exception as exc:
+            logger.exception("Re-extraction failed for %s", filename)
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise ExtractionError(str(exc)) from exc
 

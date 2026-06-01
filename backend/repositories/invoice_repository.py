@@ -10,6 +10,7 @@ from core.debug_logger import get_logger
 from models.invoice import Invoice
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
 from sqlalchemy.orm import joinedload
+from core.invoice_access import apply_invoice_visibility, user_may_delete_invoice
 from utils.normalization import normalize_invoice_number
 
 logger = get_logger(__name__)
@@ -38,9 +39,7 @@ def _to_response(row: Invoice) -> InvoiceResponse:
 
 
 def _apply_owner_scope(query, owner_user_id: int | None):
-    if owner_user_id is not None:
-        return query.where(Invoice.uploaded_by == owner_user_id)
-    return query
+    return apply_invoice_visibility(query, owner_user_id)
 
 
 class InvoiceRepository:
@@ -179,6 +178,10 @@ class InvoiceRepository:
     ) -> bool:
         row = await self._get_row(invoice_id, owner_user_id=owner_user_id)
         if not row:
+            return False
+        if owner_user_id is not None and not user_may_delete_invoice(
+            row.uploaded_by, owner_user_id
+        ):
             return False
         await self._session.delete(row)
         await self._session.flush()

@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.invoice_access import invoice_visible_to_user_clause
 from models.bank_statement import BankStatement
 from models.bank_transaction import BankTransaction
 from models.invoice import Invoice
@@ -92,12 +93,13 @@ class MatchRepository:
         txn_joined = False
 
         if owner_user_id is not None:
+            visible = invoice_visible_to_user_clause(owner_user_id)
             query = query.join(
                 Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
-            ).where(Invoice.uploaded_by == owner_user_id)
+            ).where(visible)
             count_q = count_q.join(
                 Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
-            ).where(Invoice.uploaded_by == owner_user_id)
+            ).where(visible)
             query = query.join(
                 BankTransaction,
                 InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
@@ -154,3 +156,36 @@ class MatchRepository:
         )
         row_id = (await self._session.execute(q)).scalar_one_or_none()
         return row_id is not None
+
+    async def get_pair(
+        self, invoice_id: int, bank_transaction_id: int
+    ) -> InvoicePaymentMatch | None:
+        q = select(InvoicePaymentMatch).where(
+            InvoicePaymentMatch.invoice_id == invoice_id,
+            InvoicePaymentMatch.bank_transaction_id == bank_transaction_id,
+        )
+        return (await self._session.execute(q)).scalar_one_or_none()
+
+    async def active_for_invoice(
+        self, invoice_id: int, *, exclude_bank_transaction_id: int | None = None
+    ) -> InvoicePaymentMatch | None:
+        q = select(InvoicePaymentMatch).where(
+            InvoicePaymentMatch.invoice_id == invoice_id,
+            InvoicePaymentMatch.status.in_(("matched", "approved")),
+        )
+        if exclude_bank_transaction_id is not None:
+            q = q.where(
+                InvoicePaymentMatch.bank_transaction_id != exclude_bank_transaction_id
+            )
+        return (await self._session.execute(q)).scalar_one_or_none()
+
+    async def active_for_transaction(
+        self, bank_transaction_id: int, *, exclude_invoice_id: int | None = None
+    ) -> InvoicePaymentMatch | None:
+        q = select(InvoicePaymentMatch).where(
+            InvoicePaymentMatch.bank_transaction_id == bank_transaction_id,
+            InvoicePaymentMatch.status.in_(("matched", "approved")),
+        )
+        if exclude_invoice_id is not None:
+            q = q.where(InvoicePaymentMatch.invoice_id != exclude_invoice_id)
+        return (await self._session.execute(q)).scalar_one_or_none()

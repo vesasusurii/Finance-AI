@@ -18,6 +18,7 @@ class UploadedFile(Base):
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     file_kind: Mapped[str] = mapped_column(String(50), nullable=False)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(

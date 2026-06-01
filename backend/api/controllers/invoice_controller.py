@@ -6,8 +6,9 @@ from fastapi.responses import FileResponse, Response
 
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExtractionError
-from core.invoice_access import invoice_owner_user_id
+from core.invoice_access import invoice_owner_user_id, user_may_delete_invoice
 from repositories.audit_repository import AuditRepository
+from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import InvoiceRepository
 from schemas.auth import UserContext
 from schemas.invoice import (
@@ -29,10 +30,12 @@ class InvoiceController:
         self,
         extraction_service: InvoiceExtractionService,
         invoice_repo: InvoiceRepository,
+        invoice_access_repo: InvoiceAccessRepository,
         audit_repo: AuditRepository,
     ) -> None:
         self._extraction = extraction_service
         self._invoice_repo = invoice_repo
+        self._invoice_access_repo = invoice_access_repo
         self._audit_repo = audit_repo
 
     @debug_trace
@@ -145,10 +148,9 @@ class InvoiceController:
 
     @debug_trace
     async def delete(self, invoice_id: int, user: UserContext) -> None:
-        if not await self._invoice_repo.delete(
-            invoice_id,
-            owner_user_id=invoice_owner_user_id(user),
-        ):
+        owner = invoice_owner_user_id(user)
+        invoice = await self._invoice_repo.get(invoice_id, owner_user_id=owner)
+        if not invoice:
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -156,6 +158,48 @@ class InvoiceController:
                     "message": "Invoice not found.",
                 },
             )
+
+        if user_may_delete_invoice(invoice.uploaded_by, owner):
+            if not await self._invoice_repo.delete(
+                invoice_id, owner_user_id=owner
+            ):
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "invoice_not_found",
+                        "message": "Invoice not found.",
+                    },
+                )
+            await self._audit_repo.log(
+                user.user_id,
+                "invoice_deleted",
+                "invoice",
+                invoice_id,
+                invoice.model_dump(mode="json"),
+                None,
+            )
+            return
+
+        if owner is not None and await self._invoice_access_repo.revoke(
+            invoice_id, owner
+        ):
+            await self._audit_repo.log(
+                user.user_id,
+                "invoice_access_revoked",
+                "invoice",
+                invoice_id,
+                None,
+                {"reason": "user_removed_shared_invoice"},
+            )
+            return
+
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "invoice_not_found",
+                "message": "Invoice not found.",
+            },
+        )
 
     @debug_trace
     async def approve(

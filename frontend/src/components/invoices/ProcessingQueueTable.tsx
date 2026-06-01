@@ -101,6 +101,8 @@ export function ProcessingQueueTable({
                 <td className="px-4 py-3">
                   {item.error ? (
                     <span className="text-[12px] text-destructive">{item.error}</span>
+                  ) : item.infoMessage ? (
+                    <span className="text-[12px] text-primary">{item.infoMessage}</span>
                   ) : (
                     <span className="text-[12px] text-muted-foreground">—</span>
                   )}

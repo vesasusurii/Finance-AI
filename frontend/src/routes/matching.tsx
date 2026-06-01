@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Play, Check, X } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
@@ -366,6 +366,16 @@ export function MatchingPage() {
       <Section
         title="Needs review"
         count={reviewTasks.length}
+        action={
+          reviewTasks.length > 0 ? (
+            <Link
+              to="/manual-review"
+              className="text-[12px] font-medium text-primary hover:underline"
+            >
+              Open in Manual Review
+            </Link>
+          ) : undefined
+        }
       >
         {reviewTasks.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">No open review tasks.</p>
@@ -389,6 +399,12 @@ export function MatchingPage() {
                       {t.payload.invoice_number as string}
                     </span>
                   ) : null}
+                  <Link
+                    to={`/manual-review?task=${t.id}`}
+                    className="ml-auto text-[12px] text-primary hover:underline"
+                  >
+                    Review
+                  </Link>
                 </div>
               </li>
             ))}
@@ -410,18 +426,23 @@ export function MatchingPage() {
 function Section({
   title,
   count,
+  action,
   children,
 }: {
   title: string;
   count: number;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section>
-      <h2 className="mb-3 text-[14px] font-semibold text-foreground">
-        {title}{" "}
-        <span className="font-normal text-muted-foreground">({count})</span>
-      </h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-[14px] font-semibold text-foreground">
+          {title}{" "}
+          <span className="font-normal text-muted-foreground">({count})</span>
+        </h2>
+        {action}
+      </div>
       {children}
     </section>
   );

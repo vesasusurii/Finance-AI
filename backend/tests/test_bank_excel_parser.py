@@ -50,6 +50,9 @@ def test_date_passthrough():
         ("2026-02-25 12:30:45", date(2026, 2, 25)),
         ("2026-02-25T12:30:45", date(2026, 2, 25)),    # ISO 8601
         ("25.02.2026 Mo", date(2026, 2, 25)),          # trailing weekday — falls back to head-split
+        ("'26.02.2026", date(2026, 2, 26)),           # Excel text-date leading apostrophe
+        ("26,02,2026", date(2026, 2, 26)),             # comma separators
+        ("46078", date(2026, 2, 25)),                  # serial as text (General column)
     ],
 )
 def test_string_formats(value, expected):

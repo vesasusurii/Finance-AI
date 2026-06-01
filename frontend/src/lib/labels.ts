@@ -30,6 +30,8 @@ export function reconciliationStatusLabel(status: string): string {
 
 export function reviewReasonLabel(reason: string): string {
   const map: Record<string, string> = {
+    low_confidence: "Low extraction confidence",
+    missing_fields: "Missing required fields",
     no_invoice_in_db: "Invoice not in DB",
     duplicate_invoice_in_db: "Duplicate invoice in DB",
     no_invoice_numbers_detected: "No invoice # detected",

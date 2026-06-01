@@ -1,3 +1,6 @@
+import type { BankTransaction } from "./bank";
+import type { Invoice } from "./invoice";
+
 export interface ReviewTask {
   id: number;
   task_type: string;
@@ -8,6 +11,8 @@ export interface ReviewTask {
   payload: Record<string, unknown> | null;
   created_at: string;
   resolved_at: string | null;
+  invoice?: Invoice | null;
+  bank_transaction?: BankTransaction | null;
 }
 
 export interface ReviewTaskListResponse {
@@ -15,4 +20,14 @@ export interface ReviewTaskListResponse {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface ReviewDecisionRequest {
+  reason?: string | null;
+}
+
+export interface ReviewTaskDecisionResponse {
+  review_task_id: number;
+  status: string;
+  resolved_at: string;
 }

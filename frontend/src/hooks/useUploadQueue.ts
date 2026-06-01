@@ -173,10 +173,12 @@ export function useUploadQueue() {
           invoice?.review_status,
         );
 
+        const isLinked = result.upload_status === "linked";
         const detailError =
           result.error ??
           getInvoiceError ??
           (result.upload_status === "failed" ? "Processing failed" : null);
+        const infoMessage = isLinked ? result.message ?? null : null;
 
         patchItem(item.id, {
           status:
@@ -184,21 +186,23 @@ export function useUploadQueue() {
               ? "requires_review"
               : finalStatus,
           progress: 100,
-          stageLabel:
-            getInvoiceError && result.upload_status === "processed"
+          stageLabel: isLinked
+            ? "Already in system"
+            : getInvoiceError && result.upload_status === "processed"
               ? STAGE_LABELS.requires_review
               : stageLabel,
           uploadId: result.document_id || undefined,
           invoiceId: result.invoice_id ?? null,
           confidence: invoice?.extraction_confidence ?? null,
           error: detailError,
+          infoMessage,
           invoice,
         });
 
         appendLog(
           item.id,
           finalStatus,
-          detailError ?? stageLabel,
+          infoMessage ?? detailError ?? stageLabel,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Upload failed";

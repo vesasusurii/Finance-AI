@@ -19,6 +19,7 @@ from middleware.auth import get_current_user as _get_user_from_request
 from repositories.audit_repository import AuditRepository
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
+from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import InvoiceRepository
 from repositories.match_repository import MatchRepository
 from repositories.report_repository import ReportRepository
@@ -34,6 +35,7 @@ from services.excel_service import ExcelService
 from services.export_service import ExportService
 from services.invoice_extraction_service import InvoiceExtractionService
 from services.matching_service import MatchingService
+from services.review_service import ReviewService
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -95,6 +97,12 @@ async def get_invoice_repo(
     return InvoiceRepository(session)
 
 
+async def get_invoice_access_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> InvoiceAccessRepository:
+    return InvoiceAccessRepository(session)
+
+
 async def get_audit_repo(
     session: AsyncSession = Depends(get_db_session),
 ) -> AuditRepository:
@@ -112,12 +120,18 @@ def get_excel_service() -> ExcelService:
 async def get_invoice_extraction_service(
     upload_repo: UploadRepository = Depends(get_upload_repo),
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    invoice_access_repo: InvoiceAccessRepository = Depends(get_invoice_access_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
     ai_validation: AIValidationService = Depends(get_ai_validation_service),
     openai_client: AsyncOpenAI = Depends(get_openai_client),
 ) -> InvoiceExtractionService:
     return InvoiceExtractionService(
-        upload_repo, invoice_repo, audit_repo, ai_validation, openai_client
+        upload_repo,
+        invoice_repo,
+        invoice_access_repo,
+        audit_repo,
+        ai_validation,
+        openai_client,
     )
 
 
@@ -136,9 +150,12 @@ async def get_user_controller(
 async def get_invoice_controller(
     extraction: InvoiceExtractionService = Depends(get_invoice_extraction_service),
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    invoice_access_repo: InvoiceAccessRepository = Depends(get_invoice_access_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> InvoiceController:
-    return InvoiceController(extraction, invoice_repo, audit_repo)
+    return InvoiceController(
+        extraction, invoice_repo, invoice_access_repo, audit_repo
+    )
 
 
 async def get_report_repo(
@@ -267,7 +284,16 @@ async def get_document_controller(
     return DocumentController(service)
 
 
-async def get_review_controller(
+async def get_review_service(
     review_repo: ReviewRepository = Depends(get_review_repo),
+    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    bank_txn_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> ReviewService:
+    return ReviewService(review_repo, invoice_repo, bank_txn_repo, audit_repo)
+
+
+async def get_review_controller(
+    review_service: ReviewService = Depends(get_review_service),
 ) -> ReviewController:
-    return ReviewController(review_repo)
+    return ReviewController(review_service)

@@ -9,6 +9,8 @@ class DocumentUploadItemResponse(BaseModel):
     file_size: int | None = None
     invoice_id: int | None = None
     error: str | None = None
+    message: str | None = None
+    original_uploader_email: str | None = None
 
 
 class DocumentUploadResponse(BaseModel):

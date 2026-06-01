@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
+from core.invoice_access import invoice_owner_user_id
+from schemas.auth import UserContext
+from schemas.reconciliation import ManualMatchResponse
 from repositories.audit_repository import AuditRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
 from repositories.invoice_repository import InvoiceRepository
@@ -320,3 +325,152 @@ class MatchingService:
             await self._bank_txn_repo.update_reconciliation_status(
                 txn.id, "needs_review"
             )
+
+    @debug_trace
+    async def manual_match(
+        self,
+        invoice_id: int,
+        bank_transaction_id: int,
+        user: UserContext,
+        review_task_id: int | None = None,
+    ) -> ManualMatchResponse:
+        owner = invoice_owner_user_id(user)
+        invoice = await self._invoice_repo.get(invoice_id, owner_user_id=owner)
+        if not invoice:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "invoice_not_found",
+                    "message": "Invoice not found.",
+                },
+            )
+
+        txn = await self._bank_txn_repo.get(bank_transaction_id)
+        if not txn:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "bank_transaction_not_found",
+                    "message": "Bank transaction not found.",
+                },
+            )
+
+        if not txn.transaction_date:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "missing_transaction_date",
+                    "message": "Bank transaction has no date; cannot set paid date.",
+                },
+            )
+
+        other_invoice_match = await self._match_repo.active_for_transaction(
+            bank_transaction_id, exclude_invoice_id=invoice_id
+        )
+        if other_invoice_match:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "transaction_already_matched",
+                    "message": "This bank line is already matched to another invoice.",
+                },
+            )
+
+        other_txn_match = await self._match_repo.active_for_invoice(
+            invoice_id, exclude_bank_transaction_id=bank_transaction_id
+        )
+        if other_txn_match:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "invoice_already_matched",
+                    "message": "This invoice is already matched to another bank line.",
+                },
+            )
+
+        invoice_number = (invoice.invoice_number or "").strip() or "MANUAL"
+        paid_date = txn.transaction_date
+        now = datetime.now(timezone.utc)
+
+        existing = await self._match_repo.get_pair(invoice_id, bank_transaction_id)
+        if existing:
+            if existing.status == "rejected":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "match_rejected",
+                        "message": "A rejected match exists for this pair; resolve on the matching screen.",
+                    },
+                )
+            match_id = existing.id
+            if existing.status == "matched":
+                approved = await self._match_repo.approve(existing.id)
+                status = approved.status if approved else "approved"
+            else:
+                status = existing.status
+        else:
+            row = await self._match_repo.create(
+                invoice_id=invoice_id,
+                bank_transaction_id=bank_transaction_id,
+                invoice_number=invoice_number,
+                match_type="manual",
+                match_confidence=1.0,
+                paid_at_date=paid_date,
+                status="approved",
+            )
+            match_id = row.id
+            status = row.status
+            await self._audit_repo.log(
+                user.user_id,
+                "match_created",
+                "invoice_payment_match",
+                match_id,
+                None,
+                {
+                    "invoice_id": invoice_id,
+                    "bank_transaction_id": bank_transaction_id,
+                    "match_type": "manual",
+                    "status": status,
+                },
+            )
+
+        before_paid = {"paid_at_date": str(invoice.paid_at_date) if invoice.paid_at_date else None}
+        await self._invoice_repo.update_paid_at_date(invoice_id, paid_date)
+        await self._invoice_repo.update_match_status(invoice_id, "matched")
+        await self._audit_repo.log(
+            user.user_id,
+            "payment_date_set",
+            "invoice",
+            invoice_id,
+            before_paid,
+            {"paid_at_date": str(paid_date), "via": "manual_match"},
+        )
+
+        await self._bank_txn_repo.update_reconciliation_status(
+            bank_transaction_id, "matched"
+        )
+
+        if review_task_id is not None:
+            task = await self._review_repo.get(review_task_id)
+            if task and task.status == "open":
+                await self._review_repo.resolve(review_task_id, "approved", now)
+                await self._audit_repo.log(
+                    user.user_id,
+                    "review_approved",
+                    "review_task",
+                    review_task_id,
+                    {"status": "open"},
+                    {"status": "approved", "via": "manual_match"},
+                )
+
+        await self._review_repo.resolve_open_bank_tasks_for_txn(
+            bank_transaction_id, [invoice_number], now
+        )
+
+        return ManualMatchResponse(
+            match_id=match_id,
+            status=status,
+            invoice_id=invoice_id,
+            bank_transaction_id=bank_transaction_id,
+            review_task_id=review_task_id,
+        )

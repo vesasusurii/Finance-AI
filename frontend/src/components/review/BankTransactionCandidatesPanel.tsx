@@ -1,0 +1,230 @@
+import { useEffect, useState } from "react";
+import { Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui-finance/Button";
+import { StatusBadge } from "@/components/ui-finance/StatusBadge";
+import { BankTransactionMatchCard } from "@/components/review/BankTransactionMatchCard";
+import { ApiError } from "@/api/client";
+import { listBankTransactions } from "@/api/bankStatements";
+import { manualMatch } from "@/api/reconciliation";
+import { rejectReviewTask } from "@/api/review";
+import { reviewReasonLabel } from "@/lib/labels";
+import type { ReviewTask } from "@/types/review";
+import type { BankTransaction } from "@/types/bank";
+import type { Invoice } from "@/types/invoice";
+
+const RECONCILABLE_STATUSES = new Set([
+  "needs_review",
+  "pending",
+  "partial",
+  "unmatched",
+]);
+
+export function mergeTransactionCandidates(
+  items: BankTransaction[],
+  preferred: BankTransaction | null | undefined,
+): BankTransaction[] {
+  const byId = new Map<number, BankTransaction>();
+  for (const t of items) {
+    if (RECONCILABLE_STATUSES.has(t.reconciliation_status)) {
+      byId.set(t.id, t);
+    }
+  }
+  if (preferred) {
+    byId.set(preferred.id, preferred);
+  }
+  return [...byId.values()];
+}
+
+function rankForInvoice(
+  transactions: BankTransaction[],
+  invoice: Invoice,
+): BankTransaction[] {
+  const num = invoice.invoice_number?.trim().toLowerCase();
+  return [...transactions].sort((a, b) => {
+    const da = a.transaction_date ?? "";
+    const db = b.transaction_date ?? "";
+    if (num) {
+      const aHit = a.detected_invoice_numbers.some(
+        (n) => n.trim().toLowerCase() === num,
+      );
+      const bHit = b.detected_invoice_numbers.some(
+        (n) => n.trim().toLowerCase() === num,
+      );
+      if (aHit !== bHit) return aHit ? -1 : 1;
+    }
+    return db.localeCompare(da);
+  });
+}
+
+export function BankTransactionCandidatesPanel({
+  invoice,
+  task,
+  onResolved,
+}: {
+  invoice: Invoice;
+  task?: ReviewTask | null;
+  onResolved: () => void;
+}) {
+  const [transactions, setTransactions] = useState<BankTransaction[]>([]);
+  const [loadingTxns, setLoadingTxns] = useState(true);
+  const [expandedTxnId, setExpandedTxnId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"match" | "reject" | null>(null);
+  const [matchingTxnId, setMatchingTxnId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setExpandedTxnId(null);
+  }, [invoice.id, task?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingTxns(true);
+    setError(null);
+    const statementId = task?.bank_transaction?.bank_statement_id;
+    const load = async () => {
+      try {
+        const res = await listBankTransactions({
+          ...(statementId != null ? { bank_statement_id: statementId } : {}),
+          limit: 200,
+        });
+        if (cancelled) return;
+        const merged = mergeTransactionCandidates(
+          res.items,
+          task?.bank_transaction,
+        );
+        setTransactions(rankForInvoice(merged, invoice));
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Could not load bank transactions",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoadingTxns(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [task?.bank_transaction, task?.id, invoice]);
+
+  const handleReject = async () => {
+    if (!task) return;
+    const reason = window.prompt(
+      "Reason for rejection (optional):",
+      "",
+    );
+    if (reason === null) return;
+    setBusy("reject");
+    setError(null);
+    try {
+      await rejectReviewTask(task.id, reason.trim() || undefined);
+      onResolved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Reject failed");
+      setBusy(null);
+    }
+  };
+
+  const handleMatch = async (bankTransactionId: number) => {
+    const ok = window.confirm(
+      "Match this invoice to the selected bank line? Paid date will be set from the transaction date.",
+    );
+    if (!ok) return;
+    setBusy("match");
+    setMatchingTxnId(bankTransactionId);
+    setError(null);
+    try {
+      await manualMatch({
+        invoice_id: invoice.id,
+        bank_transaction_id: bankTransactionId,
+        review_task_id: task?.id,
+      });
+      onResolved();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e.message);
+      } else {
+        setError(e instanceof Error ? e.message : "Match failed");
+      }
+      setBusy(null);
+      setMatchingTxnId(null);
+    }
+  };
+
+  return (
+    <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card">
+      <div className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-semibold text-foreground">
+              Bank transactions
+            </span>
+            {task && (
+              <StatusBadge
+                value={reviewReasonLabel(task.reason)}
+                tone="warning"
+              />
+            )}
+          </div>
+          {task && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void handleReject()}
+              icon={
+                busy === "reject" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <X className="h-3.5 w-3.5" />
+                )
+              }
+            >
+              Reject task
+            </Button>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Open a transaction to see full details, then match it to the invoice on
+          the left. Lines matching this invoice number are listed first.
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {error && (
+          <p className="mb-3 text-[12px] text-destructive">{error}</p>
+        )}
+        {loadingTxns ? (
+          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading transactions…
+          </div>
+        ) : transactions.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">
+            No candidate bank lines found. Upload a bank statement and run
+            matching, or open the matching screen.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {transactions.map((t) => (
+              <BankTransactionMatchCard
+                key={t.id}
+                transaction={t}
+                expanded={expandedTxnId === t.id}
+                matching={busy === "match" && matchingTxnId === t.id}
+                onExpand={() => {
+                  setExpandedTxnId(t.id);
+                  setError(null);
+                }}
+                onClose={() => setExpandedTxnId(null)}
+                onMatch={() => void handleMatch(t.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

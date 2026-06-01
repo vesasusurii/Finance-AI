@@ -8,6 +8,8 @@ export interface DocumentUploadItem {
   file_size?: number | null;
   invoice_id?: number | null;
   error?: string | null;
+  message?: string | null;
+  original_uploader_email?: string | null;
 }
 
 export interface DocumentUploadResponse {

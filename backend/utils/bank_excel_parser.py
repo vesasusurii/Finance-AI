@@ -65,6 +65,12 @@ _DATE_STRING_FORMATS: tuple[str, ...] = (
     "%Y-%m-%dT%H:%M:%S",
 )
 
+# Excel "text" dates: leading apostrophe, NBSP, zero-width marks, comma separators.
+_ZERO_WIDTH_RE = re.compile(r"[\u200e\u200f\u202a-\u202e\ufeff]")
+_DATE_DMY_RE = re.compile(
+    r"^(?P<d>\d{1,2})[./,\-](?P<m>\d{1,2})[./,\-](?P<y>\d{2,4})"
+)
+
 
 @dataclass
 class ParsedBankRow:
@@ -103,6 +109,44 @@ def _parse_amount(value: Any) -> Decimal | None:
         return Decimal(text).quantize(Decimal("0.01"))
     except InvalidOperation:
         return None
+
+
+def _sanitize_date_text(raw: str) -> str:
+    """Normalize plain-text Excel date cells before strptime / regex parsing."""
+    text = _ZERO_WIDTH_RE.sub("", str(raw).strip())
+    text = text.replace("\xa0", " ").strip()
+    # Excel forces text dates with a leading apostrophe in the stored value.
+    text = text.lstrip("'\"").rstrip("'\"")
+    return text.strip()
+
+
+def _expand_two_digit_year(year: int) -> int:
+    if year >= 100:
+        return year
+    return year + 2000 if year < 70 else year + 1900
+
+
+def _parse_dmy_regex(text: str) -> date | None:
+    """Parse DD.MM.YYYY (and / - , separators) after sanitization."""
+    head = text.split(" ", 1)[0]
+    match = _DATE_DMY_RE.match(head)
+    if not match:
+        return None
+    day = int(match.group("d"))
+    month = int(match.group("m"))
+    year = _expand_two_digit_year(int(match.group("y")))
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _parse_string_serial(text: str) -> date | None:
+    """Text cells that contain only an Excel serial (General-formatted dates)."""
+    cleaned = text.strip().replace(" ", "")
+    if not cleaned.isdigit():
+        return None
+    return _excel_serial_to_date(float(cleaned))
 
 
 def _excel_serial_to_date(value: float) -> date | None:
@@ -144,7 +188,7 @@ def _parse_date(value: Any) -> date | None:
             )
         return result
 
-    text = str(value).strip()
+    text = _sanitize_date_text(str(value))
     if not text:
         return None
 
@@ -165,6 +209,16 @@ def _parse_date(value: Any) -> date | None:
                 return datetime.strptime(head, fmt).date()
             except ValueError:
                 continue
+
+    # Plain-text EU dates (apostrophe-prefixed, comma separators, etc.).
+    parsed = _parse_dmy_regex(text)
+    if parsed is not None:
+        return parsed
+
+    # Serial stored as text when the column is formatted General/@.
+    parsed = _parse_string_serial(text)
+    if parsed is not None:
+        return parsed
 
     logger.warning(
         "Could not parse date from string cell: %r (%s)",

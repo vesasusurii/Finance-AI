@@ -69,6 +69,10 @@ class BankTransactionRepository:
             await self._session.refresh(entity)
         return entities
 
+    async def get(self, transaction_id: int) -> BankTransactionResponse | None:
+        row = await self._session.get(BankTransaction, transaction_id)
+        return _to_response(row) if row else None
+
     async def list_transactions(
         self,
         bank_statement_id: int | None,

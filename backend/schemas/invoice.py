@@ -95,6 +95,7 @@ class InvoiceResponse(BaseModel):
     field_confidences: dict | None
     review_status: str
     match_status: str
+    uploaded_by: int
     source_file_id: int | None
     source_filename: str | None = None
     source_mime_type: str | None = None
@@ -115,6 +116,9 @@ class UploadItemResponse(BaseModel):
     processing_status: str
     invoice_id: int | None = None
     error: str | None = None
+    # Set when processing_status is "linked" (duplicate file already in system).
+    message: str | None = None
+    original_uploader_email: str | None = None
 
 
 class InvoiceUploadResponse(BaseModel):

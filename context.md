@@ -81,7 +81,7 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 | `/bank-transactions` | Parsed transaction rows |
 | `/matching` | Run matching + results sections (approve / reject) |
 | `/exports` | Excel export |
-| `/manual-review` | Placeholder (Phase 4 full queue) |
+| `/manual-review` | Manual review queue (`review_tasks`) |
 | `/admin/*` | Placeholder |
 
 ## Key paths
@@ -102,6 +102,7 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 
 ## Session notes
 
+- **2026-05-29:** Invoice upload dedupe by file hash (`uploaded_files.content_sha256`, partial unique index for `file_kind=invoice`). Duplicate upload does not re-run OCR or create a second `invoices` row; `invoice_access` grants the second user visibility. Original `uploaded_by` on the invoice is unchanged. Upload API returns `processing_status=linked` with `message` and `original_uploader_email`. Failed prior upload of the same hash is re-processed in place.
 - **2026-05-22:** Phase 1 — full UI, OpenAI Vision OCR, scanned PDFs via `pypdfium2`
 - **2026-05-22:** Phase 2 — bank models/migration, Excel parse, bank APIs, `/bank-statements` + `/bank-transactions` UI
 - **2026-05-22:** Phase 3 — matching service, reconciliation + review APIs, documents drawer edit/save/delete, `/matching` UI
@@ -126,4 +127,4 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 - [ ] Confirm `OPENAI_API_KEY` for invoice OCR tests
 - [ ] Upload invoices + bank statement, then **Run Matching** on `/matching`
 - [ ] Test documents drawer Save and Delete
-- [ ] Phase 4 manual review queue per `DOCS/0. Roadmap.md`
+- [x] Phase 4 manual review queue per `DOCS/0. Roadmap.md`

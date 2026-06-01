@@ -7,9 +7,11 @@ import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator";
 import { FilterBar } from "@/components/ui-finance/FilterBar";
+import { useAuth } from "@/auth/AuthContext";
 import { useInvoices } from "@/hooks/useInvoices";
 import { deleteInvoice } from "@/api/invoices";
 import type { Invoice } from "@/types/invoice";
+import { isAdminRole } from "@/types/auth";
 import {
   formatCurrency,
   formatDate,
@@ -165,15 +167,21 @@ function DocumentDrawer({
   onDeleted: () => void;
   onApproved: () => Promise<void>;
 }) {
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [drawerError, setDrawerError] = useState<string | null>(null);
 
+  const isSharedView =
+    user != null &&
+    !isAdminRole(user.role) &&
+    invoice.uploaded_by !== user.user_id;
+
   const handleDelete = async () => {
-    if (
-      !window.confirm(
-        `Delete invoice ${invoice.invoice_number ?? `#${invoice.id}`}? This cannot be undone.`,
-      )
-    ) {
+    const label = invoice.invoice_number ?? `#${invoice.id}`;
+    const confirmMessage = isSharedView
+      ? `Remove invoice ${label} from your documents list? The original upload stays in the system for other users.`
+      : `Delete invoice ${label}? This cannot be undone.`;
+    if (!window.confirm(confirmMessage)) {
       return;
     }
     setBusy(true);
@@ -237,7 +245,7 @@ function DocumentDrawer({
             disabled={busy}
             onClick={() => void handleDelete()}
           >
-            Delete
+            {isSharedView ? "Remove from my list" : "Delete"}
           </Button>
         </div>
       </aside>

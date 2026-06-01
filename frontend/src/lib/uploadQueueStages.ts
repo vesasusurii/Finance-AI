@@ -53,6 +53,7 @@ export function statusFromUploadResult(
   reviewStatus?: string | null,
 ): InvoiceQueueStatus {
   if (processingStatus === "failed") return "failed";
+  if (processingStatus === "linked") return "completed";
   if (reviewStatus === "needs_review") return "requires_review";
   if (processingStatus === "processed") return "completed";
   return "requires_review";

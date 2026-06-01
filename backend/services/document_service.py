@@ -40,6 +40,8 @@ class DocumentService:
                             file_size=doc_row.file_size if doc_row else len(content),
                             invoice_id=upload_item.invoice_id,
                             error=upload_item.error,
+                            message=upload_item.message,
+                            original_uploader_email=upload_item.original_uploader_email,
                         )
                     )
                 else:

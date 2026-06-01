@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
   Loader2,
   Save,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui-finance/Button";
@@ -64,16 +65,33 @@ export function InvoiceDocumentEditor({
   onApproved,
   onSaved,
   embedded = false,
+  onApprove,
+  onReject,
+  onRejected,
+  approveLabel = "Approve",
+  showReject = false,
+  approveDisabled = false,
+  hideApproveActions = false,
 }: {
   invoice: Invoice;
   onApproved: () => void;
   onSaved: (invoice: Invoice) => void;
   /** When true, fits inside a drawer/panel instead of a full page. */
   embedded?: boolean;
+  /** When set, called instead of POST /api/invoices/{id}/approve */
+  onApprove?: () => Promise<void>;
+  onReject?: () => Promise<void>;
+  onRejected?: () => void;
+  approveLabel?: string;
+  showReject?: boolean;
+  approveDisabled?: boolean;
+  /** Hide approve/reject buttons (e.g. bank match uses a separate match action). */
+  hideApproveActions?: boolean;
 }) {
   const [form, setForm] = useState<FormData>(toFormData(invoice));
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -128,11 +146,28 @@ export function InvoiceDocumentEditor({
     }
     setApproving(true);
     try {
-      await approveInvoice(invoice.id);
+      if (onApprove) {
+        await onApprove();
+      } else {
+        await approveInvoice(invoice.id);
+      }
       onApproved();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Approve failed");
       setApproving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!onReject) return;
+    setRejecting(true);
+    setSaveError(null);
+    try {
+      await onReject();
+      onRejected?.();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Reject failed");
+      setRejecting(false);
     }
   };
 
@@ -303,7 +338,24 @@ export function InvoiceDocumentEditor({
                 <span className="text-warning">Unsaved changes</span>
               ) : null}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {!hideApproveActions && showReject && onReject && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={rejecting || approving}
+                  onClick={handleReject}
+                  icon={
+                    rejecting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <X className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  Reject
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -319,21 +371,27 @@ export function InvoiceDocumentEditor({
               >
                 Save
               </Button>
-              <Button
-                variant="success"
-                size="sm"
-                disabled={approving || invoice.review_status === "approved"}
-                onClick={handleApprove}
-                icon={
-                  approving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" />
-                  )
-                }
-              >
-                Approve
-              </Button>
+              {!hideApproveActions && (
+                <Button
+                  variant="success"
+                  size="sm"
+                  disabled={
+                    approving ||
+                    approveDisabled ||
+                    (!onApprove && invoice.review_status === "approved")
+                  }
+                  onClick={handleApprove}
+                  icon={
+                    approving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  {approveLabel}
+                </Button>
+              )}
             </div>
           </div>
         </div>

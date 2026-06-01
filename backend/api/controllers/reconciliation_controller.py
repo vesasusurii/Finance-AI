@@ -10,6 +10,8 @@ from repositories.match_repository import MatchRepository
 from schemas.auth import UserContext
 from schemas.reconciliation import (
     ApproveMatchRequest,
+    ManualMatchRequest,
+    ManualMatchResponse,
     MatchActionResponse,
     MatchListResponse,
     ReconciliationRunRequest,
@@ -100,6 +102,17 @@ class ReconciliationController:
         )
         return MatchListResponse(
             items=items, total=total, page=page, limit=limit
+        )
+
+    @debug_trace
+    async def manual_match(
+        self, body: ManualMatchRequest, user: UserContext
+    ) -> ManualMatchResponse:
+        return await self._matching.manual_match(
+            body.invoice_id,
+            body.bank_transaction_id,
+            user,
+            review_task_id=body.review_task_id,
         )
 
     @debug_trace

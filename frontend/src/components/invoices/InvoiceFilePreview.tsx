@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
 import { fetchInvoiceFile } from "@/api/invoices";
+import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
   if (fallback) return fallback;
@@ -16,11 +17,13 @@ export function InvoiceFilePreview({
   displayName,
   mimeType = null,
   minHeightClass = "min-h-[420px]",
+  className,
 }: {
   invoiceId: number;
   displayName: string;
   mimeType?: string | null;
   minHeightClass?: string;
+  className?: string;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,14 +67,18 @@ export function InvoiceFilePreview({
     resolvedMime === "application/pdf" || resolvedMime?.includes("pdf")
       ? "PDF"
       : isImage
-        ? resolvedMime?.split("/")[1]?.toUpperCase() ?? "IMAGE"
+        ? (resolvedMime?.split("/")[1]?.toUpperCase() ?? "IMAGE")
         : resolvedMime
           ? "FILE"
           : null;
 
   return (
     <div
-      className={`flex flex-col overflow-hidden rounded-lg border border-border bg-card ${minHeightClass}`}
+      className={cn(
+        "flex flex-col overflow-hidden rounded-lg border border-border bg-card",
+        minHeightClass,
+        className,
+      )}
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
         <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -101,7 +108,7 @@ export function InvoiceFilePreview({
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden bg-muted/30">
+      <div className="relative min-h-[400px] flex-1 overflow-hidden bg-muted/30">
         {loading && (
           <div
             className={`flex ${minHeightClass} flex-col items-center justify-center gap-2`}
@@ -139,8 +146,26 @@ export function InvoiceFilePreview({
           <iframe
             src={blobUrl}
             title={displayName}
-            className={`h-full w-full border-0 ${minHeightClass}`}
+            className={`h-full min-h-[400px] w-full border-0 ${minHeightClass}`}
           />
+        )}
+
+        {!loading && !error && blobUrl && imgError && (
+          <div
+            className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
+          >
+            <p className="text-[13px] text-muted-foreground">
+              Preview unavailable for this file type.
+            </p>
+            <a
+              href={blobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[12px] text-primary hover:underline"
+            >
+              Open file in new tab
+            </a>
+          </div>
         )}
       </div>
     </div>

@@ -27,6 +27,8 @@ export interface UploadQueueItem {
   invoiceId?: number | null;
   confidence?: number | null;
   error?: string | null;
+  /** Success info when the file was already uploaded by another user (linked). */
+  infoMessage?: string | null;
   invoice?: Invoice | null;
   logs: ProcessingLogEntry[];
   addedAt: string;

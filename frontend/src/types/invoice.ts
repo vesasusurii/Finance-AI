@@ -24,6 +24,7 @@ export interface Invoice {
   field_confidences: Record<string, number> | null;
   review_status: ReviewStatus;
   match_status: MatchStatus;
+  uploaded_by: number;
   source_file_id: number | null;
   source_filename: string | null;
   source_mime_type: string | null;
@@ -55,6 +56,8 @@ export interface UploadItem {
   processing_status: string;
   invoice_id?: number | null;
   error?: string | null;
+  message?: string | null;
+  original_uploader_email?: string | null;
 }
 
 export interface UploadResponse {
