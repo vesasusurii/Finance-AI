@@ -82,6 +82,9 @@ export function MatchingPage() {
           "duplicate_invoice_in_db",
           "internal_error",
           "no_invoice_numbers_detected",
+          "invoice_numbers_not_visible",
+          "batch_payment_incomplete",
+          "batch_amount_suggested",
           "missing_transaction_date",
         ].includes(t.reason),
       ),
@@ -194,6 +197,19 @@ export function MatchingPage() {
       ),
     },
     {
+      key: "type",
+      header: "Type",
+      cell: (r) => (
+        <span className="text-[12px] text-muted-foreground">
+          {r.match_type === "batch_amount"
+            ? "Batch amount"
+            : r.match_type === "batch_invoice_number"
+              ? "Batch invoice #"
+              : "Invoice #"}
+        </span>
+      ),
+    },
+    {
       key: "status",
       header: "Status",
       cell: (r) => <StatusBadge value={r.status} />,
@@ -202,7 +218,7 @@ export function MatchingPage() {
       key: "actions",
       header: "",
       cell: (r) =>
-        r.status === "matched" ? (
+        r.status === "matched" || r.status === "suggested" ? (
           <div className="flex gap-1">
             <Button
               variant="success"
@@ -290,7 +306,7 @@ export function MatchingPage() {
       <PageHeader
         eyebrow="Workflow · Step 3"
         title="Matching"
-        description="Match bank transactions to purchase invoices by invoice number in comments."
+        description="Match bank transactions to invoices using comment extraction (regex + LLM). One payment can cover multiple invoices. Amount-combination suggestions require approval when numbers are absent."
         actions={
           <div className="flex items-center gap-2">
             <select
@@ -397,6 +413,16 @@ export function MatchingPage() {
                   {t.payload?.invoice_number ? (
                     <span className="font-mono text-foreground">
                       {t.payload.invoice_number as string}
+                    </span>
+                  ) : null}
+                  {t.reason === "batch_amount_suggested" &&
+                  Array.isArray(t.payload?.invoices) ? (
+                    <span className="text-muted-foreground">
+                      ·{" "}
+                      {(t.payload.invoices as { invoice_number?: string }[])
+                        .map((i) => i.invoice_number)
+                        .filter(Boolean)
+                        .join(", ")}
                     </span>
                   ) : null}
                   <Link

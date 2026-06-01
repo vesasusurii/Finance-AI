@@ -112,16 +112,16 @@ APPROVAL_CONTEXT_RE = re.compile(
     r"\s*[:#=]\s*([A-Z0-9\-]+)"
 )
 
-# Comments that explicitly look like supplier invoice payments. Used to decide
-# whether to ask the LLM for help when regex returns nothing.
 INVOICE_KEYWORDS_RE = re.compile(
     r"(?i)\b(?:invoice|fatur|fat\.|inv\.|inv\b|pagesa|pagese\s+per\s+fat|payment\s+for\s+invoice)"
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────────────────────
+def comment_suggests_invoice_payment(comment: str | None) -> bool:
+    """True when the bank comment explicitly references invoice payment."""
+    if not comment or not str(comment).strip():
+        return False
+    return bool(INVOICE_KEYWORDS_RE.search(str(comment)))
 
 
 @debug_trace
@@ -184,10 +184,6 @@ def extract_invoice_numbers(comment: str | None) -> list[str]:
                         )
                     ]
                     candidates.append(norm)
-            # Record the span whenever the chunk yielded *any* valid token
-            # (even if it was already in `candidates`), so substring matches
-            # in later patterns are suppressed for every occurrence in the
-            # source text, not just the first.
             if chunk_yielded_valid_token:
                 covered.append(span)
 
@@ -219,7 +215,7 @@ def needs_llm_fallback(comment: str | None, regex_candidates: list[str]) -> bool
     if not text:
         return False
 
-    has_keywords = bool(INVOICE_KEYWORDS_RE.search(text))
+    has_keywords = comment_suggests_invoice_payment(text)
 
     if has_keywords and not regex_candidates:
         return True

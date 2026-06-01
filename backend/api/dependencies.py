@@ -4,6 +4,8 @@ from fastapi import Depends, HTTPException, Request
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.controllers.admin_controller import AdminController
+from api.controllers.audit_controller import AuditController
 from api.controllers.auth_controller import AuthController
 from api.controllers.bank_statement_controller import BankStatementController
 from api.controllers.export_controller import ExportController
@@ -27,6 +29,7 @@ from repositories.review_repository import ReviewRepository
 from repositories.upload_repository import UploadRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
+from services.admin_settings_service import AdminSettingsService
 from services.ai_validation_service import AIValidationService
 from services.bank_comment_extraction_service import BankCommentExtractionService
 from services.bank_statement_service import BankStatementService
@@ -133,6 +136,22 @@ async def get_invoice_extraction_service(
         ai_validation,
         openai_client,
     )
+
+
+def get_admin_settings_service() -> AdminSettingsService:
+    return AdminSettingsService()
+
+
+async def get_admin_controller(
+    settings_service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminController:
+    return AdminController(settings_service)
+
+
+async def get_audit_controller(
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> AuditController:
+    return AuditController(audit_repo)
 
 
 async def get_auth_controller(
@@ -273,9 +292,11 @@ async def get_reconciliation_controller(
 
 async def get_document_service(
     upload_repo: UploadRepository = Depends(get_upload_repo),
+    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
     extraction: InvoiceExtractionService = Depends(get_invoice_extraction_service),
+    openai_client: AsyncOpenAI = Depends(get_openai_client),
 ) -> DocumentService:
-    return DocumentService(upload_repo, extraction)
+    return DocumentService(upload_repo, invoice_repo, extraction, openai_client)
 
 
 async def get_document_controller(

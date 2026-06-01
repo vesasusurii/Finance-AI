@@ -4,10 +4,9 @@ export function ConfidenceIndicator({ value }: { value: number }) {
   if (!value) return <span className="text-[12px] text-muted-foreground">—</span>;
   const pct = Math.round(value * 100);
   const tone =
-    pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 60 ? "warning" : "danger";
+    pct >= 90 ? "success" : pct >= 70 ? "warning" : "danger";
   const bar =
     tone === "success" ? "bg-success" :
-    tone === "primary" ? "bg-primary" :
     tone === "warning" ? "bg-warning" : "bg-destructive";
 
   return (

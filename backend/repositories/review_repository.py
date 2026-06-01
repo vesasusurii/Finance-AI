@@ -24,6 +24,7 @@ class ReviewRepository:
         bank_transaction_id: int,
         invoice_number: str,
         reason: str,
+        payload: dict | None = None,
     ) -> ReviewTask:
         row = ReviewTask(
             task_type="bank_match",
@@ -31,7 +32,9 @@ class ReviewRepository:
             invoice_id=None,
             reason=reason,
             status="open",
-            payload={"invoice_number": invoice_number} if invoice_number else None,
+            payload=payload
+            if payload is not None
+            else ({"invoice_number": invoice_number} if invoice_number else None),
         )
         self._session.add(row)
         await self._session.flush()

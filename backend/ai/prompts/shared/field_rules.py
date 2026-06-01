@@ -118,17 +118,14 @@ Wait until you can read the totals page.
 | Other                 | Anything that does not fit the above                       |
 
 ### confidence_score
-- 0.95–1.00: All 4 critical fields extracted cleanly — Finance auto-accepts (no immediate review).
-- 0.90–0.94: High quality but still requires human review (set needs_review true).
-- 0.75–0.89: All 4 critical fields found but one is slightly uncertain (e.g. partially legible).
-- 0.50–0.74: 1–2 critical fields missing or low-quality image.
-- 0.20–0.49: Multiple fields missing or document is severely degraded.
-- 0.00–0.19: Cannot read the document.
+- 0.90–1.00: All 4 critical fields extracted cleanly — Finance auto-saves (no immediate review).
+- 0.70–0.89: Save but mark for review (set needs_review true).
+- Below 0.70: Do not finalise — set needs_review true and score below 0.70.
 Critical fields: invoice_number, amount, invoice_date, name_of_company.
 
 ### needs_review
-- true if ANY of the following: invoice_number is null, amount is null, invoice_date is null, name_of_company is null, confidence_score < 0.95, currency is ambiguous, amount vs total is unclear.
-- false only when all 4 critical fields are clearly extracted, unambiguous, and confidence_score >= 0.95 (Finance auto-accepts at 95% or higher).
+- true if ANY of the following: invoice_number is null, amount is null, invoice_date is null, name_of_company is null, confidence_score < 0.90, any critical field_confidences below 0.75, currency is ambiguous, amount vs total is unclear.
+- false only when all 4 critical fields are clearly extracted, unambiguous, and confidence_score >= 0.90.
 
 ### field_confidences  ← per-field confidence map
 Output a JSON object with a confidence score (0.0–1.0) for every field you extracted.

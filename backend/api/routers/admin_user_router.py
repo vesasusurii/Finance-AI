@@ -4,6 +4,7 @@ from api.controllers.user_controller import UserController
 from api.dependencies import get_user_controller, require_admin
 from schemas.auth import UserContext
 from schemas.user import CreateUserRequest, UserListResponse, UserSummary
+from schemas.admin import UpdateUserRoleRequest
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -23,6 +24,16 @@ async def create_user(
     ctrl: UserController = Depends(get_user_controller),
 ):
     return await ctrl.create_user(body)
+
+
+@router.patch("/{user_id}/role", response_model=UserSummary)
+async def update_user_role(
+    user_id: int,
+    body: UpdateUserRoleRequest,
+    admin: UserContext = Depends(require_admin),
+    ctrl: UserController = Depends(get_user_controller),
+):
+    return await ctrl.update_user_role(user_id, body, admin)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_200_OK)

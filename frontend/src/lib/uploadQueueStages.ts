@@ -54,7 +54,9 @@ export function statusFromUploadResult(
 ): InvoiceQueueStatus {
   if (processingStatus === "failed") return "failed";
   if (processingStatus === "linked") return "completed";
-  if (reviewStatus === "needs_review") return "requires_review";
+  if (reviewStatus === "manual_review" || reviewStatus === "needs_review") {
+    return "requires_review";
+  }
   if (processingStatus === "processed") return "completed";
   return "requires_review";
 }

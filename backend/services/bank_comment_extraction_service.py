@@ -31,6 +31,9 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from utils.normalization import is_tax_or_client_id, normalize_invoice_number
+from utils.openai_chat import chat_completion_kwargs
+
+_LLM_MAX_OUTPUT_TOKENS = 4096
 
 logger = get_logger(__name__)
 
@@ -223,10 +226,14 @@ class BankCommentExtractionService:
             try:
                 return await self._openai.chat.completions.create(
                     model=self._model,
-                    temperature=0,
-                    response_format={"type": "json_object"},
                     timeout=float(self._timeout_seconds),
                     messages=messages,
+                    **chat_completion_kwargs(
+                        self._model,
+                        max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
+                        temperature=0,
+                        response_format={"type": "json_object"},
+                    ),
                 )
             except RateLimitError as exc:
                 last_exc = exc

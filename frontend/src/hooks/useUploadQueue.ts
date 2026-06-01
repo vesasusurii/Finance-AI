@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getInvoice } from "@/api/invoices";
 import {
+  pollDocumentUntilDone,
   uploadDocumentWithProgress,
   validateClientFile,
   type DocumentUploadItem,
@@ -44,6 +45,12 @@ function finalStatusFromDocumentResult(
     return {
       status: "completed",
       stageLabel: "Stored — awaiting OCR",
+    };
+  }
+  if (result.upload_status === "processing") {
+    return {
+      status: "ocr_processing",
+      stageLabel: STAGE_LABELS.ocr_processing,
     };
   }
   const status = statusFromUploadResult(result.upload_status, reviewStatus);
@@ -152,9 +159,20 @@ export function useUploadQueue() {
           });
         });
 
-        const result = res.items[0];
+        let result = res.items[0];
         if (!result) {
           throw new Error("No upload result returned");
+        }
+
+        if (result.upload_status === "processing" && result.document_id) {
+          patchItem(item.id, {
+            status: "ocr_processing",
+            progress: STAGE_PROGRESS.ocr_processing,
+            stageLabel: STAGE_LABELS.ocr_processing,
+            uploadId: result.document_id,
+          });
+          appendLog(item.id, "ocr_processing", "File stored — running OCR");
+          result = await pollDocumentUntilDone(result.document_id);
         }
 
         let invoice = null;

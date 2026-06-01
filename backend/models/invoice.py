@@ -46,6 +46,7 @@ class Invoice(Base):
     category: Mapped[str | None] = mapped_column(String(200), nullable=True)
     extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     field_confidences: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    review_reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     review_status: Mapped[str] = mapped_column(
         String(50),
         nullable=False,

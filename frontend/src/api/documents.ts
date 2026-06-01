@@ -17,6 +17,16 @@ export interface DocumentUploadResponse {
   items: DocumentUploadItem[];
 }
 
+export interface DocumentStatusResponse {
+  document_id: number;
+  filename: string;
+  upload_status: string;
+  mime_type?: string | null;
+  file_size?: number | null;
+  invoice_id?: number | null;
+  error?: string | null;
+}
+
 const ALLOWED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".docx"];
 
 export function validateClientFile(file: File): string | null {
@@ -29,6 +39,56 @@ export function validateClientFile(file: File): string | null {
     return "File exceeds 20 MB limit.";
   }
   return null;
+}
+
+export async function getDocumentStatus(
+  documentId: number,
+): Promise<DocumentStatusResponse | null> {
+  const res = await fetch(`${API_BASE}/api/documents/${documentId}/status`, {
+    credentials: "include",
+  });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error("Could not load document status");
+  }
+  return res.json() as Promise<DocumentStatusResponse>;
+}
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_ATTEMPTS = 180;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export async function pollDocumentUntilDone(
+  documentId: number,
+): Promise<DocumentUploadItem> {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+    const status = await getDocumentStatus(documentId);
+    if (status === null) {
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+    if (
+      status.upload_status === "processed" ||
+      status.upload_status === "failed"
+    ) {
+      return {
+        document_id: status.document_id,
+        filename: status.filename,
+        upload_status: status.upload_status,
+        mime_type: status.mime_type,
+        file_size: status.file_size,
+        invoice_id: status.invoice_id,
+        error: status.error,
+      };
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error("Processing timed out — check the invoice list shortly");
 }
 
 export function uploadDocumentWithProgress(
