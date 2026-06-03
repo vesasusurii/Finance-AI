@@ -122,12 +122,13 @@ class MatchingService:
         # whole run (Postgres rejects further SQL after any error in-session).
         session = self._bank_txn_repo._session
         for txn in transactions:
+            txn_id = txn.id
             try:
                 async with session.begin_nested():
                     await self._process_txn(
                         txn,
-                        regex_results.get(txn.id, []),
-                        llm_extra.get(txn.id, []),
+                        regex_results.get(txn_id, []),
+                        llm_extra.get(txn_id, []),
                         summary,
                         now,
                         owner_user_id=owner_user_id,
@@ -135,25 +136,25 @@ class MatchingService:
             except Exception as exc:
                 logger.exception(
                     "Matching failed for bank_transaction id=%d: %s",
-                    txn.id,
+                    txn_id,
                     exc,
                 )
                 try:
                     if not await self._review_repo.has_open_bank_task(
-                        txn.id, "internal_error"
+                        txn_id, "internal_error"
                     ):
                         await self._review_repo.create_bank_unmatched(
-                            txn.id, "", "internal_error"
+                            txn_id, "", "internal_error"
                         )
                         summary.review_tasks_created += 1
                     await self._bank_txn_repo.update_reconciliation_status(
-                        txn.id, "needs_review"
+                        txn_id, "needs_review"
                     )
                     summary.unmatched_transactions += 1
                 except Exception:
                     logger.exception(
                         "Could not record internal_error review task for txn %d",
-                        txn.id,
+                        txn_id,
                     )
 
         summary.unmatched_invoices = await self._invoice_repo.count_by_match_status(

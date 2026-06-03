@@ -1,12 +1,13 @@
-﻿import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Play, Check, X } from "lucide-react";
+import { Play } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { TablePagination } from "@/components/ui-finance/TablePagination";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MatchedTransactionsGrid } from "@/components/matching/MatchedTransactionsGrid";
 import {
   approveMatch,
   getReconciliationResults,
@@ -47,6 +48,7 @@ const MATCHING_REVIEW_REASONS = [
 type MatchingTab =
   | "matched"
   | "unmatched-invoices"
+  | "partial-invoices"
   | "unmatched-transactions"
   | "needs-review"
   | "multi-invoice";
@@ -54,6 +56,7 @@ type MatchingTab =
 const MATCHING_TABS: { id: MatchingTab; label: string }[] = [
   { id: "matched", label: "Matched" },
   { id: "unmatched-invoices", label: "Unmatched invoices" },
+  { id: "partial-invoices", label: "Partially paid" },
   { id: "unmatched-transactions", label: "Unmatched transactions" },
   { id: "needs-review", label: "Needs review" },
   { id: "multi-invoice", label: "Multi-invoice comments" },
@@ -93,17 +96,20 @@ export function MatchingPage() {
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<InvoicePaymentMatch[]>([]);
   const [unmatchedInvoices, setUnmatchedInvoices] = useState<Invoice[]>([]);
+  const [partialInvoices, setPartialInvoices] = useState<Invoice[]>([]);
   const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
   const [unmatchedTxns, setUnmatchedTxns] = useState<BankTransaction[]>([]);
   const [multiTxns, setMultiTxns] = useState<BankTransaction[]>([]);
   const [busyMatchId, setBusyMatchId] = useState<number | null>(null);
   const [invoicePage, setInvoicePage] = useState(1);
+  const [partialInvoicePage, setPartialInvoicePage] = useState(1);
   const [txnPage, setTxnPage] = useState(1);
   const [matchPage, setMatchPage] = useState(1);
   const [reviewPage, setReviewPage] = useState(1);
   const [multiTxnPage, setMultiTxnPage] = useState(1);
   const [matchTotal, setMatchTotal] = useState(0);
   const [unmatchedInvoiceTotal, setUnmatchedInvoiceTotal] = useState(0);
+  const [partialInvoiceTotal, setPartialInvoiceTotal] = useState(0);
   const [unmatchedTxnTotal, setUnmatchedTxnTotal] = useState(0);
   const [reviewTotal, setReviewTotal] = useState(0);
   const [multiTxnTotal, setMultiTxnTotal] = useState(0);
@@ -115,32 +121,40 @@ export function MatchingPage() {
 
   const loadTotals = useCallback(async () => {
     const filters = statementFilters();
-    const [matchRes, invoiceRes, txnRes, reviewRes, multiTxnRes] =
-      await Promise.all([
-        getReconciliationResults({ ...filters, page: 1, limit: 1 }),
-        listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
-        listBankTransactions({
-          ...filters,
-          reconciliation_status: "needs_review",
-          page: 1,
-          limit: 1,
-        }),
-        listReviewTasks({
-          task_type: "bank_match",
-          page: 1,
-          limit: 1,
-          reasons: [...MATCHING_REVIEW_REASONS],
-          slim: true,
-        }),
-        listBankTransactions({
-          ...filters,
-          multi_invoice: true,
-          page: 1,
-          limit: 1,
-        }),
-      ]);
+    const [
+      matchRes,
+      invoiceRes,
+      partialRes,
+      txnRes,
+      reviewRes,
+      multiTxnRes,
+    ] = await Promise.all([
+      getReconciliationResults({ ...filters, page: 1, limit: 1 }),
+      listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
+      listInvoices({ match_status: "partially_matched", page: 1, limit: 1 }),
+      listBankTransactions({
+        ...filters,
+        reconciliation_status: "needs_review",
+        page: 1,
+        limit: 1,
+      }),
+      listReviewTasks({
+        task_type: "bank_match",
+        page: 1,
+        limit: 1,
+        reasons: [...MATCHING_REVIEW_REASONS],
+        slim: true,
+      }),
+      listBankTransactions({
+        ...filters,
+        multi_invoice: true,
+        page: 1,
+        limit: 1,
+      }),
+    ]);
     setMatchTotal(matchRes.total);
     setUnmatchedInvoiceTotal(invoiceRes.total);
+    setPartialInvoiceTotal(partialRes.total);
     setUnmatchedTxnTotal(txnRes.total);
     setReviewTotal(reviewRes.total);
     setMultiTxnTotal(multiTxnRes.total);
@@ -169,6 +183,16 @@ export function MatchingPage() {
           });
           setUnmatchedInvoices(res.items);
           setUnmatchedInvoiceTotal(res.total);
+          break;
+        }
+        case "partial-invoices": {
+          const res = await listInvoices({
+            match_status: "partially_matched",
+            page: partialInvoicePage,
+            limit: PAGE_SIZE,
+          });
+          setPartialInvoices(res.items);
+          setPartialInvoiceTotal(res.total);
           break;
         }
         case "unmatched-transactions": {
@@ -214,6 +238,7 @@ export function MatchingPage() {
     statementFilters,
     matchPage,
     invoicePage,
+    partialInvoicePage,
     txnPage,
     reviewPage,
     multiTxnPage,
@@ -221,6 +246,7 @@ export function MatchingPage() {
 
   useEffect(() => {
     setInvoicePage(1);
+    setPartialInvoicePage(1);
     setTxnPage(1);
     setMatchPage(1);
     setReviewPage(1);
@@ -347,6 +373,7 @@ export function MatchingPage() {
   const tabTotals: Record<MatchingTab, number> = {
     matched: matchTotal,
     "unmatched-invoices": unmatchedInvoiceTotal,
+    "partial-invoices": partialInvoiceTotal,
     "unmatched-transactions": unmatchedTxnTotal,
     "needs-review": reviewTotal,
     "multi-invoice": multiTxnTotal,
@@ -360,72 +387,6 @@ export function MatchingPage() {
     !selectedStatement &&
     statements.length > 0 &&
     Number.isFinite(parseInt(statementId, 10));
-
-  const matchColumns: Column<InvoicePaymentMatch>[] = [
-    {
-      key: "inv",
-      header: "Invoice #",
-      cell: (r) => <span className="font-mono text-[12px]">{r.invoice_number}</span>,
-    },
-    {
-      key: "paid",
-      header: "Paid at",
-      cell: (r) => (
-        <span className="tabular-nums">{formatDate(r.paid_at_date)}</span>
-      ),
-    },
-    {
-      key: "type",
-      header: "Type",
-      cell: (r) => (
-        <span className="text-[12px] text-muted-foreground">
-          {r.match_type === "batch_amount"
-            ? "Batch amount"
-            : r.match_type === "batch_invoice_number"
-              ? "Batch invoice #"
-              : "Invoice #"}
-        </span>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      cell: (r) => <StatusBadge value={r.status} />,
-    },
-    {
-      key: "actions",
-      header: "",
-      cell: (r) =>
-        r.status === "matched" || r.status === "suggested" ? (
-          <div className="flex gap-1">
-            <Button
-              variant="success"
-              size="sm"
-              icon={<Check className="h-3 w-3" />}
-              disabled={busyMatchId === r.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                void onApprove(r.id);
-              }}
-            >
-              Approve
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              icon={<X className="h-3 w-3" />}
-              disabled={busyMatchId === r.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                void onReject(r.id);
-              }}
-            >
-              Reject
-            </Button>
-          </div>
-        ) : null,
-    },
-  ];
 
   const invoiceColumns: Column<Invoice>[] = [
     {
@@ -446,6 +407,55 @@ export function MatchingPage() {
     {
       key: "status",
       header: "Match",
+      cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
+    },
+  ];
+
+  const partialInvoiceColumns: Column<Invoice>[] = [
+    {
+      key: "num",
+      header: "Invoice #",
+      cell: (r) => r.invoice_number ?? "—",
+    },
+    {
+      key: "company",
+      header: "Company",
+      cell: (r) => r.name_of_company ?? "—",
+    },
+    {
+      key: "amount",
+      header: "Total",
+      align: "right",
+      cell: (r) =>
+        r.amount != null
+          ? `${Number(r.amount).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${r.currency ?? "EUR"}`
+          : "—",
+    },
+    {
+      key: "debt",
+      header: "Remaining",
+      align: "right",
+      cell: (r) =>
+        r.debt != null ? (
+          <span className="font-semibold text-primary tabular-nums">
+            {Number(r.debt).toLocaleString("de-DE", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}{" "}
+            {r.currency ?? "EUR"}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      key: "first_paid",
+      header: "First payment",
+      cell: (r) => formatDate(r.paid_at_date),
+    },
+    {
+      key: "status",
+      header: "Status",
       cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
     },
   ];
@@ -482,8 +492,9 @@ export function MatchingPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Workflow ┬╖ Step 3"
+        eyebrow="Workflow · Step 3"
         title="Matching"
+        description="Match bank transactions to invoices using comment extraction (regex + LLM). One payment can cover multiple invoices. Amount-combination suggestions require approval when numbers are absent."
         actions={
           <div className="flex items-center gap-2">
             <select
@@ -504,7 +515,7 @@ export function MatchingPage() {
               disabled={running}
               onClick={() => void onRun()}
             >
-              {running ? "RunningΓÇª" : "Run Matching"}
+              {running ? "Running…" : "Run Matching"}
             </Button>
           </div>
         }
@@ -554,11 +565,18 @@ export function MatchingPage() {
 
         <TabPanel loading={loadingTab}>
           <TabsContent value="matched" className="mt-4">
-            <DataTable
-              columns={matchColumns}
-              rows={matches.map((m) => ({ ...m, id: m.id }))}
-              empty="No matches yet. Upload bank data and run matching."
-            />
+            {matchTotal === 0 ? (
+              <p className="rounded-lg border border-border bg-card px-4 py-16 text-center text-[13px] text-muted-foreground">
+                No matches yet. Upload bank data and run matching.
+              </p>
+            ) : (
+              <MatchedTransactionsGrid
+                matches={matches}
+                busyMatchId={busyMatchId}
+                onApprove={(id) => void onApprove(id)}
+                onReject={(id) => void onReject(id)}
+              />
+            )}
             <TablePagination
               page={matchPage}
               pageSize={PAGE_SIZE}
@@ -578,6 +596,20 @@ export function MatchingPage() {
               pageSize={PAGE_SIZE}
               total={unmatchedInvoiceTotal}
               onPageChange={setInvoicePage}
+            />
+          </TabsContent>
+
+          <TabsContent value="partial-invoices" className="mt-4">
+            <DataTable
+              columns={partialInvoiceColumns}
+              rows={partialInvoices}
+              empty="No partially paid invoices."
+            />
+            <TablePagination
+              page={partialInvoicePage}
+              pageSize={PAGE_SIZE}
+              total={partialInvoiceTotal}
+              onPageChange={setPartialInvoicePage}
             />
           </TabsContent>
 
@@ -623,7 +655,7 @@ export function MatchingPage() {
                           Task #{t.id}
                         </span>
                         <span className="text-muted-foreground">
-                          ┬╖ txn #{t.bank_transaction_id}
+                          · txn #{t.bank_transaction_id}
                         </span>
                         <StatusBadge value={reviewReasonLabel(t.reason)} />
                         {t.payload?.invoice_number ? (
@@ -634,7 +666,7 @@ export function MatchingPage() {
                         {t.reason === "batch_amount_suggested" &&
                         Array.isArray(t.payload?.invoices) ? (
                           <span className="text-muted-foreground">
-                            ┬╖{" "}
+                            ·{" "}
                             {(t.payload.invoices as { invoice_number?: string }[])
                               .map((i) => i.invoice_number)
                               .filter(Boolean)
@@ -691,7 +723,7 @@ function TabPanel({
     <div className="relative min-h-[200px]">
       {loading && (
         <p className="absolute right-0 top-0 text-[12px] text-muted-foreground">
-          LoadingΓÇª
+          Loading…
         </p>
       )}
       {children}

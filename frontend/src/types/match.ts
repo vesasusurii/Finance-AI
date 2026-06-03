@@ -7,6 +7,24 @@ export interface ReconciliationSummary {
   status?: string;
 }
 
+export interface MatchInvoiceSnapshot {
+  id: number;
+  invoice_number: string | null;
+  name_of_company: string | null;
+  amount: number | null;
+  currency: string | null;
+}
+
+export interface MatchBankTransactionSnapshot {
+  id: number;
+  transaction_date: string | null;
+  comment: string | null;
+  debited_amount: number | null;
+  credited_amount: number | null;
+  detected_invoice_numbers: string[];
+  reconciliation_status: string;
+}
+
 export interface InvoicePaymentMatch {
   id: number;
   invoice_id: number;
@@ -17,6 +35,8 @@ export interface InvoicePaymentMatch {
   status: string;
   paid_at_date: string;
   created_at: string;
+  invoice: MatchInvoiceSnapshot | null;
+  bank_transaction: MatchBankTransactionSnapshot | null;
 }
 
 export interface MatchListResponse {

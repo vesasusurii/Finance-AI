@@ -17,6 +17,24 @@ class ReconciliationSummary(BaseModel):
     status: str | None = None
 
 
+class MatchInvoiceSnapshot(BaseModel):
+    id: int
+    invoice_number: str | None
+    name_of_company: str | None
+    amount: Decimal | None
+    currency: str | None
+
+
+class MatchBankTransactionSnapshot(BaseModel):
+    id: int
+    transaction_date: date | None
+    comment: str | None
+    debited_amount: Decimal | None
+    credited_amount: Decimal | None
+    detected_invoice_numbers: list[str]
+    reconciliation_status: str
+
+
 class MatchResultResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,6 +47,8 @@ class MatchResultResponse(BaseModel):
     status: str
     paid_at_date: date
     created_at: datetime
+    invoice: MatchInvoiceSnapshot | None = None
+    bank_transaction: MatchBankTransactionSnapshot | None = None
 
 
 class MatchListResponse(BaseModel):
