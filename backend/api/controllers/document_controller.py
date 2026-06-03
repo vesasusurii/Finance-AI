@@ -1,4 +1,4 @@
-from fastapi import HTTPException, UploadFile, BackgroundTasks
+from fastapi import HTTPException, UploadFile
 
 from schemas.auth import UserContext
 from schemas.document import DocumentStatusResponse, DocumentUploadResponse
@@ -13,16 +13,17 @@ class DocumentController:
         self,
         files: list[UploadFile],
         user: UserContext,
-        background_tasks: BackgroundTasks,
     ) -> DocumentUploadResponse:
         if not files:
             raise HTTPException(
                 status_code=400,
                 detail={"error": "no_files", "message": "No files attached."},
             )
-        return await self._service.upload_files(files, user, background_tasks)
+        return await self._service.upload_files(files, user)
 
     async def status(
-        self, document_id: int, user: UserContext
+        self,
+        document_id: int,
+        user: UserContext,
     ) -> DocumentStatusResponse:
         return await self._service.get_status(document_id, user)

@@ -33,9 +33,19 @@ class Settings(BaseSettings):
     )
     cors_origins: str = Field(validation_alias="CORS_ORIGINS")
 
+    # Outlook / n8n email ingestion (POST /api/invoices/email-upload)
+    email_ingest_api_key: str = Field(
+        default="", validation_alias="EMAIL_INGEST_API_KEY"
+    )
+    email_ingest_user_email: str = Field(
+        default="finance@borek.com",
+        validation_alias="EMAIL_INGEST_USER_EMAIL",
+    )
+
     environment: str = Field(default="local", validation_alias="ENVIRONMENT")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
-    # Invoice OCR: OpenAI Vision only (gpt-4o-mini). Strong model on low-confidence retry.
+    # Invoice OCR: OpenAI Vision only. GPT-4o-mini is fastest; GPT-5 needs a
+    # much higher max_completion_tokens budget (reasoning tokens burn first).
     openai_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_MODEL")
     openai_model_strong: str = Field(
         default="gpt-4o", validation_alias="OPENAI_MODEL_STRONG"
@@ -44,6 +54,13 @@ class Settings(BaseSettings):
         default=120, validation_alias="OPENAI_TIMEOUT_SECONDS"
     )
     openai_max_retries: int = Field(default=2, validation_alias="OPENAI_MAX_RETRIES")
+    openai_reasoning_max_completion_tokens: int = Field(
+        default=16000,
+        validation_alias="OPENAI_REASONING_MAX_COMPLETION_TOKENS",
+    )
+    openai_strong_retry_enabled: bool = Field(
+        default=False, validation_alias="OPENAI_STRONG_RETRY_ENABLED"
+    )
     openai_max_pdf_pages: int = Field(
         default=25, validation_alias="OPENAI_MAX_PDF_PAGES"
     )
@@ -53,17 +70,26 @@ class Settings(BaseSettings):
     openai_vision_page_batch_size: int = Field(
         default=5, validation_alias="OPENAI_VISION_PAGE_BATCH_SIZE"
     )
+    # Parallel PDF page batches improve multi-page throughput while keeping
+    # per-upload OpenAI fan-out bounded for rate-limit safety.
+    openai_page_batch_concurrency: int = Field(
+        default=3, validation_alias="OPENAI_PAGE_BATCH_CONCURRENCY"
+    )
     openai_max_supplemental_chars: int = Field(
         default=80000, validation_alias="OPENAI_MAX_SUPPLEMENTAL_CHARS"
     )
     openai_pdf_render_scale: float = Field(
-        default=2.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
+        default=2.0, validation_alias="OPENAI_PDF_RENDER_SCALE"
+    )
+    ocr_cache_enabled: bool = Field(default=True, validation_alias="OCR_CACHE_ENABLED")
+    max_startup_recovery_jobs: int = Field(
+        default=3, validation_alias="MAX_STARTUP_RECOVERY_JOBS"
     )
 
     # Bank comment hybrid extraction (doc 9). Regex always runs first; LLM is
     # called only on comments where `needs_llm_fallback` returns True.
     bank_comment_use_llm: bool = Field(
-        default=True, validation_alias="BANK_COMMENT_USE_LLM"
+        default=False, validation_alias="BANK_COMMENT_USE_LLM"
     )
     bank_comment_llm_model: str = Field(
         default="gpt-4o-mini", validation_alias="BANK_COMMENT_LLM_MODEL"
@@ -110,6 +136,46 @@ class Settings(BaseSettings):
     )
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
     log_level: str = Field(default="info", validation_alias="LOG_LEVEL")
+    slow_route_ms: int = Field(default=1500, validation_alias="SLOW_ROUTE_MS")
+    redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
+    rq_default_queue: str = Field(default="finance-ai", validation_alias="RQ_DEFAULT_QUEUE")
+    queue_mode: str = Field(default="adaptive", validation_alias="QUEUE_MODE")
+    rq_ocr_high_queue: str = Field(
+        default="ocr_high_priority", validation_alias="RQ_OCR_HIGH_QUEUE"
+    )
+    rq_ocr_normal_queue: str = Field(default="ocr_normal", validation_alias="RQ_OCR_NORMAL_QUEUE")
+    rq_review_queue: str = Field(default="review", validation_alias="RQ_REVIEW_QUEUE")
+    rq_transaction_queue: str = Field(
+        default="transaction", validation_alias="RQ_TRANSACTION_QUEUE"
+    )
+    task_max_retries: int = Field(default=3, validation_alias="TASK_MAX_RETRIES")
+    task_retry_base_seconds: int = Field(
+        default=10, validation_alias="TASK_RETRY_BASE_SECONDS"
+    )
+    openai_rps_limit: float = Field(default=2.0, validation_alias="OPENAI_RPS_LIMIT")
+    openai_concurrency_limit: int = Field(
+        default=2, validation_alias="OPENAI_CONCURRENCY_LIMIT"
+    )
+    ocr_backlog_defer_threshold: int = Field(
+        default=5000, validation_alias="OCR_BACKLOG_DEFER_THRESHOLD"
+    )
+    ocr_avg_wait_defer_seconds: int = Field(
+        default=60, validation_alias="OCR_AVG_WAIT_DEFER_SECONDS"
+    )
+    worker_metrics_window_seconds: int = Field(
+        default=600, validation_alias="WORKER_METRICS_WINDOW_SECONDS"
+    )
+
+    # Keep Supabase pooler usage modest by default; deployments can tune these
+    # without code changes based on their Supabase plan and expected concurrency.
+    db_pool_size: int = Field(default=5, validation_alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=3, validation_alias="DB_MAX_OVERFLOW")
+    db_pool_timeout_seconds: int = Field(
+        default=10, validation_alias="DB_POOL_TIMEOUT_SECONDS"
+    )
+    db_pool_recycle_seconds: int = Field(
+        default=1800, validation_alias="DB_POOL_RECYCLE_SECONDS"
+    )
 
     # Verbose function-trace logging — keep OFF in production. See core/debug_logger.py
     debug: bool = Field(default=False, validation_alias="DEBUG")

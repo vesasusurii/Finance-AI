@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import math
 import secrets
 import smtplib
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 
 import bcrypt
 
 from config import settings
 from models.user import User
+from services.verification_email_template import build_verification_email_message
 
-VERIFICATION_CODE_TTL_DAYS = 7
+VERIFICATION_CODE_TTL_MINUTES = 10
+VERIFICATION_RESEND_COOLDOWN_MINUTES = 2
 
 
 def generate_verification_code() -> str:
@@ -24,7 +26,41 @@ def hash_verification_code(code: str) -> str:
 
 
 def verification_expires_at() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=VERIFICATION_CODE_TTL_DAYS)
+    return datetime.now(timezone.utc) + timedelta(
+        minutes=VERIFICATION_CODE_TTL_MINUTES
+    )
+
+
+def verification_code_issued_at(user: User) -> datetime | None:
+    """Infer when the current code was sent from its expiry timestamp."""
+    if user.email_verification_expires_at is None:
+        return None
+    expires = user.email_verification_expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return expires - timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES)
+
+
+def resend_cooldown_remaining_seconds(user: User) -> int:
+    """Seconds until the user may request another verification email."""
+    if user.email_verified_at is not None:
+        return 0
+    issued = verification_code_issued_at(user)
+    if issued is None:
+        return 0
+    elapsed = (datetime.now(timezone.utc) - issued).total_seconds()
+    cooldown = VERIFICATION_RESEND_COOLDOWN_MINUTES * 60
+    remaining = cooldown - elapsed
+    return max(0, math.ceil(remaining))
+
+
+def resend_cooldown_message(seconds: int) -> str:
+    minutes, secs = divmod(seconds, 60)
+    if minutes and secs:
+        return f"You can request a new code in {minutes}m {secs}s."
+    if minutes:
+        return f"You can request a new code in {minutes} minute{'s' if minutes != 1 else ''}."
+    return f"You can request a new code in {secs} seconds."
 
 
 def verify_code(user: User, code: str) -> bool:
@@ -45,7 +81,10 @@ def verify_code(user: User, code: str) -> bool:
 
 def log_verification_code_for_local(email: str, code: str) -> None:
     if settings.environment == "local":
-        print(f"[auth] Email verification code for {email}: {code}")
+        print(
+            f"[auth] Email verification code for {email}: {code} "
+            f"(expires in {VERIFICATION_CODE_TTL_MINUTES} minutes)"
+        )
 
 
 def send_verification_code(email: str, code: str) -> None:
@@ -53,20 +92,12 @@ def send_verification_code(email: str, code: str) -> None:
         log_verification_code_for_local(email, code)
         return
 
-    message = EmailMessage()
-    message["From"] = settings.smtp_from_email
-    message["To"] = email
-    message["Subject"] = "Borek Finance email verification code"
-    message.set_content(
-        "\n".join(
-            [
-                "Your Borek Finance verification code is:",
-                "",
-                code,
-                "",
-                "This code expires in 7 days.",
-            ]
-        )
+    message = build_verification_email_message(
+        from_addr=settings.smtp_from_email,
+        to_addr=email,
+        subject="Your Borek Finance verification code",
+        code=code,
+        ttl_minutes=VERIFICATION_CODE_TTL_MINUTES,
     )
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:

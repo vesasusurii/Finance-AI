@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from core.debug_logger import get_logger
 from models.invoice import Invoice
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
@@ -104,6 +106,24 @@ class InvoiceRepository:
         row = result.scalar_one_or_none()
         return _to_response(row) if row else None
 
+    async def get_many(
+        self,
+        invoice_ids: list[int],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[int, InvoiceResponse]:
+        ids = sorted(set(invoice_ids))
+        if not ids:
+            return {}
+        query = (
+            select(Invoice)
+            .where(Invoice.id.in_(ids))
+            .options(joinedload(Invoice.source_file))
+        )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+        return {row.id: _to_response(row) for row in result.scalars().all()}
+
     async def list_invoices(
         self,
         filters: dict,
@@ -156,9 +176,53 @@ class InvoiceRepository:
         offset = (page - 1) * limit
         query = query.offset(offset).limit(limit)
 
+        db_t0 = time.perf_counter()
         total = (await self._session.execute(count_query)).scalar_one()
         rows = (await self._session.execute(query)).scalars().all()
+        db_query_ms = round((time.perf_counter() - db_t0) * 1000, 1)
+        if db_query_ms >= settings.slow_route_ms:
+            logger.warning(
+                "Slow invoice list query db_query_ms=%s page=%d limit=%d filters=%s total=%d",
+                db_query_ms,
+                page,
+                limit,
+                sorted(filters.keys()),
+                int(total),
+            )
         return [_to_response(r) for r in rows], int(total)
+
+    async def list_invoices_for_export(
+        self,
+        filters: dict,
+        *,
+        owner_user_id: int | None = None,
+        max_rows: int = 10_000,
+    ) -> list[InvoiceResponse]:
+        query = select(Invoice).options(joinedload(Invoice.source_file))
+        query = _apply_owner_scope(query, owner_user_id)
+
+        if filters.get("review_status"):
+            query = query.where(Invoice.review_status == filters["review_status"])
+        if filters.get("match_status"):
+            query = query.where(Invoice.match_status == filters["match_status"])
+        if filters.get("invoice_date_from"):
+            query = query.where(Invoice.invoice_date >= filters["invoice_date_from"])
+        if filters.get("invoice_date_to"):
+            query = query.where(Invoice.invoice_date <= filters["invoice_date_to"])
+        if filters.get("company"):
+            pattern = f"%{filters['company']}%"
+            query = query.where(Invoice.name_of_company.ilike(pattern))
+        if filters.get("category"):
+            pattern = f"%{filters['category']}%"
+            query = query.where(Invoice.category.ilike(pattern))
+
+        query = query.order_by(
+            Invoice.invoice_date.desc().nulls_last(),
+            Invoice.id.desc(),
+        ).limit(max_rows)
+
+        rows = (await self._session.execute(query)).scalars().all()
+        return [_to_response(r) for r in rows]
 
     async def update(
         self,
@@ -252,6 +316,33 @@ class InvoiceRepository:
             [r.id for r in rows],
         )
         return None, True
+
+    async def find_unique_by_numbers(
+        self,
+        normalized_numbers: list[str],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, InvoiceResponse]:
+        numbers = sorted({n for n in normalized_numbers if n})
+        if not numbers:
+            return {}
+        query = (
+            select(Invoice)
+            .where(Invoice.invoice_number_normalized.in_(numbers))
+            .order_by(Invoice.invoice_number_normalized.asc(), Invoice.id.asc())
+            .options(joinedload(Invoice.source_file))
+        )
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+
+        grouped: dict[str, list[Invoice]] = {}
+        for row in result.scalars().all():
+            grouped.setdefault(row.invoice_number_normalized or "", []).append(row)
+        return {
+            number: _to_response(rows[0])
+            for number, rows in grouped.items()
+            if number and len(rows) == 1
+        }
 
     async def list_by_number(
         self,

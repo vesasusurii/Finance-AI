@@ -1,0 +1,598 @@
+{
+  "name": "Borek Finance — Outlook invoice ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "foldersToInclude": [
+            "={{ $env.OUTLOOK_FOLDER || 'Inbox' }}"
+          ]
+        },
+        "options": {
+          "downloadAttachments": true,
+          "attachmentsPrefix": "attachment_"
+        }
+      },
+      "id": "a1000001-0001-4000-8000-000000000001",
+      "name": "Outlook New Email",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Microsoft Outlook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log-event",
+              "name": "event",
+              "value": "workflow_start",
+              "type": "string"
+            },
+            {
+              "id": "log-ts",
+              "name": "logged_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "log-subject",
+              "name": "email_subject",
+              "value": "={{ $json.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "log-msg",
+              "name": "message_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000002",
+      "name": "Log Workflow Start",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-binary",
+              "leftValue": "={{ Object.keys($binary || {}).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000003",
+      "name": "Has Attachments",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "evt",
+              "name": "event",
+              "value": "email_received",
+              "type": "string"
+            },
+            {
+              "id": "note",
+              "name": "note",
+              "value": "Email has no attachments — skipped",
+              "type": "string"
+            },
+            {
+              "id": "mid",
+              "name": "message_id",
+              "value": "={{ $('Outlook New Email').item.json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000004",
+      "name": "Log No Attachments",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split Outlook attachment binaries into one item per supported file.\nconst email = $('Outlook New Email').first().json;\nconst binaries = $input.first().binary || {};\nconst supported = new Set(['pdf', 'png', 'jpg', 'jpeg']);\nconst out = [];\n\nfor (const [key, bin] of Object.entries(binaries)) {\n  const name = bin.fileName || bin.fileName || key;\n  const ext = (String(name).split('.').pop() || '').toLowerCase();\n  if (!supported.has(ext)) {\n    out.push({\n      json: {\n        event: 'unsupported_file',\n        attachment_filename: name,\n        message_id: email.id,\n        skip_upload: true,\n      },\n    });\n    continue;\n  }\n  out.push({\n    json: {\n      event: 'attachment_processed',\n      sender_email: email.from?.emailAddress?.address ?? email.sender?.emailAddress?.address,\n      sender_name: email.from?.emailAddress?.name ?? email.sender?.emailAddress?.name,\n      email_subject: email.subject,\n      received_datetime: email.receivedDateTime,\n      message_id: email.id,\n      attachment_filename: name,\n      source: 'outlook_email',\n      skip_upload: false,\n    },\n    binary: { data: bin },\n  });\n}\n\nif (out.length === 0) {\n  return [{ json: { event: 'email_received', note: 'No supported attachments', message_id: email.id, skip_upload: true } }];\n}\nreturn out;"
+      },
+      "id": "a1000001-0001-4000-8000-000000000005",
+      "name": "Split Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip",
+              "leftValue": "={{ $json.skip_upload }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000006",
+      "name": "Supported File",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.FINANCE_API_URL || 'http://host.docker.internal:8000') + '/api/invoices/email-upload' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Email-Ingest-Key",
+              "value": "={{ $env.EMAIL_INGEST_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.source || 'outlook_email' }}"
+            },
+            {
+              "name": "sender_email",
+              "value": "={{ $json.sender_email }}"
+            },
+            {
+              "name": "sender_name",
+              "value": "={{ $json.sender_name }}"
+            },
+            {
+              "name": "email_subject",
+              "value": "={{ $json.email_subject }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $json.message_id }}"
+            },
+            {
+              "name": "attachment_name",
+              "value": "={{ $json.attachment_filename }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a1000001-0001-4000-8000-000000000007",
+      "name": "Send to AI Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "status-202",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 202,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000008",
+      "name": "Backend OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 120]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "evt",
+              "name": "event",
+              "value": "={{ $json.body?.duplicate ? 'duplicate_detected' : 'backend_success' }}",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "ingest_status",
+              "value": "={{ $json.body?.status }}",
+              "type": "string"
+            },
+            {
+              "id": "upload",
+              "name": "upload_id",
+              "value": "={{ $json.body?.upload_id }}",
+              "type": "number"
+            },
+            {
+              "id": "inv",
+              "name": "invoice_id",
+              "value": "={{ $json.body?.invoice_id }}",
+              "type": "number"
+            },
+            {
+              "id": "dup",
+              "name": "duplicate",
+              "value": "={{ $json.body?.duplicate }}",
+              "type": "boolean"
+            },
+            {
+              "id": "mid",
+              "name": "message_id",
+              "value": "={{ $('Split Attachments').item.json.message_id }}",
+              "type": "string"
+            },
+            {
+              "id": "fn",
+              "name": "attachment_filename",
+              "value": "={{ $('Split Attachments').item.json.attachment_filename }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000009",
+      "name": "Log Backend Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 40]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "evt",
+              "name": "event",
+              "value": "backend_failure",
+              "type": "string"
+            },
+            {
+              "id": "code",
+              "name": "status_code",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            },
+            {
+              "id": "err",
+              "name": "error_body",
+              "value": "={{ JSON.stringify($json.body || $json) }}",
+              "type": "string"
+            },
+            {
+              "id": "mid",
+              "name": "message_id",
+              "value": "={{ $('Split Attachments').item.json.message_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-00000000000a",
+      "name": "Log Backend Failure",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 200]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "evt",
+              "name": "event",
+              "value": "={{ $json.event || 'unsupported_file' }}",
+              "type": "string"
+            },
+            {
+              "id": "fn",
+              "name": "attachment_filename",
+              "value": "={{ $json.attachment_filename }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-00000000000b",
+      "name": "Log Skipped File",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1200, 320]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "evt",
+              "name": "event",
+              "value": "workflow_complete",
+              "type": "string"
+            },
+            {
+              "id": "ts",
+              "name": "logged_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-00000000000c",
+      "name": "Log Workflow Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1920, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Borek Finance — Outlook ingest\n\n1. Configure **Microsoft Outlook** credential\n2. Set env: `FINANCE_API_URL`, `EMAIL_INGEST_API_KEY`, optional `OUTLOOK_FOLDER`\n3. Backend must expose `POST /api/invoices/email-upload`\n4. Multipart field name: **file** (not files)\n5. Header: **X-Email-Ingest-Key**\n\nSupabase/storage/OCR run in the FastAPI backend — not in n8n.",
+        "height": 280,
+        "width": 420
+      },
+      "id": "a1000001-0001-4000-8000-00000000000d",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-40, 40]
+    }
+  ],
+  "connections": {
+    "Outlook New Email": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Workflow Start": {
+      "main": [
+        [
+          {
+            "node": "Has Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Attachments": {
+      "main": [
+        [
+          {
+            "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Attachments": {
+      "main": [
+        [
+          {
+            "node": "Supported File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supported File": {
+      "main": [
+        [
+          {
+            "node": "Send to AI Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to AI Backend": {
+      "main": [
+        [
+          {
+            "node": "Backend OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend OK": {
+      "main": [
+        [
+          {
+            "node": "Log Backend Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Backend Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Backend Success": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Backend Failure": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Skipped File": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log No Attachments": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -1,5 +1,6 @@
 from fastapi import HTTPException, UploadFile
 
+from core.cache import cache
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
 from core.invoice_access import upload_owner_user_id
@@ -37,7 +38,9 @@ class BankStatementController:
                 detail={"error": "no_file", "message": "No file attached."},
             )
         try:
-            return await self._service.upload(file, user)
+            response = await self._service.upload(file, user)
+            cache.delete_pattern("bank_tx:*")
+            return response
         except ExcelParseError as exc:
             msg = str(exc).lower()
             if "header" in msg or "column" in msg or "komenti" in msg:
@@ -76,6 +79,13 @@ class BankStatementController:
         limit: int,
     ) -> BankTransactionListResponse:
         owner = upload_owner_user_id(user)
+        cache_key = (
+            f"bank_tx:{owner}:{bank_statement_id}:{reconciliation_status}:"
+            f"{page}:{limit}"
+        )
+        cached = cache.get_model(cache_key, BankTransactionListResponse)
+        if cached is not None:
+            return cached
         items, total = await self._transaction_repo.list_transactions(
             bank_statement_id,
             reconciliation_status,
@@ -83,12 +93,15 @@ class BankStatementController:
             limit,
             owner_user_id=owner,
         )
-        return BankTransactionListResponse(
+        response = BankTransactionListResponse(
             items=items, total=total, page=page, limit=limit
         )
+        cache.set_model(cache_key, response, ttl_seconds=30)
+        return response
 
     @debug_trace
     async def delete_statement(
         self, statement_id: int, user: UserContext
     ) -> None:
         await self._service.delete_statement(statement_id, user)
+        cache.delete_pattern("bank_tx:*")

@@ -12,11 +12,11 @@ def test_is_reasoning_model():
 def test_gpt5_uses_max_completion_tokens():
     kwargs = chat_completion_kwargs(
         "gpt-5-mini",
-        max_output_tokens=2400,
+        max_output_tokens=16000,
         temperature=0,
         response_format={"type": "json_object"},
     )
-    assert kwargs["max_completion_tokens"] == 2400
+    assert kwargs["max_completion_tokens"] == 16000
     assert "max_tokens" not in kwargs
     assert "temperature" not in kwargs
     assert kwargs["response_format"] == {"type": "json_object"}

@@ -17,6 +17,10 @@ def _engine_connect_args(database_url: str) -> dict:
 engine = create_async_engine(
     settings.database_url,
     echo=False,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout_seconds,
+    pool_recycle=settings.db_pool_recycle_seconds,
     connect_args=_engine_connect_args(settings.database_url),
 )
 async_session = async_sessionmaker(engine, expire_on_commit=False)

@@ -16,6 +16,8 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/refresh",
         "/api/health",
         "/api/ready",
+        # API-key auth via verify_email_ingest_user (not session cookie)
+        "/api/invoices/email-upload",
     }
 )
 
@@ -26,6 +28,7 @@ ONBOARDING_PATHS = frozenset(
         "/api/auth/refresh",
         "/api/auth/verify-email",
         "/api/auth/change-password",
+        "/api/auth/resend-verification-code",
     }
 )
 

@@ -14,6 +14,7 @@ class ReconciliationSummary(BaseModel):
     unmatched_transactions: int
     review_tasks_created: int
     run_at: str
+    status: str | None = None
 
 
 class MatchResultResponse(BaseModel):

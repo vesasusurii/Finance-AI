@@ -1,14 +1,16 @@
-"""Period report Excel export (openpyxl)."""
+"""Excel export — period reports and Purchase Invoices Database."""
 
 from __future__ import annotations
 
 import io
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from core.debug_logger import debug_trace, get_logger
+from schemas.invoice import InvoiceResponse
 from schemas.report import PeriodReportResponse
 
 logger = get_logger(__name__)
@@ -34,6 +36,45 @@ _ALIGN_HEADER = Alignment(horizontal="center", vertical="center", wrap_text=True
 _ALIGN_DATE = Alignment(horizontal="center", vertical="center")
 _ALIGN_AMOUNT = Alignment(horizontal="right", vertical="center")
 _ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+_ALIGN_LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+_PURCHASE_INVOICE_HEADERS: tuple[str, ...] = (
+    "Invoice Date",
+    "Name of Company",
+    "Adress of Company",
+    "Invoice Number",
+    "Amount",
+    "Debt",
+    "Account Details",
+    "Internal Note/Description",
+    "Client / Employee Related",
+    "paid at (Date)",
+    "paid by",
+    "Fixed/Not fixed",
+    "Category",
+)
+
+_PURCHASE_INVOICE_COL_WIDTHS: tuple[float, ...] = (
+    13.0,
+    32.0,
+    34.0,
+    22.0,
+    14.0,
+    12.0,
+    38.0,
+    42.0,
+    24.0,
+    14.0,
+    18.0,
+    16.0,
+    22.0,
+)
+
+# 1-based column indices for body formatting
+_PI_COL_DATES = frozenset({1, 10})
+_PI_COL_AMOUNTS = frozenset({5, 6})
+_PI_COL_INVOICE_NUMBER = 4
+_PI_COL_TEXT_LEFT = frozenset({2, 3, 7, 8, 9, 11, 12, 13})
 
 _THIN_BORDER = Border(
     left=Side(style="thin", color=_COLOR_BORDER),
@@ -53,7 +94,98 @@ def _apply_cell_format(cell, *, is_header: bool, row_fill: PatternFill) -> None:
     cell.alignment = _ALIGN_HEADER if is_header else _ALIGN_CENTER
 
 
+def _decimal_to_float(value: Decimal | float | int | None) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _invoice_to_export_row(inv: InvoiceResponse) -> list[object | None]:
+    invoice_date = inv.invoice_date
+    if isinstance(invoice_date, date) and not isinstance(invoice_date, datetime):
+        invoice_date = datetime(
+            invoice_date.year, invoice_date.month, invoice_date.day
+        )
+    paid_at = inv.paid_at_date
+    if isinstance(paid_at, date) and not isinstance(paid_at, datetime):
+        paid_at = datetime(paid_at.year, paid_at.month, paid_at.day)
+    return [
+        invoice_date,
+        inv.name_of_company,
+        inv.address_of_company,
+        str(inv.invoice_number) if inv.invoice_number is not None else None,
+        _decimal_to_float(inv.amount),
+        _decimal_to_float(inv.debt),
+        inv.account_details,
+        inv.internal_note_description,
+        inv.client_employee_related,
+        paid_at,
+        inv.paid_by,
+        inv.fixed_status,
+        inv.category,
+    ]
+
+
+def _apply_purchase_invoice_body_cell(cell, *, col_idx: int, row_fill: PatternFill) -> None:
+    cell.border = _THIN_BORDER
+    cell.fill = row_fill
+    cell.font = _FONT_BODY
+    if col_idx in _PI_COL_DATES and isinstance(cell.value, datetime):
+        cell.number_format = _FMT_DATE
+        cell.alignment = _ALIGN_DATE
+    elif col_idx in _PI_COL_AMOUNTS and isinstance(cell.value, (int, float)):
+        cell.number_format = _FMT_AMOUNT
+        cell.alignment = _ALIGN_AMOUNT
+    elif col_idx == _PI_COL_INVOICE_NUMBER:
+        cell.number_format = "@"
+        cell.alignment = _ALIGN_CENTER
+    elif col_idx in _PI_COL_TEXT_LEFT:
+        cell.alignment = _ALIGN_LEFT
+    else:
+        cell.alignment = _ALIGN_CENTER
+
+
 class ExcelService:
+    @debug_trace
+    def write_purchase_invoices_workbook(
+        self, invoices: list[InvoiceResponse]
+    ) -> bytes:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Purchase Invoices"
+        ws.append(list(_PURCHASE_INVOICE_HEADERS))
+
+        for inv in invoices:
+            ws.append(_invoice_to_export_row(inv))
+
+        ws.freeze_panes = "A2"
+        ws.sheet_view.showGridLines = False
+
+        for col_idx, width in enumerate(_PURCHASE_INVOICE_COL_WIDTHS, start=1):
+            letter = ws.cell(row=1, column=col_idx).column_letter
+            ws.column_dimensions[letter].width = width
+
+        for row_idx in range(1, ws.max_row + 1):
+            is_header = row_idx == 1
+            row_fill = (
+                _FILL_ROW_EVEN if is_header or row_idx % 2 == 0 else _FILL_ROW_ALT
+            )
+            for col_idx in range(1, len(_PURCHASE_INVOICE_HEADERS) + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.border = _THIN_BORDER
+                cell.fill = _FILL_HEADER if is_header else row_fill
+                cell.font = _FONT_HEADER if is_header else _FONT_BODY
+                if is_header:
+                    cell.alignment = _ALIGN_HEADER
+                else:
+                    _apply_purchase_invoice_body_cell(
+                        cell, col_idx=col_idx, row_fill=row_fill
+                    )
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        return buffer.getvalue()
+
     @debug_trace
     def write_period_report_workbook(self, report: PeriodReportResponse) -> bytes:
         wb = Workbook()

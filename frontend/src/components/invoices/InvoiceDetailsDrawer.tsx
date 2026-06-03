@@ -68,6 +68,16 @@ export function InvoiceDetailsDrawer({
             )}
           </section>
 
+          {!invoice &&
+            (item.status === "ocr_processing" ||
+              item.status === "validating" ||
+              item.status === "uploading") && (
+              <p className="rounded-lg border border-border bg-surface-muted px-4 py-3 text-[13px] text-muted-foreground">
+                Extraction is in progress. This panel will show company, invoice
+                number, and amounts when OCR finishes.
+              </p>
+            )}
+
           {invoice && (
             <section>
               <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

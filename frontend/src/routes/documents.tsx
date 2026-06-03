@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Download, Trash2, X } from "lucide-react";
+import { downloadPurchaseInvoicesExcel } from "@/api/export";
 import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
@@ -10,6 +11,7 @@ import { FilterBar } from "@/components/ui-finance/FilterBar";
 import { useAuth } from "@/auth/AuthContext";
 import { useInvoices } from "@/hooks/useInvoices";
 import { deleteInvoice } from "@/api/invoices";
+import { uploadProgressEvents } from "@/services/uploadProgressEvents";
 import type { Invoice } from "@/types/invoice";
 import { isAdminRole } from "@/types/auth";
 import {
@@ -22,7 +24,20 @@ import {
 export function DocumentsPage() {
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const { items, total, loading, error, reload } = useInvoices({ limit: 100 });
+
+  useEffect(() => {
+    return uploadProgressEvents.subscribe((event) => {
+      if (
+        event.invoiceId &&
+        (event.status === "completed" || event.status === "requires_review")
+      ) {
+        void reload();
+      }
+    });
+  }, [reload]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -109,10 +124,36 @@ export function DocumentsPage() {
         eyebrow="Database"
         title="Purchase invoices"
         description="Invoices you have uploaded. Open a row to edit, save, approve, or delete."
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Download className="h-3.5 w-3.5" />}
+            disabled={exporting || loading}
+            onClick={() => {
+              setExporting(true);
+              setExportError(null);
+              void downloadPurchaseInvoicesExcel(
+                search.trim() ? { company: search.trim() } : {},
+              )
+                .catch((e) => {
+                  setExportError(
+                    e instanceof Error ? e.message : "Excel download failed",
+                  );
+                })
+                .finally(() => setExporting(false));
+            }}
+          >
+            {exporting ? "Preparing…" : "Download as Excel file"}
+          </Button>
+        }
       />
 
       {error && (
         <p className="mb-4 text-[13px] text-destructive">{error}</p>
+      )}
+      {exportError && (
+        <p className="mb-4 text-[13px] text-destructive">{exportError}</p>
       )}
 
       <FilterBar

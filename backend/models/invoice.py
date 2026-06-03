@@ -26,6 +26,19 @@ class Invoice(Base):
         Index("ix_invoices_match_status", "match_status"),
         Index("ix_invoices_paid_at_date", "paid_at_date"),
         Index("ix_invoices_uploaded_by", "uploaded_by"),
+        Index("ix_invoices_source_file_id", "source_file_id"),
+        Index(
+            "ix_invoices_owner_review_created",
+            "uploaded_by",
+            "review_status",
+            "created_at",
+        ),
+        Index(
+            "ix_invoices_owner_match_date",
+            "uploaded_by",
+            "match_status",
+            "invoice_date",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

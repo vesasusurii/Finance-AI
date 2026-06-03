@@ -6,6 +6,21 @@ import { cn } from "@/lib/utils";
 import { isProcessingStatus } from "@/lib/uploadQueueStages";
 import type { UploadQueueItem } from "@/types/uploadQueue";
 import { InvoiceStatusBadge } from "./InvoiceStatusBadge";
+import { UploadStagePipeline } from "./UploadStagePipeline";
+
+function detailsCell(item: UploadQueueItem): string {
+  if (item.error) return item.error;
+  if (item.infoMessage) return item.infoMessage;
+  if (item.detailSummary) return item.detailSummary;
+  if (item.status === "ocr_processing" || item.status === "validating") {
+    return "Extracting invoice fields…";
+  }
+  if (item.status === "uploading") return "Saving to storage…";
+  if (item.status === "completed" || item.status === "requires_review") {
+    return "Open View for full extraction";
+  }
+  return "—";
+}
 
 export function ProcessingQueueTable({
   items,
@@ -20,7 +35,7 @@ export function ProcessingQueueTable({
     return (
       <p className="text-[13px] text-muted-foreground">
         No uploads in this session yet. Files you upload will appear here with
-        live processing status.
+        live extraction progress.
       </p>
     );
   }
@@ -41,7 +56,7 @@ export function ProcessingQueueTable({
                 Progress
               </th>
               <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Stage
+                Stages
               </th>
               <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Confidence
@@ -82,7 +97,7 @@ export function ProcessingQueueTable({
                   <InvoiceStatusBadge status={item.status} />
                 </td>
                 <td className="px-4 py-3">
-                  <div className="min-w-[120px]">
+                  <div className="min-w-[140px]">
                     <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                       <span>{item.stageLabel}</span>
                       <span className="tabular-nums">{item.progress}%</span>
@@ -90,22 +105,32 @@ export function ProcessingQueueTable({
                     <Progress value={item.progress} className="h-1.5" />
                   </div>
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{item.stageLabel}</td>
+                <td className="px-4 py-3">
+                  <UploadStagePipeline item={item} />
+                </td>
                 <td className="px-4 py-3">
                   {item.confidence != null ? (
                     <ConfidenceIndicator value={item.confidence} />
+                  ) : item.status === "ocr_processing" ||
+                    item.status === "validating" ? (
+                    <span className="text-[12px] text-muted-foreground">Pending</span>
                   ) : (
                     <span className="text-[12px] text-muted-foreground">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3">
-                  {item.error ? (
-                    <span className="text-[12px] text-destructive">{item.error}</span>
-                  ) : item.infoMessage ? (
-                    <span className="text-[12px] text-primary">{item.infoMessage}</span>
-                  ) : (
-                    <span className="text-[12px] text-muted-foreground">—</span>
-                  )}
+                <td className="max-w-[220px] px-4 py-3">
+                  <span
+                    className={cn(
+                      "line-clamp-2 text-[12px]",
+                      item.error
+                        ? "text-destructive"
+                        : item.infoMessage
+                          ? "text-primary"
+                          : "text-foreground",
+                    )}
+                  >
+                    {detailsCell(item)}
+                  </span>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">

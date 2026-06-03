@@ -60,6 +60,15 @@ async def verify_email(
     return await ctrl.verify_email(user, body, response)
 
 
+@router.post("/resend-verification-code", response_model=LoginResponse)
+async def resend_verification_code(
+    response: Response,
+    user: UserContext = Depends(get_current_user),
+    ctrl: AuthController = Depends(get_auth_controller),
+):
+    return await ctrl.resend_verification_code(user, response)
+
+
 @router.post("/change-password", response_model=LoginResponse)
 async def change_password(
     body: ChangePasswordRequest,
