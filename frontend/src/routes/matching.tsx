@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Play, Check, X } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
@@ -130,6 +130,7 @@ export function MatchingPage() {
           page: 1,
           limit: 1,
           reasons: [...MATCHING_REVIEW_REASONS],
+          slim: true,
         }),
         listBankTransactions({
           ...filters,
@@ -187,6 +188,7 @@ export function MatchingPage() {
             page: reviewPage,
             limit: PAGE_SIZE,
             reasons: [...MATCHING_REVIEW_REASONS],
+            slim: true,
           });
           setReviewTasks(res.items);
           setReviewTotal(res.total);
@@ -271,9 +273,18 @@ export function MatchingPage() {
     setError(null);
     try {
       await approveMatch(matchId);
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: "approved" as const } : m,
+        ),
+      );
     } catch (e) {
       if (e instanceof ApiError && e.code === "match_already_resolved") {
-        // Idempotent — row was already approved/rejected; refresh UI.
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.id === matchId ? { ...m, status: "approved" as const } : m,
+          ),
+        );
       } else {
         setError(e instanceof Error ? e.message : "Could not approve match");
         return;
@@ -292,9 +303,18 @@ export function MatchingPage() {
     setError(null);
     try {
       await rejectMatch(matchId, reason || undefined);
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: "rejected" as const } : m,
+        ),
+      );
     } catch (e) {
       if (e instanceof ApiError && e.code === "match_already_resolved") {
-        // Idempotent — refresh to sync state.
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.id === matchId ? { ...m, status: "rejected" as const } : m,
+          ),
+        );
       } else {
         setError(e instanceof Error ? e.message : "Could not reject match");
         return;
@@ -462,7 +482,7 @@ export function MatchingPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Workflow · Step 3"
+        eyebrow="Workflow ┬╖ Step 3"
         title="Matching"
         actions={
           <div className="flex items-center gap-2">
@@ -484,7 +504,7 @@ export function MatchingPage() {
               disabled={running}
               onClick={() => void onRun()}
             >
-              {running ? "Running…" : "Run Matching"}
+              {running ? "RunningΓÇª" : "Run Matching"}
             </Button>
           </div>
         }
@@ -603,7 +623,7 @@ export function MatchingPage() {
                           Task #{t.id}
                         </span>
                         <span className="text-muted-foreground">
-                          · txn #{t.bank_transaction_id}
+                          ┬╖ txn #{t.bank_transaction_id}
                         </span>
                         <StatusBadge value={reviewReasonLabel(t.reason)} />
                         {t.payload?.invoice_number ? (
@@ -614,7 +634,7 @@ export function MatchingPage() {
                         {t.reason === "batch_amount_suggested" &&
                         Array.isArray(t.payload?.invoices) ? (
                           <span className="text-muted-foreground">
-                            ·{" "}
+                            ┬╖{" "}
                             {(t.payload.invoices as { invoice_number?: string }[])
                               .map((i) => i.invoice_number)
                               .filter(Boolean)
@@ -671,7 +691,7 @@ function TabPanel({
     <div className="relative min-h-[200px]">
       {loading && (
         <p className="absolute right-0 top-0 text-[12px] text-muted-foreground">
-          Loading…
+          LoadingΓÇª
         </p>
       )}
       {children}

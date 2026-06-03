@@ -1,5 +1,14 @@
-import { useEffect, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, Search, X } from "lucide-react";
+import {
+  hintsFromInvoice,
+  hintsLabel,
+  matchesHints,
+  matchesFreeText,
+  scoreHints,
+  getHighlightTerms,
+  type AutoSearchHints,
+} from "@/lib/bankTransactionSearch";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { BankTransactionMatchCard } from "@/components/review/BankTransactionMatchCard";
@@ -71,10 +80,18 @@ export function BankTransactionCandidatesPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"match" | "reject" | null>(null);
   const [matchingTxnId, setMatchingTxnId] = useState<number | null>(null);
+  const [autoHints, setAutoHints] = useState<AutoSearchHints>(() => hintsFromInvoice(invoice));
+  const [searchInput, setSearchInput] = useState(() => hintsLabel(hintsFromInvoice(invoice)));
 
   useEffect(() => {
     setExpandedTxnId(null);
   }, [invoice.id, task?.id]);
+
+  useEffect(() => {
+    const hints = hintsFromInvoice(invoice);
+    setAutoHints(hints);
+    setSearchInput(hintsLabel(hints));
+  }, [invoice.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,8 +170,26 @@ export function BankTransactionCandidatesPanel({
     }
   };
 
+  const isAutoSearch = searchInput === hintsLabel(autoHints);
+
+  const visibleTransactions = useMemo(() => {
+    if (!searchInput.trim()) return transactions;
+    if (isAutoSearch) {
+      return transactions
+        .filter((t) => matchesHints(t, autoHints))
+        .sort((a, b) => scoreHints(b, autoHints) - scoreHints(a, autoHints));
+    }
+    return transactions.filter((t) => matchesFreeText(t, searchInput));
+  }, [transactions, searchInput, isAutoSearch, autoHints]);
+
+  const highlightTerms = useMemo(() => {
+    if (!searchInput.trim()) return [];
+    if (isAutoSearch) return getHighlightTerms(autoHints);
+    return [searchInput.trim().toLowerCase()];
+  }, [searchInput, isAutoSearch, autoHints]);
+
   return (
-    <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <div className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -190,6 +225,25 @@ export function BankTransactionCandidatesPanel({
           Open a transaction to see full details, then match it to the invoice on
           the left. Lines matching this invoice number are listed first.
         </p>
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search comment, amount, invoice #…"
+            className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-7 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => setSearchInput("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -206,14 +260,26 @@ export function BankTransactionCandidatesPanel({
             No candidate bank lines found. Upload a bank statement and run
             matching, or open the matching screen.
           </p>
+        ) : visibleTransactions.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">
+            No transactions match the search.{" "}
+            <button
+              type="button"
+              className="underline hover:text-foreground"
+              onClick={() => setSearchInput("")}
+            >
+              Clear search
+            </button>
+          </p>
         ) : (
           <div className="space-y-2">
-            {transactions.map((t) => (
+            {visibleTransactions.map((t) => (
               <BankTransactionMatchCard
                 key={t.id}
                 transaction={t}
                 expanded={expandedTxnId === t.id}
                 matching={busy === "match" && matchingTxnId === t.id}
+                highlightTerms={highlightTerms}
                 onExpand={() => {
                   setExpandedTxnId(t.id);
                   setError(null);
