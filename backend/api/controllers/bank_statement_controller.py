@@ -77,11 +77,12 @@ class BankStatementController:
         reconciliation_status: str | None,
         page: int,
         limit: int,
+        multi_invoice: bool = False,
     ) -> BankTransactionListResponse:
         owner = upload_owner_user_id(user)
         cache_key = (
             f"bank_tx:{owner}:{bank_statement_id}:{reconciliation_status}:"
-            f"{page}:{limit}"
+            f"multi={multi_invoice}:{page}:{limit}"
         )
         cached = cache.get_model(cache_key, BankTransactionListResponse)
         if cached is not None:
@@ -92,6 +93,7 @@ class BankStatementController:
             page,
             limit,
             owner_user_id=owner,
+            multi_invoice=multi_invoice,
         )
         response = BankTransactionListResponse(
             items=items, total=total, page=page, limit=limit

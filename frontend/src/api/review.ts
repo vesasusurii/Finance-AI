@@ -8,14 +8,18 @@ import type {
 export async function listReviewTasks(filters: {
   task_type?: string;
   has_invoice?: boolean;
+  reasons?: string[];
   page?: number;
   limit?: number;
 } = {}): Promise<ReviewTaskListResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") {
-      params.set(key, String(value));
+    if (value === undefined || value === "") return;
+    if (key === "reasons" && Array.isArray(value)) {
+      value.forEach((reason) => params.append("reasons", reason));
+      return;
     }
+    params.set(key, String(value));
   });
   const qs = params.toString();
   return apiFetch<ReviewTaskListResponse>(`/api/review${qs ? `?${qs}` : ""}`);

@@ -19,12 +19,16 @@ async def list_review_tasks(
         None,
         description="When true, only tasks with a linked purchase invoice (invoice-centric queue).",
     ),
+    reasons: list[str] | None = Query(
+        None,
+        description="When set, only tasks whose reason is in this list.",
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     user: UserContext = Depends(get_current_user),
     ctrl: ReviewController = Depends(get_review_controller),
 ):
-    return await ctrl.list_open(user, task_type, page, limit, has_invoice)
+    return await ctrl.list_open(user, task_type, page, limit, has_invoice, reasons)
 
 
 @router.post("/{task_id}/approve", response_model=ReviewTaskDecisionResponse)

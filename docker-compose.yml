@@ -1,8 +1,10 @@
 # Borek Finance — local team stack (starter)
 # Docs: DOCS/12. Deployment & Environments 1.md
 #
-# Default:  db + backend (health stub until full app is implemented)
-# Frontend: docker compose --profile full up -d --build  (after frontend/ is scaffolded)
+# Default:  db + backend + worker + redis
+# Frontend: docker compose --profile full up -d --build
+# n8n:      docker compose --profile n8n up -d
+# ngrok:    docker compose --profile tunnel up -d  (expose API for n8n Cloud)
 
 services:
   db:
@@ -130,6 +132,55 @@ services:
       - /app/node_modules
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
 
+  n8n:
+    profiles: ["n8n"]
+    image: n8nio/n8n:1.95.3
+    container_name: finance-ai-n8n
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${N8N_TIMEZONE:-Europe/Berlin}
+      TZ: ${N8N_TIMEZONE:-Europe/Berlin}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-change_me_n8n_password}
+      # Expose to workflow expressions ($env.FINANCE_API_URL, etc.)
+      N8N_ENVIRONMENT_VARIABLES_ALLOWLIST: FINANCE_API_URL,EMAIL_INGEST_API_KEY,OUTLOOK_FOLDER
+      FINANCE_API_URL: http://backend:8000
+      EMAIL_INGEST_API_KEY: ${EMAIL_INGEST_API_KEY:-}
+      OUTLOOK_FOLDER: ${OUTLOOK_FOLDER:-Inbox}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/import-workflows:ro
+
+  ngrok:
+    profiles: ["tunnel"]
+    image: ngrok/ngrok:latest
+    container_name: finance-ai-ngrok
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Set NGROK_AUTHTOKEN in .env — get it from https://dashboard.ngrok.com/get-started/your-authtoken}
+    command:
+      - http
+      - backend:8000
+      - --log=stdout
+      - --log-format=logfmt
+    ports:
+      - "${NGROK_INSPECT_PORT:-4040}:4040"
+
 volumes:
   postgres_data:
   upload_data:
+  n8n_data:

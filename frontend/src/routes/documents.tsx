@@ -5,6 +5,7 @@ import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEdit
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
+import { TablePagination } from "@/components/ui-finance/TablePagination";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator";
 import { FilterBar } from "@/components/ui-finance/FilterBar";
@@ -12,7 +13,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { useInvoices } from "@/hooks/useInvoices";
 import { deleteInvoice } from "@/api/invoices";
 import { uploadProgressEvents } from "@/services/uploadProgressEvents";
-import type { Invoice } from "@/types/invoice";
+import type { Invoice, InvoiceFilters, MatchStatus } from "@/types/invoice";
 import { isAdminRole } from "@/types/auth";
 import {
   formatCurrency,
@@ -21,12 +22,48 @@ import {
   reviewStatusLabel,
 } from "@/lib/labels";
 
+const PAGE_SIZE = 10;
+
+const selectClass =
+  "h-8 rounded-md border border-input bg-background px-2 text-[12px] text-foreground";
+
+type MatchFilter = "" | MatchStatus;
+type ReviewFilter = "" | "pending" | "needs_review" | "approved";
+type SortOrder = "invoice_date_desc" | "invoice_date_asc";
+
 export function DocumentsPage() {
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [matchFilter, setMatchFilter] = useState<MatchFilter>("");
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("invoice_date_desc");
+  const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const { items, total, loading, error, reload } = useInvoices({ limit: 100 });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, matchFilter, reviewFilter, sortOrder]);
+
+  const invoiceFilters = useMemo((): InvoiceFilters => {
+    const filters: InvoiceFilters = {
+      page,
+      limit: PAGE_SIZE,
+      sort: sortOrder,
+    };
+    if (debouncedSearch) filters.search = debouncedSearch;
+    if (matchFilter) filters.match_status = matchFilter;
+    if (reviewFilter) filters.review_status = reviewFilter;
+    return filters;
+  }, [page, debouncedSearch, matchFilter, reviewFilter, sortOrder]);
+
+  const { items, total, loading, error, reload } = useInvoices(invoiceFilters);
 
   useEffect(() => {
     return uploadProgressEvents.subscribe((event) => {
@@ -38,16 +75,6 @@ export function DocumentsPage() {
       }
     });
   }, [reload]);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    if (!q) return items;
-    return items.filter((i) =>
-      [i.name_of_company, i.invoice_number, i.internal_note_description]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q)),
-    );
-  }, [items, search]);
 
   const columns: Column<Invoice>[] = [
     {
@@ -123,7 +150,6 @@ export function DocumentsPage() {
       <PageHeader
         eyebrow="Database"
         title="Purchase invoices"
-        description="Invoices you have uploaded. Open a row to edit, save, approve, or delete."
         actions={
           <Button
             variant="secondary"
@@ -133,9 +159,11 @@ export function DocumentsPage() {
             onClick={() => {
               setExporting(true);
               setExportError(null);
-              void downloadPurchaseInvoicesExcel(
-                search.trim() ? { company: search.trim() } : {},
-              )
+              void downloadPurchaseInvoicesExcel({
+                ...(debouncedSearch ? { company: debouncedSearch } : {}),
+                ...(matchFilter ? { match_status: matchFilter } : {}),
+                ...(reviewFilter ? { review_status: reviewFilter } : {}),
+              })
                 .catch((e) => {
                   setExportError(
                     e instanceof Error ? e.message : "Excel download failed",
@@ -160,17 +188,57 @@ export function DocumentsPage() {
         search={search}
         onSearch={setSearch}
         placeholder="Search by company, invoice number, description…"
-        right={
-          <span className="text-[12px] text-muted-foreground tabular-nums">
-            {loading ? "Loading…" : `${filtered.length} of ${total}`}
-          </span>
-        }
-      />
+      >
+        <select
+          value={matchFilter}
+          onChange={(e) => setMatchFilter(e.target.value as MatchFilter)}
+          className={selectClass}
+          aria-label="Filter by match status"
+        >
+          <option value="">All match statuses</option>
+          <option value="unmatched">Unmatched</option>
+          <option value="matched">Matched</option>
+        </select>
+        <select
+          value={reviewFilter}
+          onChange={(e) => setReviewFilter(e.target.value as ReviewFilter)}
+          className={selectClass}
+          aria-label="Filter by review status"
+        >
+          <option value="">All review statuses</option>
+          <option value="pending">Pending</option>
+          <option value="needs_review">Needs review</option>
+          <option value="approved">Approved</option>
+        </select>
+        <select
+          value={sortOrder}
+          onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+          className={selectClass}
+          aria-label="Sort order"
+        >
+          <option value="invoice_date_desc">Date · newest first</option>
+          <option value="invoice_date_asc">Date · oldest first</option>
+        </select>
+      </FilterBar>
+
+      <div className="mb-3 flex items-center justify-between gap-2 text-[12px] text-muted-foreground">
+        <span className="tabular-nums">
+          {loading ? "Loading…" : `${total} invoice${total === 1 ? "" : "s"}`}
+        </span>
+      </div>
 
       <DataTable
         columns={columns}
-        rows={filtered}
+        rows={items}
         onRowClick={setSelected}
+        empty="No invoices match your filters."
+      />
+
+      <TablePagination
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        onPageChange={setPage}
       />
 
       {selected && (
