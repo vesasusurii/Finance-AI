@@ -1,8 +1,10 @@
-from fastapi import BackgroundTasks, HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile
 from openai import AsyncOpenAI
 
+from core.debug_logger import get_logger
 from core.document_types import is_ocr_ready, validate_document_file
 from core.exceptions import ExtractionError
+from core.upload_enqueue import safe_enqueue_invoice_ocr
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
@@ -13,8 +15,9 @@ from schemas.document import (
 )
 from schemas.invoice import UploadItemResponse
 from services.invoice_extraction_service import InvoiceExtractionService
-from services.invoice_processing_worker import schedule_invoice_extraction
 from utils.file_storage import save_bytes
+
+logger = get_logger(__name__)
 
 
 class DocumentService:
@@ -34,21 +37,33 @@ class DocumentService:
         self,
         files: list[UploadFile],
         user: UserContext,
-        background_tasks: BackgroundTasks,
     ) -> DocumentUploadResponse:
         items: list[DocumentUploadItemResponse] = []
+
         for file in files:
             filename = file.filename or "upload"
             try:
                 content = await file.read()
                 mime = validate_document_file(filename, file.content_type, len(content))
-                await file.seek(0)
 
                 if is_ocr_ready(mime):
-                    prepared = await self._extraction.prepare_upload(file, user)
-                    await self._upload_repo.commit()
+                    prepared = await self._extraction.prepare_upload(
+                        file, user, content=content
+                    )
 
                     if isinstance(prepared, UploadItemResponse):
+                        await self._upload_repo.commit()
+                        if (
+                            prepared.invoice_id is None
+                            and prepared.upload_id
+                            and prepared.processing_status
+                            in ("queued", "processing")
+                        ):
+                            safe_enqueue_invoice_ocr(
+                                prepared.upload_id,
+                                user.user_id,
+                                priority="high" if len(files) == 1 else "normal",
+                            )
                         items.append(
                             DocumentUploadItemResponse(
                                 document_id=prepared.upload_id,
@@ -64,17 +79,23 @@ class DocumentService:
                         )
                         continue
 
-                    schedule_invoice_extraction(
+                    priority = "high" if len(files) == 1 else "normal"
+                    await self._upload_repo.commit()
+                    safe_enqueue_invoice_ocr(
                         prepared.upload_id,
                         user.user_id,
-                        self._openai,
-                        background_tasks,
+                        priority=priority,
+                    )
+                    logger.info(
+                        "Upload stored upload_id=%d filename=%r",
+                        prepared.upload_id,
+                        prepared.stored_filename,
                     )
                     items.append(
                         DocumentUploadItemResponse(
                             document_id=prepared.upload_id,
                             filename=prepared.stored_filename,
-                            upload_status="processing",
+                            upload_status="saved",
                             mime_type=prepared.mime,
                             file_size=prepared.file_size,
                         )
@@ -92,14 +113,15 @@ class DocumentService:
                         storage_path=storage_path,
                         mime_type=mime,
                         user_id=user.user_id,
-                        processing_status="pending",
+                        processing_status="processed",
                         file_size=file_size,
                     )
+                    await self._upload_repo.commit()
                     items.append(
                         DocumentUploadItemResponse(
                             document_id=row.id,
                             filename=filename,
-                            upload_status="pending",
+                            upload_status="saved",
                             mime_type=mime,
                             file_size=file_size,
                         )
@@ -114,6 +136,7 @@ class DocumentService:
                     )
                 )
             except Exception as exc:
+                logger.exception("Document upload failed for %r", filename)
                 items.append(
                     DocumentUploadItemResponse(
                         document_id=0,
@@ -122,10 +145,13 @@ class DocumentService:
                         error=str(exc),
                     )
                 )
+
         return DocumentUploadResponse(uploaded=len(items), items=items)
 
     async def get_status(
-        self, document_id: int, user: UserContext
+        self,
+        document_id: int,
+        user: UserContext,
     ) -> DocumentStatusResponse:
         row = await self._upload_repo.get(document_id)
         if row is None or row.uploaded_by != user.user_id:

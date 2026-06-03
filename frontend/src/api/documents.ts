@@ -41,6 +41,13 @@ export function validateClientFile(file: File): string | null {
   return null;
 }
 
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export async function getDocumentStatus(
   documentId: number,
 ): Promise<DocumentStatusResponse | null> {
@@ -56,39 +63,38 @@ export async function getDocumentStatus(
   return res.json() as Promise<DocumentStatusResponse>;
 }
 
-const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_ATTEMPTS = 180;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-export async function pollDocumentUntilDone(
+/** Poll until worker finishes OCR (does not block the upload HTTP request). */
+export async function waitForDocumentExtraction(
   documentId: number,
+  options: {
+    onPoll?: (status: DocumentStatusResponse, elapsedMs: number) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<DocumentUploadItem> {
-  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
-    const status = await getDocumentStatus(documentId);
-    if (status === null) {
-      await sleep(POLL_INTERVAL_MS);
-      continue;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+    if (options.signal?.aborted) {
+      throw new Error("Extraction watch cancelled");
     }
-    if (
-      status.upload_status === "processed" ||
-      status.upload_status === "failed"
-    ) {
-      return {
-        document_id: status.document_id,
-        filename: status.filename,
-        upload_status: status.upload_status,
-        mime_type: status.mime_type,
-        file_size: status.file_size,
-        invoice_id: status.invoice_id,
-        error: status.error,
-      };
+    const status = await getDocumentStatus(documentId);
+    const elapsedMs = Date.now() - startedAt;
+    if (status) {
+      options.onPoll?.(status, elapsedMs);
+      if (status.upload_status === "processed" || status.upload_status === "failed") {
+        return {
+          document_id: status.document_id,
+          filename: status.filename,
+          upload_status: status.upload_status,
+          mime_type: status.mime_type,
+          file_size: status.file_size,
+          invoice_id: status.invoice_id,
+          error: status.error,
+        };
+      }
     }
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error("Processing timed out — check the invoice list shortly");
+  throw new Error("Extraction is taking longer than expected — check Documents shortly");
 }
 
 export function uploadDocumentWithProgress(

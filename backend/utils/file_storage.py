@@ -75,8 +75,9 @@ async def resolve_upload_bytes(
 ) -> bytes | None:
     backend = _backend()
     try:
-        if await backend.exists(storage_path):
-            return await backend.read(storage_path)
+        # Read directly instead of HEAD + GET; on Supabase that saves one
+        # network round-trip for every OCR fallback to storage.
+        return await backend.read(storage_path)
     except FileNotFoundError:
         pass
 

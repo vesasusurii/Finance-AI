@@ -18,6 +18,7 @@ class LoginResponse(BaseModel):
     role: UserRole = Field(default=ROLE_FINANCE)
     email_verified: bool = True
     must_change_password: bool = False
+    verification_resend_in_seconds: int = 0
 
 
 class UserContext(BaseModel):

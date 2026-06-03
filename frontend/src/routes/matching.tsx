@@ -11,7 +11,7 @@ import {
   rejectMatch,
   runReconciliation,
 } from "@/api/reconciliation";
-import { ApiError, apiFetch } from "@/api/client";
+import { ApiError } from "@/api/client";
 import { refreshSession } from "@/api/auth";
 import { listReviewTasks } from "@/api/review";
 import { listBankStatements, listBankTransactions } from "@/api/bankStatements";
@@ -349,9 +349,10 @@ export function MatchingPage() {
       {summary && (
         <div className="rounded-lg border border-border bg-surface-muted/50 px-4 py-3 text-[13px] text-foreground">
           Last run: <strong>{summary.matched}</strong> matched,{" "}
-          <strong>{summary.unmatched_transactions}</strong> unmatched transactions,{" "}
-          <strong>{summary.review_tasks_created}</strong> review tasks,{" "}
-          <strong>{summary.unmatched_invoices}</strong> unmatched invoices in DB
+          <strong>{summary.unmatched_transactions}</strong> unmatched
+          transactions, <strong>{summary.review_tasks_created}</strong> review
+          tasks, <strong>{summary.unmatched_invoices}</strong> unmatched invoices
+          in DB
         </div>
       )}
 

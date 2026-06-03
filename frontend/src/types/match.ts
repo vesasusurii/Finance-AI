@@ -4,6 +4,7 @@ export interface ReconciliationSummary {
   unmatched_transactions: number;
   review_tasks_created: number;
   run_at: string;
+  status?: string;
 }
 
 export interface InvoicePaymentMatch {

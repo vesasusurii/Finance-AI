@@ -25,17 +25,9 @@ export const STAGE_LABELS: Record<InvoiceQueueStatus, string> = {
   requires_review: "Requires review",
 };
 
-/** Simulated pipeline while awaiting the existing upload API response. */
-export const MOCK_PIPELINE: InvoiceQueueStatus[] = [
-  "uploading",
-  "ocr_processing",
-  "validating",
-  "saving",
-];
-
 export const STAGE_PROGRESS: Record<InvoiceQueueStatus, number> = {
   queued: 0,
-  uploading: 12,
+  uploading: 8,
   ocr_processing: 45,
   validating: 72,
   saving: 90,
@@ -57,6 +49,13 @@ export function statusFromUploadResult(
   if (reviewStatus === "manual_review" || reviewStatus === "needs_review") {
     return "requires_review";
   }
-  if (processingStatus === "processed") return "completed";
+  if (
+    processingStatus === "processed" ||
+    processingStatus === "queued" ||
+    processingStatus === "processing" ||
+    processingStatus === "saved"
+  ) {
+    return "completed";
+  }
   return "requires_review";
 }

@@ -18,6 +18,8 @@ from schemas.auth import (
 from services.email_verification_service import (
     generate_verification_code,
     hash_verification_code,
+    resend_cooldown_message,
+    resend_cooldown_remaining_seconds,
     send_verification_code,
     verification_expires_at,
     verify_code,
@@ -43,12 +45,18 @@ def _user_auth_flags(user: User) -> tuple[bool, bool]:
 
 def _login_response(user: User) -> LoginResponse:
     email_verified, must_change_password = _user_auth_flags(user)
+    resend_in = (
+        0
+        if email_verified
+        else resend_cooldown_remaining_seconds(user)
+    )
     return LoginResponse(
         user_id=user.id,
         email=user.email,
         role=user.role,
         email_verified=email_verified,
         must_change_password=must_change_password,
+        verification_resend_in_seconds=resend_in,
     )
 
 
@@ -216,11 +224,60 @@ class AuthController:
                 status_code=400,
                 detail={
                     "error": "invalid_verification_code",
-                    "message": "Invalid or expired verification code.",
+                    "message": (
+                        "Invalid or expired verification code. "
+                        "Codes expire after 10 minutes."
+                    ),
                 },
             )
 
         user = await self._user_repo.mark_email_verified(user)
+        set_auth_cookies(response, user=user)
+        return _login_response(user)
+
+    async def resend_verification_code(
+        self,
+        user_ctx: UserContext,
+        response: Response,
+    ) -> LoginResponse:
+        user = await self._user_repo.get(user_ctx.user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "invalid_session",
+                    "message": "Session expired. Please sign in again.",
+                },
+            )
+        if user.email_verified_at is not None:
+            return _login_response(user)
+        if user.must_change_password:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "password_change_required",
+                    "message": "Change your password before requesting a verification code.",
+                },
+            )
+
+        wait = resend_cooldown_remaining_seconds(user)
+        if wait > 0:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "resend_too_soon",
+                    "message": resend_cooldown_message(wait),
+                    "retry_after_seconds": wait,
+                },
+            )
+
+        verification_code = generate_verification_code()
+        user = await self._user_repo.set_email_verification_code(
+            user,
+            code_hash=hash_verification_code(verification_code),
+            expires_at=verification_expires_at(),
+        )
+        send_verification_code(user.email, verification_code)
         set_auth_cookies(response, user=user)
         return _login_response(user)
 

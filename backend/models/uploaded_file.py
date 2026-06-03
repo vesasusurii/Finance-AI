@@ -11,6 +11,17 @@ class UploadedFile(Base):
     __table_args__ = (
         Index("ix_uploaded_files_kind_status", "file_kind", "processing_status"),
         Index("ix_uploaded_files_uploaded_by", "uploaded_by"),
+        Index(
+            "ix_uploaded_files_user_kind_status",
+            "uploaded_by",
+            "file_kind",
+            "processing_status",
+        ),
+        Index(
+            "ix_uploaded_files_status_uploaded_at",
+            "processing_status",
+            "uploaded_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

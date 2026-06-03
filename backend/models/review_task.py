@@ -9,7 +9,13 @@ from models.base import Base
 
 class ReviewTask(Base):
     __tablename__ = "review_tasks"
-    __table_args__ = (Index("ix_review_tasks_status", "status"),)
+    __table_args__ = (
+        Index("ix_review_tasks_status", "status"),
+        Index("ix_review_tasks_status_created", "status", "created_at"),
+        Index("ix_review_tasks_type_status_created", "task_type", "status", "created_at"),
+        Index("ix_review_tasks_invoice_id", "invoice_id"),
+        Index("ix_review_tasks_bank_transaction_id", "bank_transaction_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     task_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -32,6 +38,7 @@ class ReviewTask(Base):
         nullable=True,
     )
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    enriched_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

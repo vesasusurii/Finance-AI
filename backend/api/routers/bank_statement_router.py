@@ -8,6 +8,7 @@ from schemas.bank_statement import (
     BankStatementUploadResponse,
     BankTransactionListResponse,
 )
+from utils.pagination import normalize_pagination
 
 router = APIRouter(tags=["bank"])
 
@@ -47,11 +48,14 @@ async def delete_bank_statement(
 async def list_bank_transactions(
     bank_statement_id: int | None = None,
     reconciliation_status: str | None = None,
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1),
+    limit: int = Query(50),
     user: UserContext = Depends(get_current_user),
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
+    page, limit = normalize_pagination(page, limit)
+    if reconciliation_status is not None:
+        reconciliation_status = reconciliation_status.strip() or None
     return await ctrl.list_transactions(
         user, bank_statement_id, reconciliation_status, page, limit
     )

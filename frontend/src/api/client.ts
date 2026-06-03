@@ -14,6 +14,7 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -101,11 +102,13 @@ export async function apiFetch<T>(
     const body = (await res.json().catch(() => ({}))) as {
       error?: string;
       message?: string;
+      retry_after_seconds?: number;
     };
     throw new ApiError(
       body.message ?? res.statusText,
       res.status,
       body.error,
+      body.retry_after_seconds,
     );
   }
 

@@ -13,6 +13,16 @@ class BankTransaction(Base):
     __table_args__ = (
         Index("ix_bank_transactions_statement_id", "bank_statement_id"),
         Index("ix_bank_transactions_reconciliation_status", "reconciliation_status"),
+        Index(
+            "ix_bank_transactions_statement_status",
+            "bank_statement_id",
+            "reconciliation_status",
+        ),
+        Index(
+            "ix_bank_transactions_status_date",
+            "reconciliation_status",
+            "transaction_date",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

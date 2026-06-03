@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.debug_logger import get_logger
 from core.exceptions import AppError
+from config import settings
 
 logger = get_logger(__name__)
 
@@ -50,13 +51,18 @@ class RequestHandlerMiddleware(BaseHTTPMiddleware):
                 },
             )
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        logger.info(
+        log_fn = logger.warning if elapsed_ms >= settings.slow_route_ms else logger.info
+        log_fn(
             "%s %s — %s — %sms",
             request.method,
             request.url.path,
             response.status_code,
             elapsed_ms,
-            extra={"correlation_id": correlation_id},
+            extra={
+                "correlation_id": correlation_id,
+                "latency_ms": elapsed_ms,
+                "slow_route": elapsed_ms >= settings.slow_route_ms,
+            },
         )
         response.headers["X-Correlation-ID"] = correlation_id
         return response

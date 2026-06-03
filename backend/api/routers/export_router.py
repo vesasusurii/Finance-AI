@@ -41,3 +41,25 @@ async def monthly_report(
     ctrl: ExportController = Depends(get_export_controller),
 ) -> PeriodReportResponse:
     return await ctrl.monthly_report(user, year, month)
+
+
+@router.get("/purchase-invoices-excel")
+async def purchase_invoices_excel(
+    invoice_date_from: date | None = None,
+    invoice_date_to: date | None = None,
+    match_status: str | None = None,
+    review_status: str | None = None,
+    category: str | None = None,
+    company: str | None = None,
+    user: UserContext = Depends(get_current_user),
+    ctrl: ExportController = Depends(get_export_controller),
+) -> StreamingResponse:
+    return await ctrl.purchase_invoices_excel(
+        user,
+        invoice_date_from,
+        invoice_date_to,
+        match_status,
+        review_status,
+        category,
+        company,
+    )
