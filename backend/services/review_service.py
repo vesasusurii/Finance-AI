@@ -66,6 +66,7 @@ class ReviewService:
         *,
         owner_user_id: int | None = None,
         has_invoice: bool | None = None,
+        reasons: list[str] | None = None,
     ) -> ReviewTaskListResponse:
         if has_invoice is not None:
             # Invoice-centric vs bank-line-only queues (filter after enrichment).
@@ -75,6 +76,7 @@ class ReviewService:
                 page=1,
                 limit=fetch_limit,
                 owner_user_id=owner_user_id,
+                reasons=reasons,
             )
             enriched_all: list[ReviewTaskResponse] = []
             for item in items:
@@ -91,7 +93,7 @@ class ReviewService:
             )
 
         items, total = await self._review_repo.list_open(
-            task_type, page, limit, owner_user_id=owner_user_id
+            task_type, page, limit, owner_user_id=owner_user_id, reasons=reasons
         )
         enriched = [await self._enrich_task(item) for item in items]
         return ReviewTaskListResponse(

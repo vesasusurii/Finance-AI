@@ -67,6 +67,7 @@ class ReviewRepository:
         limit: int,
         *,
         owner_user_id: int | None = None,
+        reasons: list[str] | None = None,
     ) -> tuple[list[ReviewTaskResponse], int]:
         query = select(ReviewTask).where(ReviewTask.status == "open")
         count_q = (
@@ -77,6 +78,9 @@ class ReviewRepository:
         if task_type:
             query = query.where(ReviewTask.task_type == task_type)
             count_q = count_q.where(ReviewTask.task_type == task_type)
+        if reasons:
+            query = query.where(ReviewTask.reason.in_(reasons))
+            count_q = count_q.where(ReviewTask.reason.in_(reasons))
 
         if owner_user_id is not None:
             owner_filter = or_(

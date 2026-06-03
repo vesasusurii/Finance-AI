@@ -48,6 +48,10 @@ async def delete_bank_statement(
 async def list_bank_transactions(
     bank_statement_id: int | None = None,
     reconciliation_status: str | None = None,
+    multi_invoice: bool = Query(
+        False,
+        description="When true, only transactions with more than one detected invoice number.",
+    ),
     page: int = Query(1),
     limit: int = Query(50),
     user: UserContext = Depends(get_current_user),
@@ -57,5 +61,5 @@ async def list_bank_transactions(
     if reconciliation_status is not None:
         reconciliation_status = reconciliation_status.strip() or None
     return await ctrl.list_transactions(
-        user, bank_statement_id, reconciliation_status, page, limit
+        user, bank_statement_id, reconciliation_status, page, limit, multi_invoice
     )

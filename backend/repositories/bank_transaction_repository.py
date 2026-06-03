@@ -97,6 +97,7 @@ class BankTransactionRepository:
         limit: int,
         *,
         owner_user_id: int | None = None,
+        multi_invoice: bool = False,
     ) -> tuple[list[BankTransactionResponse], int]:
         base = select(BankTransaction)
         count_q = select(func.count()).select_from(BankTransaction)
@@ -120,6 +121,12 @@ class BankTransactionRepository:
             count_q = count_q.where(
                 BankTransaction.reconciliation_status == reconciliation_status
             )
+        if multi_invoice:
+            multi_filter = func.jsonb_array_length(
+                BankTransaction.detected_invoice_numbers
+            ) > 1
+            base = base.where(multi_filter)
+            count_q = count_q.where(multi_filter)
 
         db_t0 = time.perf_counter()
         total = (await self._session.execute(count_q)).scalar_one()

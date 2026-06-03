@@ -1,17 +1,12 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+﻿import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Play, Check, X } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
+import { TablePagination } from "@/components/ui-finance/TablePagination";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   approveMatch,
   getReconciliationResults,
@@ -22,7 +17,7 @@ import { ApiError } from "@/api/client";
 import { refreshSession } from "@/api/auth";
 import { listReviewTasks } from "@/api/review";
 import { listBankStatements, listBankTransactions } from "@/api/bankStatements";
-import { useInvoices } from "@/hooks/useInvoices";
+import { listInvoices } from "@/api/invoices";
 import type { InvoicePaymentMatch, ReconciliationSummary } from "@/types/match";
 import type { BankStatement, BankTransaction } from "@/types/bank";
 import type { ReviewTask } from "@/types/review";
@@ -34,8 +29,11 @@ import {
   reconciliationStatusLabel,
   reviewReasonLabel,
 } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 
-const MATCHING_REVIEW_REASONS = new Set([
+const PAGE_SIZE = 10;
+
+const MATCHING_REVIEW_REASONS = [
   "no_invoice_in_db",
   "duplicate_invoice_in_db",
   "internal_error",
@@ -44,14 +42,33 @@ const MATCHING_REVIEW_REASONS = new Set([
   "batch_payment_incomplete",
   "batch_amount_suggested",
   "missing_transaction_date",
-]);
+] as const;
 
-function filterMatchingReviewTasks(tasks: ReviewTask[]): ReviewTask[] {
-  return tasks.filter((t) => MATCHING_REVIEW_REASONS.has(t.reason));
+type MatchingTab =
+  | "matched"
+  | "unmatched-invoices"
+  | "unmatched-transactions"
+  | "needs-review"
+  | "multi-invoice";
+
+const MATCHING_TABS: { id: MatchingTab; label: string }[] = [
+  { id: "matched", label: "Matched" },
+  { id: "unmatched-invoices", label: "Unmatched invoices" },
+  { id: "unmatched-transactions", label: "Unmatched transactions" },
+  { id: "needs-review", label: "Needs review" },
+  { id: "multi-invoice", label: "Multi-invoice comments" },
+];
+
+function isMatchingTab(value: string | null): value is MatchingTab {
+  return MATCHING_TABS.some((tab) => tab.id === value);
 }
 
 export function MatchingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<MatchingTab>(() => {
+    const tab = searchParams.get("tab");
+    return isMatchingTab(tab) ? tab : "unmatched-invoices";
+  });
   const [statementId, setStatementId] = useState(
     () => searchParams.get("bank_statement_id") ?? "",
   );
@@ -60,6 +77,8 @@ export function MatchingPage() {
   useEffect(() => {
     const sid = searchParams.get("bank_statement_id");
     if (sid) setStatementId(sid);
+    const tab = searchParams.get("tab");
+    if (isMatchingTab(tab)) setActiveTab(tab);
   }, [searchParams]);
 
   useEffect(() => {
@@ -69,101 +88,161 @@ export function MatchingPage() {
   }, []);
 
   const [running, setRunning] = useState(false);
+  const [loadingTab, setLoadingTab] = useState(false);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<InvoicePaymentMatch[]>([]);
+  const [unmatchedInvoices, setUnmatchedInvoices] = useState<Invoice[]>([]);
   const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
   const [unmatchedTxns, setUnmatchedTxns] = useState<BankTransaction[]>([]);
   const [multiTxns, setMultiTxns] = useState<BankTransaction[]>([]);
   const [busyMatchId, setBusyMatchId] = useState<number | null>(null);
-  const [reviewSectionVisible, setReviewSectionVisible] = useState(false);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const reviewSectionRef = useRef<HTMLElement>(null);
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [txnPage, setTxnPage] = useState(1);
+  const [matchPage, setMatchPage] = useState(1);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [multiTxnPage, setMultiTxnPage] = useState(1);
+  const [matchTotal, setMatchTotal] = useState(0);
+  const [unmatchedInvoiceTotal, setUnmatchedInvoiceTotal] = useState(0);
+  const [unmatchedTxnTotal, setUnmatchedTxnTotal] = useState(0);
+  const [reviewTotal, setReviewTotal] = useState(0);
+  const [multiTxnTotal, setMultiTxnTotal] = useState(0);
 
-  const { items: unmatchedInvoices, reload: reloadInvoices } = useInvoices({
-    match_status: "unmatched",
-    limit: 100,
-  });
-
-  const { items: partialInvoices, reload: reloadPartialInvoices } = useInvoices({
-    match_status: "partially_matched",
-    limit: 100,
-  });
-
-  const statementFilters = useMemo(() => {
+  const statementFilters = useCallback(() => {
     const sid = statementId ? parseInt(statementId, 10) : undefined;
     return Number.isFinite(sid) ? { bank_statement_id: sid } : {};
   }, [statementId]);
 
-  const refreshMatches = useCallback(async () => {
-    const matchRes = await getReconciliationResults({
-      ...statementFilters,
-      limit: 100,
-    });
-    setMatches(matchRes.items);
+  const loadTotals = useCallback(async () => {
+    const filters = statementFilters();
+    const [matchRes, invoiceRes, txnRes, reviewRes, multiTxnRes] =
+      await Promise.all([
+        getReconciliationResults({ ...filters, page: 1, limit: 1 }),
+        listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
+        listBankTransactions({
+          ...filters,
+          reconciliation_status: "needs_review",
+          page: 1,
+          limit: 1,
+        }),
+        listReviewTasks({
+          task_type: "bank_match",
+          page: 1,
+          limit: 1,
+          reasons: [...MATCHING_REVIEW_REASONS],
+          slim: true,
+        }),
+        listBankTransactions({
+          ...filters,
+          multi_invoice: true,
+          page: 1,
+          limit: 1,
+        }),
+      ]);
+    setMatchTotal(matchRes.total);
+    setUnmatchedInvoiceTotal(invoiceRes.total);
+    setUnmatchedTxnTotal(txnRes.total);
+    setReviewTotal(reviewRes.total);
+    setMultiTxnTotal(multiTxnRes.total);
   }, [statementFilters]);
 
-  const refreshReview = useCallback(async () => {
-    setReviewLoading(true);
+  const loadActiveTab = useCallback(async () => {
+    const filters = statementFilters();
+    setLoadingTab(true);
     try {
-      const reviewRes = await listReviewTasks({
-        task_type: "bank_match",
-        limit: 100,
-        slim: true,
-      });
-      setReviewTasks(filterMatchingReviewTasks(reviewRes.items));
+      switch (activeTab) {
+        case "matched": {
+          const res = await getReconciliationResults({
+            ...filters,
+            page: matchPage,
+            limit: PAGE_SIZE,
+          });
+          setMatches(res.items);
+          setMatchTotal(res.total);
+          break;
+        }
+        case "unmatched-invoices": {
+          const res = await listInvoices({
+            match_status: "unmatched",
+            page: invoicePage,
+            limit: PAGE_SIZE,
+          });
+          setUnmatchedInvoices(res.items);
+          setUnmatchedInvoiceTotal(res.total);
+          break;
+        }
+        case "unmatched-transactions": {
+          const res = await listBankTransactions({
+            ...filters,
+            reconciliation_status: "needs_review",
+            page: txnPage,
+            limit: PAGE_SIZE,
+          });
+          setUnmatchedTxns(res.items);
+          setUnmatchedTxnTotal(res.total);
+          break;
+        }
+        case "needs-review": {
+          const res = await listReviewTasks({
+            task_type: "bank_match",
+            page: reviewPage,
+            limit: PAGE_SIZE,
+            reasons: [...MATCHING_REVIEW_REASONS],
+            slim: true,
+          });
+          setReviewTasks(res.items);
+          setReviewTotal(res.total);
+          break;
+        }
+        case "multi-invoice": {
+          const res = await listBankTransactions({
+            ...filters,
+            multi_invoice: true,
+            page: multiTxnPage,
+            limit: PAGE_SIZE,
+          });
+          setMultiTxns(res.items);
+          setMultiTxnTotal(res.total);
+          break;
+        }
+      }
     } finally {
-      setReviewLoading(false);
+      setLoadingTab(false);
     }
-  }, []);
-
-  const refreshTransactions = useCallback(async () => {
-    const [txnRes, allTxnRes] = await Promise.all([
-      listBankTransactions({
-        ...statementFilters,
-        reconciliation_status: "needs_review",
-        limit: 200,
-      }),
-      listBankTransactions({ ...statementFilters, limit: 200 }),
-    ]);
-    setUnmatchedTxns(txnRes.items);
-    setMultiTxns(
-      allTxnRes.items.filter((t) => t.detected_invoice_numbers.length > 1),
-    );
-  }, [statementFilters]);
-
-  const refreshCore = useCallback(async () => {
-    await Promise.all([refreshMatches(), refreshTransactions(), reloadInvoices(), reloadPartialInvoices()]);
-  }, [refreshMatches, refreshTransactions, reloadInvoices, reloadPartialInvoices]);
+  }, [
+    activeTab,
+    statementFilters,
+    matchPage,
+    invoicePage,
+    txnPage,
+    reviewPage,
+    multiTxnPage,
+  ]);
 
   useEffect(() => {
-    void refreshCore().catch((e) => {
+    setInvoicePage(1);
+    setTxnPage(1);
+    setMatchPage(1);
+    setReviewPage(1);
+    setMultiTxnPage(1);
+  }, [statementId]);
+
+  useEffect(() => {
+    void loadTotals().catch(() => {
+      /* counts are optional — tab content fetch shows errors */
+    });
+  }, [loadTotals]);
+
+  useEffect(() => {
+    void loadActiveTab().catch((e) => {
       setError(e instanceof Error ? e.message : "Could not load matching data");
     });
-  }, [refreshCore]);
+  }, [loadActiveTab]);
 
-  useEffect(() => {
-    const el = reviewSectionRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setReviewSectionVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "120px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!reviewSectionVisible) return;
-    void refreshReview().catch((e) => {
-      setError(e instanceof Error ? e.message : "Could not load review tasks");
-    });
-  }, [reviewSectionVisible, refreshReview]);
+  const refreshAll = useCallback(async () => {
+    await loadTotals();
+    await loadActiveTab();
+  }, [loadTotals, loadActiveTab]);
 
   const onRun = async () => {
     setRunning(true);
@@ -176,9 +255,7 @@ export function MatchingPage() {
       );
       setSummary(res);
       await refreshSession();
-      await refreshCore();
-      setReviewSectionVisible(true);
-      await refreshReview();
+      await refreshAll();
     } catch (e) {
       if (e instanceof ApiError && e.code === "session_expired") {
         setError("Session expired. Please sign in again.");
@@ -215,7 +292,7 @@ export function MatchingPage() {
     } finally {
       setBusyMatchId(null);
     }
-    void refreshMatches();
+    await refreshAll();
   };
 
   const onReject = async (matchId: number) => {
@@ -245,16 +322,34 @@ export function MatchingPage() {
     } finally {
       setBusyMatchId(null);
     }
-    void refreshMatches();
+    await refreshAll();
   };
 
   const onStatementChange = (value: string) => {
     setStatementId(value);
+    const next = new URLSearchParams(searchParams);
     if (value) {
-      setSearchParams({ bank_statement_id: value });
+      next.set("bank_statement_id", value);
     } else {
-      setSearchParams({});
+      next.delete("bank_statement_id");
     }
+    setSearchParams(next);
+  };
+
+  const onTabChange = (tab: string) => {
+    if (!isMatchingTab(tab)) return;
+    setActiveTab(tab);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    setSearchParams(next);
+  };
+
+  const tabTotals: Record<MatchingTab, number> = {
+    matched: matchTotal,
+    "unmatched-invoices": unmatchedInvoiceTotal,
+    "unmatched-transactions": unmatchedTxnTotal,
+    "needs-review": reviewTotal,
+    "multi-invoice": multiTxnTotal,
   };
 
   const selectedStatement = statements.find(
@@ -355,50 +450,6 @@ export function MatchingPage() {
     },
   ];
 
-  const partialInvoiceColumns: Column<Invoice>[] = [
-    {
-      key: "num",
-      header: "Invoice #",
-      cell: (r) => r.invoice_number ?? "—",
-    },
-    {
-      key: "company",
-      header: "Company",
-      cell: (r) => r.name_of_company ?? "—",
-    },
-    {
-      key: "amount",
-      header: "Total",
-      align: "right",
-      cell: (r) =>
-        r.amount != null
-          ? `${Number(r.amount).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${r.currency ?? "EUR"}`
-          : "—",
-    },
-    {
-      key: "debt",
-      header: "Remaining",
-      align: "right",
-      cell: (r) =>
-        r.debt != null ? (
-          <span className="font-semibold text-primary tabular-nums">
-            {Number(r.debt).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-            {r.currency ?? "EUR"}
-          </span>
-        ) : "—",
-    },
-    {
-      key: "first_paid",
-      header: "First payment",
-      cell: (r) => formatDate(r.paid_at_date),
-    },
-    {
-      key: "status",
-      header: "Status",
-      cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
-    },
-  ];
-
   const txnColumns: Column<BankTransaction>[] = [
     {
       key: "date",
@@ -429,11 +480,10 @@ export function MatchingPage() {
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
-        eyebrow="Workflow · Step 3"
+        eyebrow="Workflow ┬╖ Step 3"
         title="Matching"
-        description="Match bank transactions to invoices using comment extraction (regex + LLM). One payment can cover multiple invoices. Amount-combination suggestions require approval when numbers are absent."
         actions={
           <div className="flex items-center gap-2">
             <select
@@ -454,7 +504,7 @@ export function MatchingPage() {
               disabled={running}
               onClick={() => void onRun()}
             >
-              {running ? "Running…" : "Run Matching"}
+              {running ? "RunningΓÇª" : "Run Matching"}
             </Button>
           </div>
         }
@@ -476,146 +526,175 @@ export function MatchingPage() {
       {summary && (
         <div className="rounded-lg border border-border bg-surface-muted/50 px-4 py-3 text-[13px] text-foreground">
           Last run: <strong>{summary.matched}</strong> matched,{" "}
-          <strong>{summary.unmatched_transactions}</strong> unmatched transactions,{" "}
-          <strong>{summary.review_tasks_created}</strong> review tasks,{" "}
-          <strong>{summary.unmatched_invoices}</strong> unmatched invoices in DB
+          <strong>{summary.unmatched_transactions}</strong> unmatched
+          transactions, <strong>{summary.review_tasks_created}</strong> review
+          tasks, <strong>{summary.unmatched_invoices}</strong> unmatched invoices
+          in DB
         </div>
       )}
 
-      <Section title="Matched" count={matches.length}>
-        <DataTable
-          columns={matchColumns}
-          rows={matches.map((m) => ({ ...m, id: m.id }))}
-          empty="No matches yet. Upload bank data and run matching."
-        />
-      </Section>
-
-      <Section title="Unmatched invoices" count={unmatchedInvoices.length}>
-        <DataTable
-          columns={invoiceColumns}
-          rows={unmatchedInvoices}
-          empty="No unmatched invoices."
-        />
-      </Section>
-
-      <Section title="Partially paid invoices" count={partialInvoices.length}>
-        <DataTable
-          columns={partialInvoiceColumns}
-          rows={partialInvoices}
-          empty="No partially paid invoices."
-        />
-      </Section>
-
-      <Section title="Unmatched transactions" count={unmatchedTxns.length}>
-        <DataTable
-          columns={txnColumns}
-          rows={unmatchedTxns}
-          empty="No transactions needing review."
-        />
-      </Section>
-
-      <Section
-        ref={reviewSectionRef}
-        title="Needs review"
-        count={reviewSectionVisible ? reviewTasks.length : undefined}
-        action={
-          reviewTasks.length > 0 ? (
-            <Link
-              to="/manual-review"
-              className="text-[12px] font-medium text-primary hover:underline"
+      <Tabs value={activeTab} onValueChange={onTabChange}>
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-lg border border-border bg-card p-1">
+          {MATCHING_TABS.map((tab) => (
+            <TabsTrigger
+              key={tab.id}
+              value={tab.id}
+              className={cn(
+                "h-8 rounded-md px-3 text-[12px] font-medium text-muted-foreground",
+                "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground",
+              )}
             >
-              Open in Manual Review
-            </Link>
-          ) : undefined
-        }
-      >
-        {!reviewSectionVisible ? (
-          <p className="text-[13px] text-muted-foreground">
-            Scroll here to load review tasks…
-          </p>
-        ) : reviewLoading ? (
-          <p className="text-[13px] text-muted-foreground">Loading review tasks…</p>
-        ) : reviewTasks.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">No open review tasks.</p>
-        ) : (
-          <ul className="space-y-2 text-[13px]">
-            {reviewTasks.map((t) => (
-              <li
-                key={t.id}
-                className="rounded-md border border-border px-3 py-2"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">
-                    Task #{t.id}
-                  </span>
-                  <span className="text-muted-foreground">
-                    · txn #{t.bank_transaction_id}
-                  </span>
-                  <StatusBadge value={reviewReasonLabel(t.reason)} />
-                  {t.payload?.invoice_number ? (
-                    <span className="font-mono text-foreground">
-                      {t.payload.invoice_number as string}
-                    </span>
-                  ) : null}
-                  {t.reason === "batch_amount_suggested" &&
-                  Array.isArray(t.payload?.invoices) ? (
-                    <span className="text-muted-foreground">
-                      ·{" "}
-                      {(t.payload.invoices as { invoice_number?: string }[])
-                        .map((i) => i.invoice_number)
-                        .filter(Boolean)
-                        .join(", ")}
-                    </span>
-                  ) : null}
-                  <Link
-                    to={`/manual-review?task=${t.id}`}
-                    className="ml-auto text-[12px] text-primary hover:underline"
-                  >
-                    Review
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+              {tab.label}
+              <span className="ml-1.5 rounded bg-background/20 px-1.5 py-0.5 text-[10px] tabular-nums">
+                {tabTotals[tab.id]}
+              </span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-      <Section title="Multi-invoice comments" count={multiTxns.length}>
-        <DataTable
-          columns={txnColumns}
-          rows={multiTxns}
-          empty="No multi-invoice bank lines."
-        />
-      </Section>
+        <TabPanel loading={loadingTab}>
+          <TabsContent value="matched" className="mt-4">
+            <DataTable
+              columns={matchColumns}
+              rows={matches.map((m) => ({ ...m, id: m.id }))}
+              empty="No matches yet. Upload bank data and run matching."
+            />
+            <TablePagination
+              page={matchPage}
+              pageSize={PAGE_SIZE}
+              total={matchTotal}
+              onPageChange={setMatchPage}
+            />
+          </TabsContent>
+
+          <TabsContent value="unmatched-invoices" className="mt-4">
+            <DataTable
+              columns={invoiceColumns}
+              rows={unmatchedInvoices}
+              empty="No unmatched invoices."
+            />
+            <TablePagination
+              page={invoicePage}
+              pageSize={PAGE_SIZE}
+              total={unmatchedInvoiceTotal}
+              onPageChange={setInvoicePage}
+            />
+          </TabsContent>
+
+          <TabsContent value="unmatched-transactions" className="mt-4">
+            <DataTable
+              columns={txnColumns}
+              rows={unmatchedTxns}
+              empty="No transactions needing review."
+            />
+            <TablePagination
+              page={txnPage}
+              pageSize={PAGE_SIZE}
+              total={unmatchedTxnTotal}
+              onPageChange={setTxnPage}
+            />
+          </TabsContent>
+
+          <TabsContent value="needs-review" className="mt-4">
+            <div className="mb-3 flex justify-end">
+              {reviewTotal > 0 ? (
+                <Link
+                  to="/manual-review"
+                  className="text-[12px] font-medium text-primary hover:underline"
+                >
+                  Open in Manual Review
+                </Link>
+              ) : null}
+            </div>
+            {reviewTotal === 0 ? (
+              <p className="text-[13px] text-muted-foreground">
+                No open review tasks.
+              </p>
+            ) : (
+              <>
+                <ul className="space-y-2 text-[13px]">
+                  {reviewTasks.map((t) => (
+                    <li
+                      key={t.id}
+                      className="rounded-md border border-border px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-foreground">
+                          Task #{t.id}
+                        </span>
+                        <span className="text-muted-foreground">
+                          ┬╖ txn #{t.bank_transaction_id}
+                        </span>
+                        <StatusBadge value={reviewReasonLabel(t.reason)} />
+                        {t.payload?.invoice_number ? (
+                          <span className="font-mono text-foreground">
+                            {t.payload.invoice_number as string}
+                          </span>
+                        ) : null}
+                        {t.reason === "batch_amount_suggested" &&
+                        Array.isArray(t.payload?.invoices) ? (
+                          <span className="text-muted-foreground">
+                            ┬╖{" "}
+                            {(t.payload.invoices as { invoice_number?: string }[])
+                              .map((i) => i.invoice_number)
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        ) : null}
+                        <Link
+                          to={`/manual-review?task=${t.id}`}
+                          className="ml-auto text-[12px] text-primary hover:underline"
+                        >
+                          Review
+                        </Link>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <TablePagination
+                  page={reviewPage}
+                  pageSize={PAGE_SIZE}
+                  total={reviewTotal}
+                  onPageChange={setReviewPage}
+                />
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="multi-invoice" className="mt-4">
+            <DataTable
+              columns={txnColumns}
+              rows={multiTxns}
+              empty="No multi-invoice bank lines."
+            />
+            <TablePagination
+              page={multiTxnPage}
+              pageSize={PAGE_SIZE}
+              total={multiTxnTotal}
+              onPageChange={setMultiTxnPage}
+            />
+          </TabsContent>
+        </TabPanel>
+      </Tabs>
     </div>
   );
 }
 
-const Section = ({
-  ref,
-  title,
-  count,
-  action,
+function TabPanel({
+  loading,
   children,
 }: {
-  ref?: React.RefObject<HTMLElement | null>;
-  title: string;
-  count?: number;
-  action?: ReactNode;
+  loading: boolean;
   children: ReactNode;
-}) => {
+}) {
   return (
-    <section ref={ref}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[14px] font-semibold text-foreground">
-          {title}{" "}
-          {count !== undefined ? (
-            <span className="font-normal text-muted-foreground">({count})</span>
-          ) : null}
-        </h2>
-        {action}
-      </div>
+    <div className="relative min-h-[200px]">
+      {loading && (
+        <p className="absolute right-0 top-0 text-[12px] text-muted-foreground">
+          LoadingΓÇª
+        </p>
+      )}
       {children}
-    </section>
+    </div>
   );
-};
+}

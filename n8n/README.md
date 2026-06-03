@@ -66,11 +66,170 @@ curl -X POST "http://localhost:8000/api/invoices/email-upload" \
 
 Expected: **202** JSON with `"status": "queued"` (OCR runs asynchronously).
 
+## n8n Cloud + ngrok (recommended for Cloud workflows)
+
+n8n Cloud cannot reach `localhost`. Use **ngrok** to expose your local API over HTTPS.
+
+### 1. Get an ngrok authtoken
+
+1. Sign up at [ngrok.com](https://ngrok.com) (free tier works)
+2. Copy your token from [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+3. Add to `.env`:
+
+```env
+NGROK_AUTHTOKEN=your_token_here
+```
+
+### 2. Start the tunnel
+
+From the repo root:
+
+```powershell
+.\scripts\start-ngrok-tunnel.ps1
+```
+
+This starts the backend (if needed), runs ngrok in Docker, and prints your public HTTPS URL.
+
+Inspect traffic at **http://localhost:4040**.
+
+Manual start:
+
+```powershell
+docker compose --profile tunnel up -d
+```
+
+### 3. Configure n8n Cloud
+
+**If `$vars.FINANCE_API_URL` shows `[undefined]`:** Custom Variables need **Pro Cloud** (or Enterprise). On **Starter / free Cloud**, use the workaround below instead of `$vars` or `$env`.
+
+#### Option A — Pro Cloud (Variables)
+
+**Settings → Variables** (exact names, case-sensitive):
+
+| Name | Value |
+|------|--------|
+| `FINANCE_API_URL` | `https://xxxx.ngrok-free.app` (no trailing slash) |
+| `EMAIL_INGEST_API_KEY` | Same as `.env` |
+
+**Send to AI Backend:**
+
+- URL: `={{ $vars.FINANCE_API_URL }}/api/invoices/email-upload`
+- Header `X-Email-Ingest-Key`: `={{ $vars.EMAIL_INGEST_API_KEY }}`
+- Header `ngrok-skip-browser-warning`: `true`
+
+#### Option B — Starter / free Cloud (no Variables)
+
+Do **not** use `$vars` or `$env`. Hardcode the URL and store the API key in a **Credential**.
+
+1. **Credentials → Add credential → Header Auth**
+   - Name: `X-Email-Ingest-Key`
+   - Value: your `EMAIL_INGEST_API_KEY` from `.env`
+   - Save as e.g. `Borek Finance email ingest`
+
+2. **Send to AI Backend** node:
+   - **Method:** POST
+   - **URL:** paste the full ngrok URL (no `{{ }}`):
+     ```
+     https://YOUR-NGROK-URL.ngrok-free.app/api/invoices/email-upload
+     ```
+   - **Authentication:** Generic Credential Type → **Header Auth** → select the credential above
+   - **Send Headers:** add one more header:
+     - `ngrok-skip-browser-warning` = `true`
+   - **Body:** Form-Data, field `file` = binary attachment, plus `source`, `sender_email`, `message_id`, `attachment_name`, etc.
+
+When ngrok restarts and the URL changes, update the **URL field** in this node (re-run `.\scripts\start-ngrok-tunnel.ps1` for the new URL).
+
+### 4. Test through the tunnel
+
+```powershell
+# Replace with your ngrok URL from the script
+curl.exe https://YOUR-NGROK-URL.ngrok-free.app/api/health
+
+# Full email-upload test
+.\scripts\test-email-upload.ps1 -ApiUrl "https://YOUR-NGROK-URL.ngrok-free.app/api/invoices/email-upload" -FilePath "C:\path\to\invoice.pdf"
+```
+
+Expected: health → `{"status":"ok"}`, upload → **202** `"status": "queued"`.
+
+**Free ngrok:** add header `ngrok-skip-browser-warning: true` on the **Send to AI Backend** node (included in the repo workflow JSON). Without it, ngrok returns an HTML warning page instead of JSON.
+
+### Notes
+
+- Free ngrok URLs **change** when you restart the tunnel — update `FINANCE_API_URL` in n8n Cloud when that happens
+- Keep `docker compose --profile tunnel up -d` running while n8n Cloud workflows are active
+- Stop tunnel: `docker compose --profile tunnel stop ngrok`
+
+## n8n Cloud (general)
+
+If your workflow lives on **n8n Cloud**, it runs on n8n’s servers — not your PC. It **cannot** call `localhost`, `backend:8000`, or `host.docker.internal`.
+
+Use ngrok (above) or deploy the API to a fixed HTTPS host for production.
+
+### n8n Cloud checklist
+
+For your workflow on n8n Cloud:
+
+1. **Variables** — `FINANCE_API_URL`, `EMAIL_INGEST_API_KEY`, optional `OUTLOOK_FOLDER` (use `$vars`, not `$env`)
+2. **Send to AI Backend** — POST multipart to `{{ $vars.FINANCE_API_URL }}/api/invoices/email-upload`
+3. **Header** — `X-Email-Ingest-Key` (not session cookie)
+4. **Body** — form field **`file`** (binary), plus metadata fields
+5. **Remove Supabase insert nodes** if present — backend handles storage and DB
+6. **Success** — HTTP **202** with `"status": "queued"` or `"duplicate"`
+
+## Run n8n in Docker (self-hosted alternative)
+
+n8n is defined in the root `docker-compose.yml` under the **`n8n` profile**, on the same network as the FastAPI backend.
+
+### 1. Add to `.env`
+
+```env
+EMAIL_INGEST_API_KEY=your-long-random-secret
+EMAIL_INGEST_USER_EMAIL=finance@borek.com
+N8N_BASIC_AUTH_PASSWORD=choose-a-strong-password
+OUTLOOK_FOLDER=Inbox
+```
+
+### 2. Start the stack
+
+From the repo root:
+
+```powershell
+docker compose --profile n8n up -d
+```
+
+With frontend as well:
+
+```powershell
+docker compose --profile full --profile n8n up -d
+```
+
+Open **http://localhost:5678** (basic auth: `N8N_BASIC_AUTH_USER` / `N8N_BASIC_AUTH_PASSWORD` from `.env`).
+
+### 3. Import workflow and Outlook credential
+
+1. **Workflows** → **Import from file** → `n8n/workflows/outlook-invoice-ingest.json`  
+   (or pick from `/home/node/import-workflows` inside the container)
+2. Create **Microsoft Outlook OAuth2** credential  
+3. Azure app redirect URI: `http://localhost:5678/rest/oauth2-credential/callback`
+4. Activate the workflow
+
+Compose sets `FINANCE_API_URL=http://backend:8000` inside the n8n container — **do not use `localhost`** for the API URL.
+
+### 4. Verify n8n → backend
+
+From inside the n8n container:
+
+```powershell
+docker exec finance-ai-n8n wget -qO- http://backend:8000/api/health
+```
+
+Expected: `{"status":"ok"}`
+
 ## n8n environment variables
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
-| `FINANCE_API_URL` | `http://host.docker.internal:8000` | API base (see networking below) |
+| `FINANCE_API_URL` | `http://backend:8000` (Compose) | API base (see networking below) |
 | `EMAIL_INGEST_API_KEY` | same as backend `.env` | Header `X-Email-Ingest-Key` |
 | `OUTLOOK_FOLDER` | `Inbox` or `Invoices` | Mailbox folder to watch |
 
@@ -78,10 +237,11 @@ Expected: **202** JSON with `"status": "queued"` (OCR runs asynchronously).
 
 | n8n runs on | Use `FINANCE_API_URL` |
 |-------------|------------------------|
-| Same machine as API | `http://localhost:8000` |
-| Docker (API on host) | `http://host.docker.internal:8000` |
-| Docker Compose same stack | `http://backend:8000` |
+| Docker Compose (this repo) | `http://backend:8000` |
+| Docker, API on host only | `http://host.docker.internal:8000` |
+| Same machine, not in Docker | `http://localhost:8000` |
 | n8n Cloud | Public HTTPS URL to your API (not `localhost`) |
+| n8n Cloud + local dev API | Tunnel URL, e.g. `https://xxxx.ngrok-free.app` |
 
 ## Fix: HTTP 400 on “Send to AI Backend”
 
@@ -100,9 +260,9 @@ Common causes:
 ### Correct HTTP Request node (n8n)
 
 - **Method:** POST  
-- **URL:** `{{ $env.FINANCE_API_URL }}/api/invoices/email-upload`  
+- **URL:** `{{ $vars.FINANCE_API_URL }}/api/invoices/email-upload`  
 - **Authentication:** None (use header below)  
-- **Header:** `X-Email-Ingest-Key` = `{{ $env.EMAIL_INGEST_API_KEY }}`  
+- **Header:** `X-Email-Ingest-Key` = `{{ $vars.EMAIL_INGEST_API_KEY }}`  
 - **Body content type:** Form-Data  
 - **Body parameters:**
 

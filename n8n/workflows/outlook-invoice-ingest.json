@@ -12,7 +12,7 @@
         },
         "filters": {
           "foldersToInclude": [
-            "={{ $env.OUTLOOK_FOLDER || 'Inbox' }}"
+            "={{ $vars.OUTLOOK_FOLDER || 'Inbox' }}"
           ]
         },
         "options": {
@@ -177,14 +177,18 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.FINANCE_API_URL || 'http://host.docker.internal:8000') + '/api/invoices/email-upload' }}",
+        "url": "={{ ($vars.FINANCE_API_URL || 'http://backend:8000') + '/api/invoices/email-upload' }}",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "X-Email-Ingest-Key",
-              "value": "={{ $env.EMAIL_INGEST_API_KEY }}"
+              "value": "={{ $vars.EMAIL_INGEST_API_KEY }}"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
             }
           ]
         },
@@ -427,7 +431,7 @@
     },
     {
       "parameters": {
-        "content": "## Borek Finance — Outlook ingest\n\n1. Configure **Microsoft Outlook** credential\n2. Set env: `FINANCE_API_URL`, `EMAIL_INGEST_API_KEY`, optional `OUTLOOK_FOLDER`\n3. Backend must expose `POST /api/invoices/email-upload`\n4. Multipart field name: **file** (not files)\n5. Header: **X-Email-Ingest-Key**\n\nSupabase/storage/OCR run in the FastAPI backend — not in n8n.",
+        "content": "## Borek Finance — Outlook ingest\n\n1. Configure **Microsoft Outlook** credential\n2. n8n Cloud: **Settings → Variables** (`$vars`, not `$env`)\n   - `FINANCE_API_URL`, `EMAIL_INGEST_API_KEY`, optional `OUTLOOK_FOLDER`\n3. Backend: `POST /api/invoices/email-upload`\n4. Multipart field: **file** | Header: **X-Email-Ingest-Key**\n5. ngrok free: header **ngrok-skip-browser-warning: true**",
         "height": 280,
         "width": 420
       },

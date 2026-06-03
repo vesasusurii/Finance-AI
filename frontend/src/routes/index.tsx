@@ -50,7 +50,6 @@ export function UploadPage() {
       <PageHeader
         eyebrow="Workflow · Step 1"
         title="Upload invoices"
-        description="Upload supplier invoices and scans. Progress shows upload, OCR, validation, and extracted fields as each file is processed."
         actions={
           <div className="flex items-center gap-2">
             <Button

@@ -311,7 +311,6 @@ export function ManualReviewPage() {
             : "Workflow"
         }
         title="Manual review"
-        description="Compare each invoice document to bank transactions and match the correct payment line."
         actions={
           items.length > 1 ? (
             <div className="flex items-center gap-1.5">

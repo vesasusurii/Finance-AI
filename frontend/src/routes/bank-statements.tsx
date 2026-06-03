@@ -242,7 +242,6 @@ export function BankPage() {
       <PageHeader
         eyebrow="Workflow · Step 2"
         title="Bank statements"
-        description="Upload ProCredit-style Excel exports. Invoice numbers are parsed from Komenti / Comment."
         actions={
           <Link
             to="/matching"

@@ -4,7 +4,7 @@ import time
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -162,16 +162,34 @@ class InvoiceRepository:
             pattern = f"%{filters['company']}%"
             query = query.where(Invoice.name_of_company.ilike(pattern))
             count_query = count_query.where(Invoice.name_of_company.ilike(pattern))
+        if filters.get("search"):
+            term = str(filters["search"]).strip()
+            if term:
+                pattern = f"%{term}%"
+                text_filter = or_(
+                    Invoice.name_of_company.ilike(pattern),
+                    Invoice.invoice_number.ilike(pattern),
+                    Invoice.internal_note_description.ilike(pattern),
+                )
+                query = query.where(text_filter)
+                count_query = count_query.where(text_filter)
         if filters.get("category"):
             pattern = f"%{filters['category']}%"
             query = query.where(Invoice.category.ilike(pattern))
             count_query = count_query.where(Invoice.category.ilike(pattern))
 
-        sort = filters.get("sort", "id")
+        sort = filters.get("sort") or "invoice_date_desc"
         if sort == "created_at":
-            query = query.order_by(Invoice.created_at.desc())
-        else:
-            query = query.order_by(Invoice.id.desc())
+            sort = "created_at_desc"
+        order_by = {
+            "invoice_date_desc": Invoice.invoice_date.desc().nullslast(),
+            "invoice_date_asc": Invoice.invoice_date.asc().nullsfirst(),
+            "created_at_desc": Invoice.created_at.desc(),
+            "created_at_asc": Invoice.created_at.asc(),
+            "id_desc": Invoice.id.desc(),
+            "id_asc": Invoice.id.asc(),
+        }.get(sort, Invoice.invoice_date.desc().nullslast())
+        query = query.order_by(order_by)
 
         offset = (page - 1) * limit
         query = query.offset(offset).limit(limit)

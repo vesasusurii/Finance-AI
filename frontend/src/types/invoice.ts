@@ -47,6 +47,7 @@ export interface InvoiceFilters {
   invoice_date_from?: string;
   invoice_date_to?: string;
   company?: string;
+  search?: string;
   sort?: string;
   page?: number;
   limit?: number;

@@ -235,6 +235,7 @@ class InvoiceController:
         invoice_date_from: date | None,
         invoice_date_to: date | None,
         company: str | None,
+        search: str | None,
         sort: str | None,
         page: int,
         limit: int,
@@ -247,6 +248,7 @@ class InvoiceController:
                 "invoice_date_from": invoice_date_from,
                 "invoice_date_to": invoice_date_to,
                 "company": company,
+                "search": search,
                 "sort": sort,
             }.items()
             if v is not None

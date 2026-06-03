@@ -57,6 +57,7 @@ export interface BankTransactionListResponse {
 export interface BankTransactionFilters {
   bank_statement_id?: number;
   reconciliation_status?: string;
+  multi_invoice?: boolean;
   page?: number;
   limit?: number;
 }

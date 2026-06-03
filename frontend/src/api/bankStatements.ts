@@ -36,9 +36,12 @@ export async function listBankTransactions(
 ): Promise<BankTransactionListResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") {
-      params.set(key, String(value));
+    if (value === undefined || value === "") return;
+    if (key === "multi_invoice") {
+      if (value) params.set(key, "true");
+      return;
     }
+    params.set(key, String(value));
   });
   const qs = params.toString();
   return apiFetch<BankTransactionListResponse>(
