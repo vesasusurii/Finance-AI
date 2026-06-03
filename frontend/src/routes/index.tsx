@@ -50,7 +50,7 @@ export function UploadPage() {
       <PageHeader
         eyebrow="Workflow · Step 1"
         title="Upload invoices"
-        description="Upload supplier invoices, scans, and documents. Files are stored under your user folder; PDF and images are processed with OpenAI Vision."
+        description="Upload supplier invoices and scans. Progress shows upload, OCR, validation, and extracted fields as each file is processed."
         actions={
           <div className="flex items-center gap-2">
             <Button

@@ -23,6 +23,18 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: finance-ai-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -32,11 +44,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       # Use DATABASE_URL from .env (Supabase or local). Do not hardcode @db here — that overrides .env.
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      # Inside Compose, localhost is the container itself — use the redis service hostname.
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: ${QUEUE_MODE:-adaptive}
       STORAGE_PATH: /data/uploads
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       SUPABASE_URL: ${SUPABASE_URL:-}
@@ -54,6 +71,39 @@ services:
       # Persist debug logs on host so they survive container restarts
       - ./logs:/var/log/borek
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-ai-worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: ${QUEUE_MODE:-adaptive}
+      STORAGE_PATH: /data/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-invoices}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_MODEL_STRONG: ${OPENAI_MODEL_STRONG:-gpt-4o}
+    volumes:
+      - ./backend:/app
+      - upload_data:/data/uploads
+      - ./logs:/var/log/borek
+    command: >
+      rq worker --url redis://redis:6379/0
+      finance-ai ocr_high_priority ocr_normal review transaction
 
   frontend:
     profiles: ["full"]

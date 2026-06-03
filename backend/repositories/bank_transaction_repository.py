@@ -1,9 +1,15 @@
+import time
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
+from core.debug_logger import get_logger
 from models.bank_statement import BankStatement
 from models.bank_transaction import BankTransaction
 from schemas.bank_statement import BankTransactionResponse
+
+logger = get_logger(__name__)
 
 
 def _to_response(row: BankTransaction) -> BankTransactionResponse:
@@ -73,6 +79,16 @@ class BankTransactionRepository:
         row = await self._session.get(BankTransaction, transaction_id)
         return _to_response(row) if row else None
 
+    async def get_many(
+        self, transaction_ids: list[int]
+    ) -> dict[int, BankTransactionResponse]:
+        ids = sorted(set(transaction_ids))
+        if not ids:
+            return {}
+        q = select(BankTransaction).where(BankTransaction.id.in_(ids))
+        result = await self._session.execute(q)
+        return {row.id: _to_response(row) for row in result.scalars().all()}
+
     async def list_transactions(
         self,
         bank_statement_id: int | None,
@@ -82,41 +98,47 @@ class BankTransactionRepository:
         *,
         owner_user_id: int | None = None,
     ) -> tuple[list[BankTransactionResponse], int]:
-        filters = []
-        stmt_joined = False
+        base = select(BankTransaction)
+        count_q = select(func.count()).select_from(BankTransaction)
+
         if owner_user_id is not None:
-            filters.append(BankStatement.uploaded_by == owner_user_id)
-            stmt_joined = True
+            join_condition = BankTransaction.bank_statement_id == BankStatement.id
+            base = base.join(BankStatement, join_condition)
+            count_q = count_q.join(BankStatement, join_condition)
+            base = base.where(BankStatement.uploaded_by == owner_user_id)
+            count_q = count_q.where(BankStatement.uploaded_by == owner_user_id)
 
         if bank_statement_id is not None:
-            filters.append(BankTransaction.bank_statement_id == bank_statement_id)
+            base = base.where(BankTransaction.bank_statement_id == bank_statement_id)
+            count_q = count_q.where(
+                BankTransaction.bank_statement_id == bank_statement_id
+            )
         if reconciliation_status:
-            filters.append(
+            base = base.where(
+                BankTransaction.reconciliation_status == reconciliation_status
+            )
+            count_q = count_q.where(
                 BankTransaction.reconciliation_status == reconciliation_status
             )
 
-        count_q = select(func.count()).select_from(BankTransaction)
-        if stmt_joined:
-            count_q = count_q.join(
-                BankStatement,
-                BankTransaction.bank_statement_id == BankStatement.id,
-            )
-        if filters:
-            count_q = count_q.where(*filters)
+        db_t0 = time.perf_counter()
         total = (await self._session.execute(count_q)).scalar_one()
 
         offset = (page - 1) * limit
-        q = select(BankTransaction).order_by(BankTransaction.id.asc())
-        if stmt_joined:
-            q = q.join(
-                BankStatement,
-                BankTransaction.bank_statement_id == BankStatement.id,
-            )
-        if filters:
-            q = q.where(*filters)
-        q = q.offset(offset).limit(limit)
+        q = base.order_by(BankTransaction.id.asc()).offset(offset).limit(limit)
         result = await self._session.execute(q)
         rows = result.scalars().all()
+        db_query_ms = round((time.perf_counter() - db_t0) * 1000, 1)
+        if db_query_ms >= settings.slow_route_ms:
+            logger.warning(
+                "Slow bank transaction list query db_query_ms=%s statement_id=%s status=%s page=%d limit=%d total=%d",
+                db_query_ms,
+                bank_statement_id,
+                reconciliation_status,
+                page,
+                limit,
+                int(total),
+            )
         return [_to_response(r) for r in rows], total
 
     async def list_pending(
@@ -134,8 +156,19 @@ class BankTransactionRepository:
         q, joined = self._apply_statement_owner(
             q, owner_user_id=owner_user_id, joined=joined
         )
+        db_t0 = time.perf_counter()
         result = await self._session.execute(q)
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        db_query_ms = round((time.perf_counter() - db_t0) * 1000, 1)
+        if db_query_ms >= settings.slow_route_ms:
+            logger.warning(
+                "Slow unresolved transaction query db_query_ms=%s statement_id=%s rows=%d owner_scoped=%s",
+                db_query_ms,
+                bank_statement_id,
+                len(rows),
+                owner_user_id is not None,
+            )
+        return rows
 
     async def list_unresolved(
         self,

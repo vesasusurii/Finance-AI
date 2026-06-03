@@ -171,9 +171,14 @@ async def get_invoice_controller(
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
     invoice_access_repo: InvoiceAccessRepository = Depends(get_invoice_access_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
+    upload_repo: UploadRepository = Depends(get_upload_repo),
 ) -> InvoiceController:
     return InvoiceController(
-        extraction, invoice_repo, invoice_access_repo, audit_repo
+        extraction,
+        invoice_repo,
+        invoice_access_repo,
+        audit_repo,
+        upload_repo,
     )
 
 
@@ -192,8 +197,9 @@ async def get_export_service(
 async def get_export_controller(
     excel: ExcelService = Depends(get_excel_service),
     export_service: ExportService = Depends(get_export_service),
+    invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
 ) -> ExportController:
-    return ExportController(excel, export_service)
+    return ExportController(excel, export_service, invoice_repo)
 
 
 async def get_bank_statement_repo(

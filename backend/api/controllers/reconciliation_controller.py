@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 
+from core.cache import cache
 from core.debug_logger import debug_trace, get_logger
 from core.invoice_access import invoice_owner_user_id, upload_owner_user_id
 from models.invoice_payment_match import InvoicePaymentMatch
@@ -108,12 +109,15 @@ class ReconciliationController:
     async def manual_match(
         self, body: ManualMatchRequest, user: UserContext
     ) -> ManualMatchResponse:
-        return await self._matching.manual_match(
+        response = await self._matching.manual_match(
             body.invoice_id,
             body.bank_transaction_id,
             user,
             review_task_id=body.review_task_id,
         )
+        cache.delete_pattern("review:*")
+        cache.delete_pattern("bank_tx:*")
+        return response
 
     @debug_trace
     async def approve_match(
@@ -147,6 +151,8 @@ class ReconciliationController:
             {"status": row.status},
             {"status": "approved"},
         )
+        cache.delete_pattern("review:*")
+        cache.delete_pattern("bank_tx:*")
         return MatchActionResponse(match_id=body.match_id, status=updated.status)
 
     @debug_trace
@@ -177,6 +183,8 @@ class ReconciliationController:
                 {"status": "suggested"},
                 {"status": "rejected", "reason": body.reason},
             )
+            cache.delete_pattern("review:*")
+            cache.delete_pattern("bank_tx:*")
             return MatchActionResponse(match_id=body.match_id, status="rejected")
         await self._invoice_repo.clear_paid_at_date(row.invoice_id)
         await self._invoice_repo.update_match_status(row.invoice_id, "needs_review")
@@ -202,4 +210,6 @@ class ReconciliationController:
                 "reason": body.reason,
             },
         )
+        cache.delete_pattern("review:*")
+        cache.delete_pattern("bank_tx:*")
         return MatchActionResponse(match_id=body.match_id, status="rejected")

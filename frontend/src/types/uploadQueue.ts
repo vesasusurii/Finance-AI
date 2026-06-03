@@ -26,6 +26,8 @@ export interface UploadQueueItem {
   uploadId?: number;
   invoiceId?: number | null;
   confidence?: number | null;
+  /** Short summary for the queue table Details column. */
+  detailSummary?: string | null;
   error?: string | null;
   /** Success info when the file was already uploaded by another user (linked). */
   infoMessage?: string | null;

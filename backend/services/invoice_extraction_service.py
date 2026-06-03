@@ -6,8 +6,10 @@ are sent directly to Vision without conversion. No pdfplumber, Document AI,
 Tesseract, or other OCR providers.
 """
 
+import asyncio
 import base64
 import json
+import time
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
@@ -38,7 +40,7 @@ from services.ocr.pdf_reader import (
     render_pdf_pages_as_images,
 )
 from utils.file_storage import resolve_upload_bytes, save_bytes
-from utils.openai_chat import chat_completion_kwargs
+from utils.openai_chat import chat_completion_kwargs, is_reasoning_model
 
 logger = get_logger(__name__)
 
@@ -56,8 +58,8 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 # OR when any critical field is missing.
 VISION_RETRY_CONFIDENCE = 0.82
 
-# Max tokens for extraction response — enough for full JSON, prevents truncation
-_MAX_TOKENS = 2400  # Raised from 1800 — multi-page docs with multiple IBANs need headroom
+# GPT-4 output budget; GPT-5/o-series also spend tokens on internal reasoning first.
+_MAX_TOKENS = 2400
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,7 @@ class PreparedUpload:
     mime: str
     storage_path: str
     file_size: int
+    content: bytes | None = None
 
 
 class InvoiceExtractionService:
@@ -91,18 +94,12 @@ class InvoiceExtractionService:
     # ─────────────────────────────────────────────────────────────────────
 
     @debug_trace
-    async def process_upload(
-        self, file: UploadFile, user: UserContext
-    ) -> UploadItemResponse:
-        """Synchronous upload + extraction (legacy invoice upload endpoint)."""
-        prepared = await self.prepare_upload(file, user)
-        if isinstance(prepared, UploadItemResponse):
-            return prepared
-        return await self.complete_upload(prepared.upload_id, user.user_id)
-
-    @debug_trace
     async def prepare_upload(
-        self, file: UploadFile, user: UserContext
+        self,
+        file: UploadFile,
+        user: UserContext,
+        *,
+        content: bytes | None = None,
     ) -> PreparedUpload | UploadItemResponse:
         """Store file bytes and create an upload row — fast path for async OCR."""
         logger.debug(
@@ -112,7 +109,8 @@ class InvoiceExtractionService:
         if not file.filename:
             raise ExtractionError("Missing filename")
 
-        content = await file.read()
+        if content is None:
+            content = await file.read()
         logger.debug(
             "Read upload bytes: size=%d (%s)", len(content), type(content).__name__
         )
@@ -126,12 +124,18 @@ class InvoiceExtractionService:
                 f"Unsupported file type: {mime}. Supported: PDF, JPEG, JPG, PNG."
             )
 
-        content_hash = sha256_hex(content)
-        existing = await self._handle_duplicate_upload(
-            content_hash, file.filename, mime, user
-        )
-        if existing is not None:
-            return existing
+        content_hash = sha256_hex(content) if settings.ocr_cache_enabled else None
+        if content_hash is not None:
+            existing = await self._handle_duplicate_upload(
+                content_hash, file.filename, mime, user
+            )
+            if existing is not None:
+                logger.info(
+                    "OCR cache reused for filename=%r user_id=%d",
+                    file.filename,
+                    user.user_id,
+                )
+                return existing
 
         stored_filename = file.filename or "upload"
 
@@ -142,27 +146,28 @@ class InvoiceExtractionService:
             mime_type=mime,
         )
         try:
-            upload_row = await self._upload_repo.create(
-                file_kind="invoice",
-                filename=stored_filename,
-                storage_path=storage_path,
-                mime_type=mime,
-                user_id=user.user_id,
-                processing_status="processing",
-                file_size=file_size,
-                content_sha256=content_hash,
-            )
+            async with self._upload_repo._session.begin_nested():
+                upload_row = await self._upload_repo.create(
+                    file_kind="invoice",
+                    filename=stored_filename,
+                    storage_path=storage_path,
+                    mime_type=mime,
+                    user_id=user.user_id,
+                    processing_status="queued",
+                    file_size=file_size,
+                    content_sha256=content_hash,
+                )
         except IntegrityError:
             logger.warning(
                 "Duplicate content_sha256 on insert for %r — resolving existing row",
                 stored_filename,
             )
-            await self._upload_repo.rollback()
-            existing = await self._handle_duplicate_upload(
-                content_hash, stored_filename, mime, user
-            )
-            if existing is not None:
-                return existing
+            if content_hash is not None:
+                existing = await self._handle_duplicate_upload(
+                    content_hash, stored_filename, mime, user
+                )
+                if existing is not None:
+                    return existing
             raise ExtractionError(
                 "This file was already uploaded. Check your documents list."
             ) from None
@@ -175,23 +180,53 @@ class InvoiceExtractionService:
             mime=mime,
             storage_path=storage_path,
             file_size=file_size,
+            content=content,
         )
 
     @debug_trace
     async def complete_upload(
-        self, upload_id: int, user_id: int
+        self,
+        upload_id: int,
+        user_id: int,
+        *,
+        content: bytes | None = None,
     ) -> UploadItemResponse:
         """Run OCR and persist invoice data for a prepared upload row."""
+        t0 = time.perf_counter()
         upload_row = await self._upload_repo.get(upload_id)
         if upload_row is None:
             raise ExtractionError(f"Upload {upload_id} not found")
 
-        content = await resolve_upload_bytes(
-            upload_row.storage_path,
-            original_filename=upload_row.original_filename,
-        )
+        content_source = "memory"
+        storage_download_ms = 0.0
+        if content is None:
+            content_source = "storage"
+            storage_t0 = time.perf_counter()
+            logger.info(
+                "OCR upload_id=%d downloading bytes from Supabase/storage path=%s",
+                upload_id,
+                upload_row.storage_path,
+            )
+            content = await resolve_upload_bytes(
+                upload_row.storage_path,
+                original_filename=upload_row.original_filename,
+            )
+            storage_download_ms = round((time.perf_counter() - storage_t0) * 1000, 1)
+        else:
+            logger.info(
+                "OCR upload_id=%d using in-memory upload bytes (%d bytes)",
+                upload_id,
+                len(content),
+            )
         if content is None:
             raise ExtractionError("Stored upload file could not be read")
+        logger.info(
+            "OCR content resolved upload_id=%d source=%s bytes=%d storage_download_ms=%s",
+            upload_id,
+            content_source,
+            len(content),
+            storage_download_ms,
+        )
 
         mime = upload_row.mime_type or "application/pdf"
         if mime == "image/jpg":
@@ -199,8 +234,19 @@ class InvoiceExtractionService:
         stored_filename = upload_row.original_filename
 
         try:
+            extract_t0 = time.perf_counter()
             result, model_used, meta = await self._extract(
                 stored_filename, mime, content
+            )
+            extract_ms = round((time.perf_counter() - extract_t0) * 1000, 1)
+            meta["ocr_ms"] = extract_ms
+            meta["storage_download_ms"] = storage_download_ms
+            logger.info(
+                "OCR extract finished upload_id=%d ocr_ms=%s model=%s mode=%s",
+                upload_id,
+                extract_ms,
+                model_used,
+                meta.get("extraction_mode"),
             )
             log_typed_fields(logger, "OCR raw extraction", result)
             logger.debug("OCR meta: %r model_used=%r", meta, model_used)
@@ -320,7 +366,7 @@ class InvoiceExtractionService:
             )
 
         status = upload_row.processing_status
-        if status in ("processing", "pending"):
+        if status in ("processing", "queued"):
             if upload_row.uploaded_by == user.user_id:
                 return UploadItemResponse(
                     upload_id=upload_row.id,
@@ -337,62 +383,12 @@ class InvoiceExtractionService:
             )
 
         if status in ("failed", "processed"):
-            await self._upload_repo.update_status(upload_row.id, "processing")
+            await self._upload_repo.update_status(upload_row.id, "queued")
             return self._prepared_from_row(upload_row, mime)
 
         raise ExtractionError(
             "This file was already uploaded. Check your documents list."
         )
-
-    async def _reprocess_failed_upload(
-        self,
-        upload_row,
-        filename: str,
-        mime: str,
-        content: bytes,
-        user: UserContext,
-    ) -> UploadItemResponse:
-        """Retry OCR on a failed upload row (same file hash, no invoice yet)."""
-        await self._upload_repo.update_status(upload_row.id, "processing")
-        try:
-            result, model_used, meta = await self._extract(filename, mime, content)
-            result = self._ai_validation.sanitize_and_validate(result)
-            missing = self._ai_validation.validate_required_fields(result)
-            if missing:
-                result.needs_review = True
-                result.confidence_score = min(result.confidence_score, 0.69)
-            review_status = self._ai_validation.determine_review_status(result)
-            invoice = await self._invoice_repo.create(
-                result,
-                upload_row.id,
-                review_status,
-                uploaded_by=user.user_id,
-            )
-            await self._audit_repo.log(
-                user.user_id,
-                "invoice_extracted",
-                "invoice",
-                invoice.id,
-                None,
-                {
-                    **result.model_dump(),
-                    "provider": EXTRACTION_PROVIDER,
-                    "model": model_used,
-                    "reprocessed_upload_id": upload_row.id,
-                    **meta,
-                },
-            )
-            await self._upload_repo.update_status(upload_row.id, "processed")
-            return UploadItemResponse(
-                upload_id=upload_row.id,
-                original_filename=filename,
-                processing_status="processed",
-                invoice_id=invoice.id,
-            )
-        except Exception as exc:
-            logger.exception("Re-extraction failed for %s", filename)
-            await self._upload_repo.update_status(upload_row.id, "failed")
-            raise ExtractionError(str(exc)) from exc
 
     # ─────────────────────────────────────────────────────────────────────
     # Extraction routing
@@ -434,9 +430,18 @@ class InvoiceExtractionService:
                 "pages_processed": len(images),
                 "total_pdf_pages": total_pages,
             }
-            result, model_used, mode = await self._extract_pdf_pages(
-                filename, images, total_pages=total_pages
-            )
+            try:
+                result, model_used, mode = await self._extract_pdf_pages(
+                    filename, images, total_pages=total_pages
+                )
+            except ExtractionError as exc:
+                result, model_used, mode = await self._retry_strong_after_failure(
+                    filename,
+                    exc,
+                    extract_fn=lambda m: self._extract_pdf_pages(
+                        filename, images, total_pages=total_pages, model=m
+                    ),
+                )
             meta["extraction_mode"] = mode
             meta["model"] = model_used
             return await self._maybe_retry_strong(
@@ -464,7 +469,14 @@ class InvoiceExtractionService:
             )
             return r, model, "vision_single"
 
-        result, model_used, mode = await _extract_image(settings.openai_model)
+        try:
+            result, model_used, mode = await _extract_image(settings.openai_model)
+        except ExtractionError as exc:
+            result, model_used, mode = await self._retry_strong_after_failure(
+                filename,
+                exc,
+                extract_fn=_extract_image,
+            )
         meta = {"pages_processed": 1, "extraction_mode": mode, "model": model_used}
         return await self._maybe_retry_strong(
             filename, result, model_used, meta, extract_fn=_extract_image
@@ -500,37 +512,77 @@ class InvoiceExtractionService:
             )
             return result, model, "vision_full_document"
 
-        # Batched extraction with context carry-forward
+        # Batched extraction. The first batch still runs first so we can keep
+        # the issuer/invoice context hint; remaining batches run concurrently
+        # with a small per-upload cap to avoid rate-limit spikes.
         partials: list[ExtractionResult] = []
         header_context: str | None = None  # carry issuer + invoice # from batch 1
+        batches: list[tuple[int, int, list[tuple[bytes, str]]]] = []
 
         for start in range(0, len(images), batch_size):
             batch = images[start : start + batch_size]
             page_start = start + 1
             page_end = start + len(batch)
+            batches.append((page_start, page_end, batch))
 
-            partial = await self._openai_vision_extract(
-                batch,
-                filename=filename,
-                file_type="pdf",
-                model=model,
-                page_range=(page_start, page_end),
-                total_pages=total_pages,
-                system_prompt=BATCH_SYSTEM_PROMPT,
-                context_hint=header_context,
+        first_page_start, first_page_end, first_batch = batches[0]
+        first_partial = await self._openai_vision_extract(
+            first_batch,
+            filename=filename,
+            file_type="pdf",
+            model=model,
+            page_range=(first_page_start, first_page_end),
+            total_pages=total_pages,
+            system_prompt=BATCH_SYSTEM_PROMPT,
+            context_hint=None,
+        )
+        partials.append(first_partial)
+
+        # After first batch: build context hint so later batches know the issuer.
+        if first_partial.name_of_company or first_partial.invoice_number:
+            parts = []
+            if first_partial.name_of_company:
+                parts.append(f"Issuer: {first_partial.name_of_company}")
+            if first_partial.invoice_number:
+                parts.append(f"Invoice #: {first_partial.invoice_number}")
+            if first_partial.invoice_date:
+                parts.append(f"Date: {first_partial.invoice_date}")
+            header_context = " | ".join(parts) if parts else None
+
+        remaining_batches = batches[1:]
+        if remaining_batches:
+            concurrency = max(1, settings.openai_page_batch_concurrency)
+            semaphore = asyncio.Semaphore(concurrency)
+            logger.info(
+                "PDF OCR page batches filename=%r batches=%d concurrency=%d",
+                filename,
+                len(batches),
+                concurrency,
             )
-            partials.append(partial)
 
-            # After first batch: build context hint so later batches know the issuer
-            if start == 0 and (partial.name_of_company or partial.invoice_number):
-                parts = []
-                if partial.name_of_company:
-                    parts.append(f"Issuer: {partial.name_of_company}")
-                if partial.invoice_number:
-                    parts.append(f"Invoice #: {partial.invoice_number}")
-                if partial.invoice_date:
-                    parts.append(f"Date: {partial.invoice_date}")
-                header_context = " | ".join(parts) if parts else None
+            async def _extract_batch(
+                page_start: int,
+                page_end: int,
+                batch: list[tuple[bytes, str]],
+            ) -> ExtractionResult:
+                async with semaphore:
+                    return await self._openai_vision_extract(
+                        batch,
+                        filename=filename,
+                        file_type="pdf",
+                        model=model,
+                        page_range=(page_start, page_end),
+                        total_pages=total_pages,
+                        system_prompt=BATCH_SYSTEM_PROMPT,
+                        context_hint=header_context,
+                    )
+
+            # asyncio.gather preserves input order, so merge semantics remain deterministic.
+            partials.extend(
+                await asyncio.gather(
+                    *(_extract_batch(*batch_info) for batch_info in remaining_batches)
+                )
+            )
 
         merged = await self._merge_partial_extractions(
             partials, total_pages=total_pages, model=model
@@ -566,6 +618,28 @@ class InvoiceExtractionService:
     # ─────────────────────────────────────────────────────────────────────
 
     @debug_trace
+    async def _retry_strong_after_failure(
+        self,
+        filename: str,
+        exc: ExtractionError,
+        *,
+        extract_fn,
+    ) -> tuple[ExtractionResult, str, str]:
+        """Retry invalid JSON or failed primary extraction only when enabled."""
+        if (
+            not settings.openai_strong_retry_enabled
+            or settings.openai_model_strong == settings.openai_model
+        ):
+            raise exc
+        logger.info(
+            "Retrying %s with %s after primary extraction failed: %s",
+            filename,
+            settings.openai_model_strong,
+            exc,
+        )
+        return await extract_fn(settings.openai_model_strong)
+
+    @debug_trace
     async def _maybe_retry_strong(
         self,
         filename: str,
@@ -585,19 +659,28 @@ class InvoiceExtractionService:
             suspicious, type(suspicious).__name__,
         )
 
+        retry_reasons: list[str] = []
+        if missing:
+            retry_reasons.append("missing_fields")
+        if result.confidence_score < VISION_RETRY_CONFIDENCE:
+            retry_reasons.append("low_confidence")
+        if suspicious:
+            retry_reasons.append("suspicious_values")
+
         should_retry = (
-            (missing or result.confidence_score < VISION_RETRY_CONFIDENCE or suspicious)
+            settings.openai_strong_retry_enabled
+            and bool(retry_reasons)
             and settings.openai_model_strong != settings.openai_model
         )
 
         if should_retry:
             logger.info(
-                "Retrying %s with %s (confidence=%.2f, missing=%s, suspicious=%s)",
+                "Retrying %s with %s (reasons=%s confidence=%.2f missing=%s)",
                 filename,
                 settings.openai_model_strong,
+                retry_reasons,
                 result.confidence_score,
                 missing,
-                suspicious,
             )
             retry_result, retry_model, retry_mode = await extract_fn(
                 settings.openai_model_strong
@@ -781,25 +864,66 @@ class InvoiceExtractionService:
         return min(300.0, base + page_count * 20.0)
 
     @debug_trace
+    def _max_output_tokens(self, model: str) -> int:
+        if is_reasoning_model(model):
+            return settings.openai_reasoning_max_completion_tokens
+        return _MAX_TOKENS
+
+    @debug_trace
     async def _chat_completion(
         self, *, model: str, messages: list, timeout_seconds: float | None = None
     ):
         timeout = timeout_seconds or float(settings.openai_timeout_seconds)
         last_exc: Exception | None = None
         attempts = max(1, settings.openai_max_retries)
+        token_budget = self._max_output_tokens(model)
         for attempt in range(attempts):
             try:
-                return await self._openai.chat.completions.create(
+                openai_t0 = time.perf_counter()
+                response = await self._openai.chat.completions.create(
                     model=model,
                     timeout=timeout,
                     messages=messages,
                     **chat_completion_kwargs(
                         model,
-                        max_output_tokens=_MAX_TOKENS,
+                        max_output_tokens=token_budget,
                         temperature=0,
                         response_format={"type": "json_object"},
                     ),
                 )
+                openai_ms = round((time.perf_counter() - openai_t0) * 1000, 1)
+                choice = response.choices[0]
+                content = (choice.message.content or "").strip()
+                logger.info(
+                    "OpenAI OCR call complete model=%s attempt=%d openai_ms=%s finish_reason=%s content_len=%d",
+                    model,
+                    attempt + 1,
+                    openai_ms,
+                    choice.finish_reason,
+                    len(content),
+                )
+                if (
+                    is_reasoning_model(model)
+                    and not content
+                    and choice.finish_reason == "length"
+                ):
+                    logger.warning(
+                        "OpenAI %s hit token limit with empty JSON (reasoning "
+                        "consumed budget=%d); retrying with larger budget",
+                        model,
+                        token_budget,
+                    )
+                    token_budget = min(token_budget * 2, 32000)
+                    continue
+                if is_reasoning_model(model) and not content:
+                    logger.warning(
+                        "OpenAI %s returned empty content (finish_reason=%s)",
+                        model,
+                        choice.finish_reason,
+                    )
+                    if attempt + 1 < attempts:
+                        continue
+                return response
             except RateLimitError as exc:
                 last_exc = exc
                 if attempt + 1 >= attempts:

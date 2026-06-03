@@ -21,6 +21,7 @@ from api.routers import (
     export_router,
     health_router,
     invoice_router,
+    metrics_router,
     reconciliation_router,
     review_router,
 )
@@ -32,6 +33,7 @@ from middleware.auth import AuthMiddleware
 from middleware.cors import setup_cors
 from middleware.request_handler import RequestHandlerMiddleware
 from utils.file_storage import bind_http_client
+from services.upload_recovery import recover_stuck_invoice_uploads
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 setup_debug_logging()
@@ -67,6 +69,15 @@ async def lifespan(app: FastAPI):
         settings.openai_model,
         settings.openai_model_strong,
     )
+    # Startup recovery enqueues RQ jobs — must not prevent the API from serving auth/UI.
+    try:
+        await recover_stuck_invoice_uploads(app.state.openai_client)
+    except Exception as exc:
+        logger.warning(
+            "Startup OCR recovery skipped (is Redis running? REDIS_URL=%s): %s",
+            settings.redis_url,
+            exc,
+        )
     yield
     logger.info("Shutting down Borek Finance backend")
     await app.state.http_client.aclose()
@@ -144,6 +155,7 @@ app.include_router(admin_user_router.router, prefix="/api")
 app.include_router(admin_router.router, prefix="/api")
 app.include_router(admin_audit_router.router, prefix="/api")
 app.include_router(invoice_router.router, prefix="/api")
+app.include_router(metrics_router.router, prefix="/api")
 app.include_router(document_router.router, prefix="/api")
 app.include_router(export_router.router, prefix="/api")
 app.include_router(bank_statement_router.router, prefix="/api")
