@@ -32,6 +32,8 @@ const map: Record<string, Tone> = {
   rejected: "danger",
   Matched: "success",
   matched: "success",
+  "Partially Paid": "info",
+  partially_matched: "info",
   suggested: "warning",
   Suggested: "warning",
   Unmatched: "warning",

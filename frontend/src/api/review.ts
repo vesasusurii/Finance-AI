@@ -10,9 +10,15 @@ export async function listReviewTasks(filters: {
   has_invoice?: boolean;
   page?: number;
   limit?: number;
+  /** Skip loading invoice/bank line details (faster for matching page). */
+  slim?: boolean;
 } = {}): Promise<ReviewTaskListResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
+    if (key === "slim") {
+      if (value === true) params.set("enrich", "false");
+      return;
+    }
     if (value !== undefined && value !== "") {
       params.set(key, String(value));
     }

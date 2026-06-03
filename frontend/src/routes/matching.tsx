@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Play, Check, X } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
@@ -28,6 +35,21 @@ import {
   reviewReasonLabel,
 } from "@/lib/labels";
 
+const MATCHING_REVIEW_REASONS = new Set([
+  "no_invoice_in_db",
+  "duplicate_invoice_in_db",
+  "internal_error",
+  "no_invoice_numbers_detected",
+  "invoice_numbers_not_visible",
+  "batch_payment_incomplete",
+  "batch_amount_suggested",
+  "missing_transaction_date",
+]);
+
+function filterMatchingReviewTasks(tasks: ReviewTask[]): ReviewTask[] {
+  return tasks.filter((t) => MATCHING_REVIEW_REASONS.has(t.reason));
+}
+
 export function MatchingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [statementId, setStatementId] = useState(
@@ -45,6 +67,7 @@ export function MatchingPage() {
       .then((res) => setStatements(res.items))
       .catch(() => setStatements([]));
   }, []);
+
   const [running, setRunning] = useState(false);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,54 +76,94 @@ export function MatchingPage() {
   const [unmatchedTxns, setUnmatchedTxns] = useState<BankTransaction[]>([]);
   const [multiTxns, setMultiTxns] = useState<BankTransaction[]>([]);
   const [busyMatchId, setBusyMatchId] = useState<number | null>(null);
+  const [reviewSectionVisible, setReviewSectionVisible] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const reviewSectionRef = useRef<HTMLElement>(null);
 
   const { items: unmatchedInvoices, reload: reloadInvoices } = useInvoices({
     match_status: "unmatched",
     limit: 100,
   });
 
-  const refresh = useCallback(async () => {
-    const sid = statementId ? parseInt(statementId, 10) : undefined;
-    const filters = Number.isFinite(sid) ? { bank_statement_id: sid } : {};
+  const { items: partialInvoices, reload: reloadPartialInvoices } = useInvoices({
+    match_status: "partially_matched",
+    limit: 100,
+  });
 
-    const [matchRes, reviewRes, txnRes, allTxnRes] = await Promise.all([
-      getReconciliationResults({ ...filters, limit: 100 }),
-      listReviewTasks({ task_type: "bank_match", limit: 100 }),
+  const statementFilters = useMemo(() => {
+    const sid = statementId ? parseInt(statementId, 10) : undefined;
+    return Number.isFinite(sid) ? { bank_statement_id: sid } : {};
+  }, [statementId]);
+
+  const refreshMatches = useCallback(async () => {
+    const matchRes = await getReconciliationResults({
+      ...statementFilters,
+      limit: 100,
+    });
+    setMatches(matchRes.items);
+  }, [statementFilters]);
+
+  const refreshReview = useCallback(async () => {
+    setReviewLoading(true);
+    try {
+      const reviewRes = await listReviewTasks({
+        task_type: "bank_match",
+        limit: 100,
+        slim: true,
+      });
+      setReviewTasks(filterMatchingReviewTasks(reviewRes.items));
+    } finally {
+      setReviewLoading(false);
+    }
+  }, []);
+
+  const refreshTransactions = useCallback(async () => {
+    const [txnRes, allTxnRes] = await Promise.all([
       listBankTransactions({
-        ...filters,
+        ...statementFilters,
         reconciliation_status: "needs_review",
         limit: 200,
       }),
-      listBankTransactions({ ...filters, limit: 200 }),
+      listBankTransactions({ ...statementFilters, limit: 200 }),
     ]);
-
-    setMatches(matchRes.items);
-    setReviewTasks(
-      reviewRes.items.filter((t) =>
-        [
-          "no_invoice_in_db",
-          "duplicate_invoice_in_db",
-          "internal_error",
-          "no_invoice_numbers_detected",
-          "invoice_numbers_not_visible",
-          "batch_payment_incomplete",
-          "batch_amount_suggested",
-          "missing_transaction_date",
-        ].includes(t.reason),
-      ),
-    );
     setUnmatchedTxns(txnRes.items);
     setMultiTxns(
       allTxnRes.items.filter((t) => t.detected_invoice_numbers.length > 1),
     );
-    await reloadInvoices();
-  }, [statementId, reloadInvoices]);
+  }, [statementFilters]);
+
+  const refreshCore = useCallback(async () => {
+    await Promise.all([refreshMatches(), refreshTransactions(), reloadInvoices(), reloadPartialInvoices()]);
+  }, [refreshMatches, refreshTransactions, reloadInvoices, reloadPartialInvoices]);
 
   useEffect(() => {
-    void refresh().catch((e) => {
+    void refreshCore().catch((e) => {
       setError(e instanceof Error ? e.message : "Could not load matching data");
     });
-  }, [refresh]);
+  }, [refreshCore]);
+
+  useEffect(() => {
+    const el = reviewSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setReviewSectionVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "120px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!reviewSectionVisible) return;
+    void refreshReview().catch((e) => {
+      setError(e instanceof Error ? e.message : "Could not load review tasks");
+    });
+  }, [reviewSectionVisible, refreshReview]);
 
   const onRun = async () => {
     setRunning(true);
@@ -113,7 +176,9 @@ export function MatchingPage() {
       );
       setSummary(res);
       await refreshSession();
-      await refresh();
+      await refreshCore();
+      setReviewSectionVisible(true);
+      await refreshReview();
     } catch (e) {
       if (e instanceof ApiError && e.code === "session_expired") {
         setError("Session expired. Please sign in again.");
@@ -131,9 +196,18 @@ export function MatchingPage() {
     setError(null);
     try {
       await approveMatch(matchId);
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: "approved" as const } : m,
+        ),
+      );
     } catch (e) {
       if (e instanceof ApiError && e.code === "match_already_resolved") {
-        // Idempotent — row was already approved/rejected; refresh UI.
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.id === matchId ? { ...m, status: "approved" as const } : m,
+          ),
+        );
       } else {
         setError(e instanceof Error ? e.message : "Could not approve match");
         return;
@@ -141,7 +215,7 @@ export function MatchingPage() {
     } finally {
       setBusyMatchId(null);
     }
-    await refresh();
+    void refreshMatches();
   };
 
   const onReject = async (matchId: number) => {
@@ -152,9 +226,18 @@ export function MatchingPage() {
     setError(null);
     try {
       await rejectMatch(matchId, reason || undefined);
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === matchId ? { ...m, status: "rejected" as const } : m,
+        ),
+      );
     } catch (e) {
       if (e instanceof ApiError && e.code === "match_already_resolved") {
-        // Idempotent — refresh to sync state.
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.id === matchId ? { ...m, status: "rejected" as const } : m,
+          ),
+        );
       } else {
         setError(e instanceof Error ? e.message : "Could not reject match");
         return;
@@ -162,7 +245,7 @@ export function MatchingPage() {
     } finally {
       setBusyMatchId(null);
     }
-    await refresh();
+    void refreshMatches();
   };
 
   const onStatementChange = (value: string) => {
@@ -272,6 +355,50 @@ export function MatchingPage() {
     },
   ];
 
+  const partialInvoiceColumns: Column<Invoice>[] = [
+    {
+      key: "num",
+      header: "Invoice #",
+      cell: (r) => r.invoice_number ?? "—",
+    },
+    {
+      key: "company",
+      header: "Company",
+      cell: (r) => r.name_of_company ?? "—",
+    },
+    {
+      key: "amount",
+      header: "Total",
+      align: "right",
+      cell: (r) =>
+        r.amount != null
+          ? `${Number(r.amount).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${r.currency ?? "EUR"}`
+          : "—",
+    },
+    {
+      key: "debt",
+      header: "Remaining",
+      align: "right",
+      cell: (r) =>
+        r.debt != null ? (
+          <span className="font-semibold text-primary tabular-nums">
+            {Number(r.debt).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+            {r.currency ?? "EUR"}
+          </span>
+        ) : "—",
+    },
+    {
+      key: "first_paid",
+      header: "First payment",
+      cell: (r) => formatDate(r.paid_at_date),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
+    },
+  ];
+
   const txnColumns: Column<BankTransaction>[] = [
     {
       key: "date",
@@ -349,10 +476,9 @@ export function MatchingPage() {
       {summary && (
         <div className="rounded-lg border border-border bg-surface-muted/50 px-4 py-3 text-[13px] text-foreground">
           Last run: <strong>{summary.matched}</strong> matched,{" "}
-          <strong>{summary.unmatched_transactions}</strong> unmatched
-          transactions, <strong>{summary.review_tasks_created}</strong> review
-          tasks, <strong>{summary.unmatched_invoices}</strong> unmatched invoices
-          in DB
+          <strong>{summary.unmatched_transactions}</strong> unmatched transactions,{" "}
+          <strong>{summary.review_tasks_created}</strong> review tasks,{" "}
+          <strong>{summary.unmatched_invoices}</strong> unmatched invoices in DB
         </div>
       )}
 
@@ -372,6 +498,14 @@ export function MatchingPage() {
         />
       </Section>
 
+      <Section title="Partially paid invoices" count={partialInvoices.length}>
+        <DataTable
+          columns={partialInvoiceColumns}
+          rows={partialInvoices}
+          empty="No partially paid invoices."
+        />
+      </Section>
+
       <Section title="Unmatched transactions" count={unmatchedTxns.length}>
         <DataTable
           columns={txnColumns}
@@ -381,8 +515,9 @@ export function MatchingPage() {
       </Section>
 
       <Section
+        ref={reviewSectionRef}
         title="Needs review"
-        count={reviewTasks.length}
+        count={reviewSectionVisible ? reviewTasks.length : undefined}
         action={
           reviewTasks.length > 0 ? (
             <Link
@@ -394,7 +529,13 @@ export function MatchingPage() {
           ) : undefined
         }
       >
-        {reviewTasks.length === 0 ? (
+        {!reviewSectionVisible ? (
+          <p className="text-[13px] text-muted-foreground">
+            Scroll here to load review tasks…
+          </p>
+        ) : reviewLoading ? (
+          <p className="text-[13px] text-muted-foreground">Loading review tasks…</p>
+        ) : reviewTasks.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">No open review tasks.</p>
         ) : (
           <ul className="space-y-2 text-[13px]">
@@ -450,27 +591,31 @@ export function MatchingPage() {
   );
 }
 
-function Section({
+const Section = ({
+  ref,
   title,
   count,
   action,
   children,
 }: {
+  ref?: React.RefObject<HTMLElement | null>;
   title: string;
-  count: number;
+  count?: number;
   action?: ReactNode;
   children: ReactNode;
-}) {
+}) => {
   return (
-    <section>
+    <section ref={ref}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[14px] font-semibold text-foreground">
           {title}{" "}
-          <span className="font-normal text-muted-foreground">({count})</span>
+          {count !== undefined ? (
+            <span className="font-normal text-muted-foreground">({count})</span>
+          ) : null}
         </h2>
         {action}
       </div>
       {children}
     </section>
   );
-}
+};

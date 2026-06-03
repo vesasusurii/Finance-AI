@@ -9,6 +9,36 @@ import {
 import { cn } from "@/lib/utils";
 import type { BankTransaction } from "@/types/bank";
 
+function HighlightText({
+  text,
+  terms,
+}: {
+  text: string;
+  terms: string[];
+}) {
+  if (!terms.length || !text) return <>{text}</>;
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(regex);
+  const lowerTerms = new Set(terms.map((t) => t.toLowerCase()));
+  return (
+    <>
+      {parts.map((part, i) =>
+        lowerTerms.has(part.toLowerCase()) ? (
+          <mark
+            key={i}
+            className="rounded-sm bg-yellow-200 px-0.5 text-foreground dark:bg-yellow-700"
+          >
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 export function transactionCompanyLabel(transaction: BankTransaction): string {
   const comment = transaction.comment?.trim();
   if (comment) {
@@ -35,6 +65,7 @@ export function BankTransactionMatchCard({
   expanded,
   matching,
   matchEnabled = true,
+  highlightTerms = [],
   onExpand,
   onClose,
   onMatch,
@@ -44,6 +75,8 @@ export function BankTransactionMatchCard({
   matching: boolean;
   /** When false, cards expand for inspection only (no Match action). */
   matchEnabled?: boolean;
+  /** Lowercase terms to highlight inside text fields. */
+  highlightTerms?: string[];
   onExpand: () => void;
   onClose: () => void;
   onMatch: () => void;
@@ -51,6 +84,7 @@ export function BankTransactionMatchCard({
   const company = transactionCompanyLabel(transaction);
   const value = transactionDisplayValue(transaction);
   const numbers = transaction.detected_invoice_numbers;
+  const hl = highlightTerms;
 
   if (!expanded) {
     return (
@@ -63,13 +97,13 @@ export function BankTransactionMatchCard({
           <div className="min-w-0 sm:col-span-1">
             <span className="text-[11px] text-muted-foreground">Company</span>
             <p className="truncate text-[13px] font-medium text-foreground">
-              {company}
+              <HighlightText text={company} terms={hl} />
             </p>
           </div>
           <div>
             <span className="text-[11px] text-muted-foreground">Value</span>
             <p className="tabular-nums text-[13px] font-medium text-foreground">
-              {value}
+              <HighlightText text={value} terms={hl} />
             </p>
           </div>
           <div className="min-w-0">
@@ -77,7 +111,11 @@ export function BankTransactionMatchCard({
               Detected invoice #
             </span>
             <p className="font-mono text-[12px] text-foreground">
-              {numbers.length > 0 ? numbers.join(", ") : "—"}
+              {numbers.length > 0 ? (
+                <HighlightText text={numbers.join(", ")} terms={hl} />
+              ) : (
+                "—"
+              )}
             </p>
           </div>
         </div>
@@ -94,7 +132,7 @@ export function BankTransactionMatchCard({
       <div className="border-b border-border px-3 py-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-[13px] font-semibold text-foreground">
-            {company}
+            <HighlightText text={company} terms={hl} />
           </span>
           <StatusBadge
             value={reconciliationStatusLabel(transaction.reconciliation_status)}
@@ -111,31 +149,49 @@ export function BankTransactionMatchCard({
           <div>
             <dt className="text-muted-foreground">Type</dt>
             <dd className="text-foreground">
-              {transaction.transaction_type ?? "—"}
+              {transaction.transaction_type ? (
+                <HighlightText text={transaction.transaction_type} terms={hl} />
+              ) : (
+                "—"
+              )}
             </dd>
           </div>
           <div>
             <dt className="text-muted-foreground">Debited</dt>
             <dd className="tabular-nums text-foreground">
-              {formatCurrency(transaction.debited_amount, null)}
+              <HighlightText
+                text={formatCurrency(transaction.debited_amount, null)}
+                terms={hl}
+              />
             </dd>
           </div>
           <div>
             <dt className="text-muted-foreground">Credited</dt>
             <dd className="tabular-nums text-foreground">
-              {formatCurrency(transaction.credited_amount, null)}
+              <HighlightText
+                text={formatCurrency(transaction.credited_amount, null)}
+                terms={hl}
+              />
             </dd>
           </div>
           <div className="sm:col-span-2">
             <dt className="text-muted-foreground">Detected invoice numbers</dt>
             <dd className="font-mono text-foreground">
-              {numbers.length > 0 ? numbers.join(", ") : "—"}
+              {numbers.length > 0 ? (
+                <HighlightText text={numbers.join(", ")} terms={hl} />
+              ) : (
+                "—"
+              )}
             </dd>
           </div>
           <div className="sm:col-span-2">
             <dt className="text-muted-foreground">Comment</dt>
             <dd className="whitespace-pre-wrap text-foreground">
-              {transaction.comment?.trim() || "—"}
+              {transaction.comment?.trim() ? (
+                <HighlightText text={transaction.comment.trim()} terms={hl} />
+              ) : (
+                "—"
+              )}
             </dd>
           </div>
         </dl>
