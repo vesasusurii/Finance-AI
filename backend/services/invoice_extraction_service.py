@@ -100,6 +100,7 @@ class InvoiceExtractionService:
         user: UserContext,
         *,
         content: bytes | None = None,
+        upload_source: str = "portal",
     ) -> PreparedUpload | UploadItemResponse:
         """Store file bytes and create an upload row — fast path for async OCR."""
         logger.debug(
@@ -156,6 +157,7 @@ class InvoiceExtractionService:
                     processing_status="queued",
                     file_size=file_size,
                     content_sha256=content_hash,
+                    upload_source=upload_source,
                 )
         except IntegrityError:
             logger.warning(

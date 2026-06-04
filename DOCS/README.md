@@ -52,6 +52,6 @@ Canonical numbered docs (use these for implementation). Aligned with the origina
 | E2E / CI testing strategy | ⚠️ Partial | 8, 9 (eval scripts only) |
 | Deployment / ops runbook | ⚠️ Partial | 11 (checklist only) |
 | Intern task breakdown (spec §18) | ❌ Missing | Was in removed extended doc — add when team splits work |
-| Finance pending decisions | 📋 Listed | 8 (OCR), 9 (matching), 10 §12 |
+| Finance pending decisions | 📋 Listed | `DOCS/FINANCE_PENDING_DECISIONS.md`; also 8, 9, 10 §12 |
 
 **Verdict:** Documentation is **sufficient to start MVP implementation** (Phases 1–4). Gaps are post-MVP reporting, dedicated testing/UI specs, and Finance sign-off on pending decisions — not blockers for core invoice + bank matching flow.

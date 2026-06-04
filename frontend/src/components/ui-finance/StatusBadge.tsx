@@ -33,6 +33,7 @@ const map: Record<string, Tone> = {
   Matched: "success",
   matched: "success",
   "Partially Paid": "info",
+  "Partially paid": "info",
   partially_matched: "info",
   suggested: "warning",
   Suggested: "warning",

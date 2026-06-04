@@ -187,3 +187,20 @@ class ReviewRepository:
         if count:
             await self._session.flush()
         return count
+
+    async def resolve_missing_transaction_date_tasks(
+        self, bank_transaction_id: int, resolved_at: datetime
+    ) -> int:
+        q = select(ReviewTask).where(
+            ReviewTask.task_type == "bank_match",
+            ReviewTask.bank_transaction_id == bank_transaction_id,
+            ReviewTask.reason == "missing_transaction_date",
+            ReviewTask.status == "open",
+        )
+        rows = (await self._session.execute(q)).scalars().all()
+        for row in rows:
+            row.status = "approved"
+            row.resolved_at = resolved_at
+        if rows:
+            await self._session.flush()
+        return len(rows)

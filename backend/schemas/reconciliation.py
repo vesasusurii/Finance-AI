@@ -46,6 +46,7 @@ class MatchResultResponse(BaseModel):
     match_confidence: float
     status: str
     paid_at_date: date
+    paid_amount: Decimal | None = None
     created_at: datetime
     invoice: MatchInvoiceSnapshot | None = None
     bank_transaction: MatchBankTransactionSnapshot | None = None
@@ -62,6 +63,7 @@ class ManualMatchRequest(BaseModel):
     invoice_id: int = Field(..., ge=1)
     bank_transaction_id: int = Field(..., ge=1)
     review_task_id: int | None = Field(default=None, ge=1)
+    paid_amount: Decimal | None = Field(default=None, ge=0)
 
 
 class ManualMatchResponse(BaseModel):

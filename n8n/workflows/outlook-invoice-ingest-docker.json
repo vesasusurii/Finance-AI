@@ -1,5 +1,5 @@
 {
-  "name": "Borek Finance — Outlook invoice ingest",
+  "name": "Borek Finance — Outlook invoice ingest (Docker)",
   "nodes": [
     {
       "parameters": {
@@ -12,7 +12,7 @@
         },
         "filters": {
           "foldersToInclude": [
-            "Inbox"
+            "={{ $env.OUTLOOK_FOLDER || 'Inbox' }}"
           ]
         },
         "options": {
@@ -176,17 +176,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://YOUR-NGROK-URL.ngrok-free.app/api/invoices/email-upload",
+        "url": "http://backend:8000/api/invoices/email-upload",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [
-            {
-              "name": "ngrok-skip-browser-warning",
-              "value": "true"
-            }
-          ]
+          "parameters": []
         },
         "sendBody": true,
         "contentType": "multipart-form-data",
@@ -432,7 +427,7 @@
     },
     {
       "parameters": {
-        "content": "## Borek Finance — Outlook ingest (n8n Cloud free tier)\n\n1. **Outlook New Email** — select your Microsoft Outlook credential on import\n2. **Credentials → Header Auth** named `Borek Finance email ingest`\n   - Header name: `X-Email-Ingest-Key`\n   - Value: same as `EMAIL_INGEST_API_KEY` in backend `.env`\n3. **Send to AI Backend** — replace `YOUR-NGROK-URL` with output from `scripts/start-ngrok-tunnel.ps1`\n4. Docker self-hosted n8n: import `outlook-invoice-ingest-docker.json` instead\n5. Production: use a fixed HTTPS API host (ngrok is dev-only)",
+        "content": "## Borek Finance — Outlook ingest (Docker Compose)\n\n1. Import with `docker compose --profile n8n up -d`\n2. **Outlook New Email** — select Microsoft Outlook credential\n3. **Header Auth** credential `Borek Finance email ingest` (`X-Email-Ingest-Key`)\n4. API URL is `http://backend:8000` on the Compose network\n5. Optional env: `OUTLOOK_FOLDER` (default Inbox)",
         "height": 280,
         "width": 420
       },

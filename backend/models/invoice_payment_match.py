@@ -46,6 +46,7 @@ class InvoicePaymentMatch(Base):
     match_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     paid_at_date: Mapped[date] = mapped_column(Date, nullable=False)
+    paid_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -1,6 +1,11 @@
 # Outlook → Borek Finance invoice ingestion (n8n)
 
-Production workflow: **`workflows/outlook-invoice-ingest.json`**
+Production workflow: **`workflows/outlook-invoice-ingest.json`** (n8n Cloud free tier)
+
+| Workflow file | Use when |
+|---------------|----------|
+| `outlook-invoice-ingest.json` | n8n Cloud — hardcoded ngrok URL + Header Auth credential (no `$vars`) |
+| `outlook-invoice-ingest-docker.json` | Self-hosted n8n in Docker Compose — `http://backend:8000` |
 
 ## Architecture (important)
 
@@ -159,6 +164,32 @@ Expected: health → `{"status":"ok"}`, upload → **202** `"status": "queued"`.
 - Keep `docker compose --profile tunnel up -d` running while n8n Cloud workflows are active
 - Stop tunnel: `docker compose --profile tunnel stop ngrok`
 
+### Production note
+
+ngrok is **dev-only**. For production, deploy the API to a fixed HTTPS host (Azure, Fly.io, etc.) and point the n8n **Send to AI Backend** URL at that host. Self-hosted n8n on the same Docker network as the backend avoids a tunnel entirely (`outlook-invoice-ingest-docker.json`).
+
+## Database migrations (email ingest)
+
+Alembic chain for email ingest:
+
+| Revision | Purpose |
+|----------|---------|
+| `m1n2o3p4q5r6` | `paid_amount` on matches (may already be applied on Supabase) |
+| `p3q4r5s6t7u8` | `uploaded_files.upload_source` |
+| `q4r5s6t7u8v9` | ingest metadata columns + backfill from `audit_logs` |
+
+Apply on Supabase / local Postgres:
+
+```powershell
+docker compose exec backend alembic upgrade head
+```
+
+If Supabase was stamped at `m1n2o3p4q5r6` but columns were added manually, migrations are idempotent (they skip existing columns). To re-run the audit backfill only:
+
+```powershell
+docker compose exec backend python scripts/backfill_email_ingest.py
+```
+
 ## n8n Cloud (general)
 
 If your workflow lives on **n8n Cloud**, it runs on n8n’s servers — not your PC. It **cannot** call `localhost`, `backend:8000`, or `host.docker.internal`.
@@ -169,9 +200,9 @@ Use ngrok (above) or deploy the API to a fixed HTTPS host for production.
 
 For your workflow on n8n Cloud:
 
-1. **Variables** — `FINANCE_API_URL`, `EMAIL_INGEST_API_KEY`, optional `OUTLOOK_FOLDER` (use `$vars`, not `$env`)
-2. **Send to AI Backend** — POST multipart to `{{ $vars.FINANCE_API_URL }}/api/invoices/email-upload`
-3. **Header** — `X-Email-Ingest-Key` (not session cookie)
+1. **Credentials** — Microsoft Outlook OAuth2 + Header Auth `Borek Finance email ingest`
+2. **Send to AI Backend** — full HTTPS URL to `/api/invoices/email-upload` (no `$vars` on free tier)
+3. **Header Auth** provides `X-Email-Ingest-Key` (do not use session cookie)
 4. **Body** — form field **`file`** (binary), plus metadata fields
 5. **Remove Supabase insert nodes** if present — backend handles storage and DB
 6. **Success** — HTTP **202** with `"status": "queued"` or `"duplicate"`

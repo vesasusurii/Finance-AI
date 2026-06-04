@@ -5,17 +5,31 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from core.debug_logger import get_logger
 from models.invoice import Invoice
+from models.uploaded_file import UploadedFile
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
 from sqlalchemy.orm import joinedload
 from core.invoice_access import apply_invoice_visibility, user_may_delete_invoice
 from utils.normalization import normalize_invoice_number
 
 logger = get_logger(__name__)
+
+
+class DuplicateInvoiceNumberError(ValueError):
+    """Raised when uploaded_by + invoice_number_normalized already exists."""
+
+
+def _is_duplicate_invoice_number_error(exc: IntegrityError) -> bool:
+    orig = getattr(exc, "orig", None)
+    message = str(orig or exc).lower()
+    return "uq_invoices_owner_invoice_number_normalized" in message or (
+        "invoice_number_normalized" in message and "unique" in message
+    )
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -36,6 +50,11 @@ def _to_response(row: Invoice) -> InvoiceResponse:
         update={
             "source_filename": upload.original_filename,
             "source_mime_type": upload.mime_type,
+            "upload_source": upload.upload_source,
+            "ingest_sender_email": upload.ingest_sender_email,
+            "ingest_sender_name": upload.ingest_sender_name,
+            "ingest_email_subject": upload.ingest_email_subject,
+            "ingest_message_id": upload.ingest_message_id,
         }
     )
 
@@ -78,7 +97,12 @@ class InvoiceRepository:
             uploaded_by=uploaded_by,
         )
         self._session.add(row)
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            if _is_duplicate_invoice_number_error(exc):
+                raise DuplicateInvoiceNumberError(formatted or "") from exc
+            raise
         return await self.get(row.id, owner_user_id=None)  # type: ignore[return-value]
 
     async def get_id_by_source_file(self, source_file_id: int) -> int | None:
@@ -177,6 +201,14 @@ class InvoiceRepository:
             pattern = f"%{filters['category']}%"
             query = query.where(Invoice.category.ilike(pattern))
             count_query = count_query.where(Invoice.category.ilike(pattern))
+        if filters.get("upload_source"):
+            source = str(filters["upload_source"])
+            query = query.join(
+                UploadedFile, Invoice.source_file_id == UploadedFile.id
+            ).where(UploadedFile.upload_source == source)
+            count_query = count_query.join(
+                UploadedFile, Invoice.source_file_id == UploadedFile.id
+            ).where(UploadedFile.upload_source == source)
 
         sort = filters.get("sort") or "invoice_date_desc"
         if sort == "created_at":
@@ -259,7 +291,13 @@ class InvoiceRepository:
             row.invoice_number_normalized = formatted
         for key, value in payload.items():
             setattr(row, key, value)
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            if _is_duplicate_invoice_number_error(exc):
+                num = payload.get("invoice_number", row.invoice_number)
+                raise DuplicateInvoiceNumberError(str(num or "")) from exc
+            raise
         return await self.get(invoice_id, owner_user_id=owner_user_id)
 
     async def delete(
@@ -398,6 +436,12 @@ class InvoiceRepository:
         row = await self._session.get(Invoice, invoice_id)
         if row:
             row.match_status = match_status
+            await self._session.flush()
+
+    async def update_debt(self, invoice_id: int, remaining: Decimal) -> None:
+        row = await self._session.get(Invoice, invoice_id)
+        if row:
+            row.debt = remaining
             await self._session.flush()
 
     async def flag_for_review(

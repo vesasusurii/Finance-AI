@@ -148,6 +148,17 @@ class BankTransactionRepository:
             )
         return [_to_response(r) for r in rows], total
 
+    async def list_for_statement(
+        self, bank_statement_id: int
+    ) -> list[BankTransaction]:
+        q = (
+            select(BankTransaction)
+            .where(BankTransaction.bank_statement_id == bank_statement_id)
+            .order_by(BankTransaction.id.asc())
+        )
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
+
     async def list_pending(
         self,
         bank_statement_id: int | None = None,

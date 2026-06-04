@@ -34,6 +34,14 @@ export interface BankStatementListResponse {
   limit: number;
 }
 
+export interface BankStatementReparseResponse {
+  bank_statement_id: number;
+  rows_updated: number;
+  dates_fixed: number;
+  unparsed_date_rows: number;
+  review_tasks_resolved: number;
+}
+
 export interface BankTransaction {
   id: number;
   bank_statement_id: number;

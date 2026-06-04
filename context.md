@@ -76,12 +76,12 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 |-------|--------|
 | `/` | Invoice upload |
 | `/documents` | Purchase invoices — **edit, save, delete** in detail drawer |
-| `/review` | OCR review queue |
+| `/review` | Redirect → `/manual-review` (legacy alias) |
+| `/manual-review` | Manual review queue (`review_tasks`) |
 | `/bank-statements` | Bank Excel upload + statement list → link to matching |
 | `/bank-transactions` | Parsed transaction rows |
-| `/matching` | Run matching + results sections (approve / reject) |
+| `/matching` | Run matching + tabbed results (approve / reject) |
 | `/exports` | Excel export |
-| `/manual-review` | Manual review queue (`review_tasks`) |
 | `/admin/*` | Placeholder |
 
 ## Key paths
@@ -99,6 +99,8 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 | Documents UI | `frontend/src/routes/documents.tsx` |
 | Matching UI | `frontend/src/routes/matching.tsx` |
 | Specs | `DOCS/*.md` (see `DOCS/0. Roadmap.md`) |
+| Phase A runbook (n8n + Documents) | `DOCS/PHASE_A_STABILISATION.md` |
+| Finance sign-off items | `DOCS/FINANCE_PENDING_DECISIONS.md` |
 
 ## Session notes
 
@@ -112,14 +114,14 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
   2. `MatchingService.run` wraps each transaction in `try/except` and delegates to a new `_process_txn`; failed rows become `needs_review` with a `internal_error` review task so one bad txn can no longer abort the whole run.
   3. Ambiguous lookups produce a new `duplicate_invoice_in_db` review task (existing `create_bank_unmatched` signature — no schema change). Per-txn dedupe by `invoice_id` guards against the `(invoice_id, bank_transaction_id)` unique constraint when two candidates resolve to the same invoice.
   - Frontend `/matching` now renders all relevant review reasons (`no_invoice_in_db`, `duplicate_invoice_in_db`, `internal_error`, `no_invoice_numbers_detected`, `missing_transaction_date`) with a `StatusBadge` and the `reviewReasonLabel()` helper in `frontend/src/lib/labels.ts`.
-  - Data clean-up still required: list duplicates via `SELECT invoice_number_normalized, COUNT(*) FROM invoices GROUP BY 1 HAVING COUNT(*) > 1;` and delete / rename the offenders from the documents page. Adding a partial unique index on `invoice_number_normalized WHERE NOT NULL` is the recommended schema follow-up (not applied yet).
+  - Data clean-up still required: list duplicates via `docker compose exec backend python scripts/list_duplicate_invoice_numbers.py` and delete / rename offenders from the documents page. Migration `r5s6t7u8v9w0` adds a partial unique index on `(uploaded_by, invoice_number_normalized)` when no duplicates remain; new saves return HTTP 409 `duplicate_invoice_number`.
 - **2026-05-26:** Bank Excel `transaction_date` parsing fix — every row of statement #3 had `transaction_date = NULL`, so `MatchingService` skipped them with `missing_transaction_date` and invoice `613260192` (correctly detected, present in DB) never matched. `utils/bank_excel_parser._parse_date` only knew three string formats and dropped Excel serial numbers / unknown shapes to `None` silently. Fixed in four layers:
   1. `_parse_date` now also accepts Excel serial floats/ints (`days since 1899-12-30`, range-guarded), dashed (`25-02-2026`), 2-digit-year (`25.02.26`), ISO with time (`2026-02-25T12:30:45`), and date+time (`25.02.2026 12:30:45`) strings. Falls back to a head-split for trailing-junk (`"25.02.2026 Mo"`). Logs a `WARNING` with the raw value when it gives up — surprises are now visible in `docker compose logs backend` instead of vanishing as silent `NULL`s.
   2. `_load_rows_xls` now converts xlrd `XL_CELL_DATE` cells via `xldate_as_datetime(value, book.datemode)` so legacy `.xls` exports stop returning dates as raw floats.
   3. `REQUIRED_HEADERS` gained German tokens — `datum` (matches `Buchungsdatum` / `Valutadatum` via substring), `valuta`, `verwendungszweck`, `beschreibung`, `betreff`, `purpose` — so Kreissparkasse-style exports parse the right columns.
   4. `BankStatementUploadResponse.unparsed_date_rows` (Pydantic + TS) is surfaced as a yellow alert on `/bank-statements` after upload: "N of M rows have an unparsable date and will be skipped by matching" with the accepted formats spelled out. Backend also logs the count.
   - Tests in `backend/tests/test_bank_excel_parser.py` cover every accepted shape + defensive rejection of bool/0/negative/huge-serial/garbage strings (verified via direct module invocation since pytest isn't in the backend image).
-  - Existing broken rows still need a one-off backfill — either by SQL `UPDATE bank_transactions SET transaction_date = …` (the user already did this for statement #3) or by re-uploading the same file. A re-parse endpoint is the suggested nice-to-have follow-up.
+  - Existing broken rows: `POST /api/bank-statements/{id}/reparse` re-reads the stored Excel and updates transaction dates without re-upload. Resolves `missing_transaction_date` review tasks when dates are fixed.
 
 ## Handoff checklist
 

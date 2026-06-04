@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Trash2, Upload, FileSpreadsheet } from "lucide-react";
+import { Trash2, Upload, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import {
   deleteBankStatement,
   listBankStatements,
+  reparseBankStatement,
   uploadBankStatement,
 } from "@/api/bankStatements";
 import type {
@@ -36,6 +37,8 @@ export function BankPage() {
   const [statements, setStatements] = useState<BankStatement[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [reparsingId, setReparsingId] = useState<number | null>(null);
+  const [reparseMessage, setReparseMessage] = useState<string | null>(null);
 
   const loadStatements = useCallback(async () => {
     setLoadingList(true);
@@ -110,6 +113,25 @@ export function BankPage() {
       }
     },
     [loadStatements, uploadResult?.bank_statement_id],
+  );
+
+  const handleReparse = useCallback(
+    async (statement: BankStatement) => {
+      setReparsingId(statement.id);
+      setError(null);
+      setReparseMessage(null);
+      try {
+        const res = await reparseBankStatement(statement.id);
+        setReparseMessage(
+          `Re-parsed ${formatStatementId(statement)}: ${res.dates_fixed} date(s) fixed, ${res.rows_updated} row(s) updated.`,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Re-parse failed");
+      } finally {
+        setReparsingId(null);
+      }
+    },
+    [],
   );
 
   const previewColumns: Column<PreviewRow>[] = [
@@ -216,13 +238,22 @@ export function BankPage() {
       key: "view",
       header: "",
       cell: (r) => (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to={`/bank-transactions?bank_statement_id=${r.id}`}
             className="text-[12px] font-medium text-primary hover:underline"
           >
             View transactions
           </Link>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            disabled={reparsingId === r.id}
+            onClick={() => void handleReparse(r)}
+          >
+            {reparsingId === r.id ? "Re-parsing…" : "Re-parse"}
+          </Button>
           <Button
             variant="danger"
             size="sm"
@@ -301,6 +332,11 @@ export function BankPage() {
       {error && (
         <p className="text-[13px] text-destructive" role="alert">
           {error}
+        </p>
+      )}
+      {reparseMessage && (
+        <p className="text-[13px] text-muted-foreground" role="status">
+          {reparseMessage}
         </p>
       )}
 

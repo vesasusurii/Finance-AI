@@ -34,6 +34,7 @@ export interface InvoicePaymentMatch {
   match_confidence: number;
   status: string;
   paid_at_date: string;
+  paid_amount?: number | null;
   created_at: string;
   invoice: MatchInvoiceSnapshot | null;
   bank_transaction: MatchBankTransactionSnapshot | null;

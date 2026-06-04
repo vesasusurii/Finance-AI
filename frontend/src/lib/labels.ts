@@ -14,6 +14,7 @@ export function matchStatusLabel(status: string): string {
   const map: Record<string, string> = {
     unmatched: "Unmatched",
     matched: "Matched",
+    partially_matched: "Partially paid",
     needs_review: "Needs Review",
   };
   return map[status] ?? status;

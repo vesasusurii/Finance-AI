@@ -10,7 +10,10 @@ from core.invoice_access import invoice_owner_user_id, user_may_delete_invoice
 from core.upload_enqueue import safe_enqueue_invoice_ocr
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_access_repository import InvoiceAccessRepository
-from repositories.invoice_repository import InvoiceRepository
+from repositories.invoice_repository import (
+    DuplicateInvoiceNumberError,
+    InvoiceRepository,
+)
 from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
 from schemas.email_ingest import EmailIngestResponse
@@ -102,7 +105,11 @@ class InvoiceController:
 
     @debug_trace
     async def upload(
-        self, files: list[UploadFile], user: UserContext
+        self,
+        files: list[UploadFile],
+        user: UserContext,
+        *,
+        upload_source: str = "portal",
     ) -> InvoiceUploadResponse:
         if not files:
             raise HTTPException(
@@ -114,7 +121,9 @@ class InvoiceController:
 
         for file in files:
             try:
-                prepared = await self._extraction.prepare_upload(file, user)
+                prepared = await self._extraction.prepare_upload(
+                    file, user, upload_source=upload_source
+                )
                 if isinstance(prepared, UploadItemResponse):
                     await self._upload_repo.commit()
                     if (
@@ -182,7 +191,7 @@ class InvoiceController:
         if attachment_name and not file.filename:
             file.filename = attachment_name
 
-        batch = await self.upload([file], user)
+        batch = await self.upload([file], user, upload_source=source or "outlook_email")
         item = batch.items[0] if batch.items else None
         if item is None:
             raise HTTPException(
@@ -192,6 +201,17 @@ class InvoiceController:
                     "message": "No upload result returned.",
                 },
             )
+
+        if item.upload_id:
+            await self._upload_repo.update_email_ingest_metadata(
+                item.upload_id,
+                upload_source=source or "outlook_email",
+                sender_email=sender_email,
+                sender_name=sender_name,
+                email_subject=email_subject,
+                message_id=message_id,
+            )
+            await self._upload_repo.commit()
 
         invoice: InvoiceResponse | None = None
         if item.invoice_id:
@@ -237,6 +257,7 @@ class InvoiceController:
         company: str | None,
         search: str | None,
         sort: str | None,
+        upload_source: str | None,
         page: int,
         limit: int,
     ) -> InvoiceListResponse:
@@ -250,6 +271,7 @@ class InvoiceController:
                 "company": company,
                 "search": search,
                 "sort": sort,
+                "upload_source": upload_source,
             }.items()
             if v is not None
         }
@@ -293,21 +315,40 @@ class InvoiceController:
                     "message": "Invoice not found.",
                 },
             )
-        updated = await self._invoice_repo.update(
-            invoice_id,
-            data,
-            owner_user_id=owner,
-        )
-        if updated:
-            await self._audit_repo.log(
-                user.user_id,
-                "invoice_updated",
-                "invoice",
+        try:
+            updated = await self._invoice_repo.update(
                 invoice_id,
-                before.model_dump(mode="json"),
-                updated.model_dump(mode="json"),
+                data,
+                owner_user_id=owner,
             )
-        return updated  # type: ignore[return-value]
+        except DuplicateInvoiceNumberError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "duplicate_invoice_number",
+                    "message": (
+                        f"Another invoice with number {exc.args[0]!r} already exists "
+                        "in your documents."
+                    ),
+                },
+            ) from exc
+        if updated is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "invoice_not_found",
+                    "message": "Invoice not found.",
+                },
+            )
+        await self._audit_repo.log(
+            user.user_id,
+            "invoice_updated",
+            "invoice",
+            invoice_id,
+            before.model_dump(mode="json"),
+            updated.model_dump(mode="json"),
+        )
+        return updated
 
     @debug_trace
     async def delete(self, invoice_id: int, user: UserContext) -> None:

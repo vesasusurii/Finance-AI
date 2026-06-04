@@ -22,6 +22,7 @@ class UploadedFile(Base):
             "processing_status",
             "uploaded_at",
         ),
+        Index("ix_uploaded_files_upload_source", "upload_source"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -41,4 +42,25 @@ class UploadedFile(Base):
         String(50),
         nullable=False,
         server_default="pending",
+    )
+    upload_source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default="portal",
+    )
+    ingest_sender_email: Mapped[str | None] = mapped_column(
+        String(320),
+        nullable=True,
+    )
+    ingest_sender_name: Mapped[str | None] = mapped_column(
+        String(300),
+        nullable=True,
+    )
+    ingest_email_subject: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    ingest_message_id: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )
