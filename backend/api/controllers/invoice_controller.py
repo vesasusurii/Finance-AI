@@ -14,7 +14,9 @@ from repositories.invoice_repository import (
     DuplicateInvoiceNumberError,
     InvoiceRepository,
 )
+from repositories.match_repository import MatchRepository
 from repositories.upload_repository import UploadRepository
+from schemas.reconciliation import MatchListResponse
 from schemas.auth import UserContext
 from schemas.email_ingest import EmailIngestResponse
 from schemas.invoice import (
@@ -96,12 +98,14 @@ class InvoiceController:
         invoice_access_repo: InvoiceAccessRepository,
         audit_repo: AuditRepository,
         upload_repo: UploadRepository,
+        match_repo: MatchRepository,
     ) -> None:
         self._extraction = extraction_service
         self._invoice_repo = invoice_repo
         self._invoice_access_repo = invoice_access_repo
         self._audit_repo = audit_repo
         self._upload_repo = upload_repo
+        self._match_repo = match_repo
 
     @debug_trace
     async def upload(
@@ -300,6 +304,28 @@ class InvoiceController:
                 },
             )
         return invoice
+
+    @debug_trace
+    async def list_matches(
+        self, invoice_id: int, user: UserContext
+    ) -> MatchListResponse:
+        owner = invoice_owner_user_id(user)
+        invoice = await self._invoice_repo.get(invoice_id, owner_user_id=owner)
+        if not invoice:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "invoice_not_found",
+                    "message": "Invoice not found.",
+                },
+            )
+        items = await self._match_repo.list_for_invoice(invoice_id)
+        return MatchListResponse(
+            items=items,
+            total=len(items),
+            page=1,
+            limit=max(len(items), 1),
+        )
 
     @debug_trace
     async def update(

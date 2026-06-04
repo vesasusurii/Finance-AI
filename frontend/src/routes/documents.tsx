@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Download, Trash2, X } from "lucide-react";
 import { downloadPurchaseInvoicesExcel } from "@/api/export";
 import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
+import { InvoiceMatchedTransactionsSection } from "@/components/invoices/InvoiceMatchedTransactionsSection";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -557,6 +558,7 @@ function DocumentDrawer({
             onSaved={onSaved}
             onApproved={() => void onApproved()}
           />
+          <InvoiceMatchedTransactionsSection invoice={invoice} />
         </div>
 
         <div className="flex shrink-0 items-center border-t border-border px-5 py-3">

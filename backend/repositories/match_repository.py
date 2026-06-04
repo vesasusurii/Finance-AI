@@ -295,6 +295,35 @@ class MatchRepository:
         )
         return list((await self._session.execute(q)).scalars().all())
 
+    async def list_for_invoice(
+        self, invoice_id: int
+    ) -> list[MatchResultResponse]:
+        """Active matches for an invoice with bank transaction snapshots."""
+        rows = await self.list_active_for_invoice(invoice_id)
+        if not rows:
+            return []
+
+        txn_ids = list({r.bank_transaction_id for r in rows})
+        txns: dict[int, BankTransaction] = {}
+        if txn_ids:
+            txn_rows = (
+                await self._session.execute(
+                    select(BankTransaction).where(BankTransaction.id.in_(txn_ids))
+                )
+            ).scalars().all()
+            txns = {t.id: t for t in txn_rows}
+
+        invoice_row = await self._session.get(Invoice, invoice_id)
+
+        return [
+            _to_response(
+                r,
+                invoice=invoice_row,
+                txn=txns.get(r.bank_transaction_id),
+            )
+            for r in sorted(rows, key=lambda m: m.created_at, reverse=True)
+        ]
+
     async def set_paid_amount_if_missing(
         self, match_id: int, paid_amount: Decimal
     ) -> None:

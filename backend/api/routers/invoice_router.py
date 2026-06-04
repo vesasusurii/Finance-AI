@@ -16,6 +16,7 @@ from schemas.invoice import (
     InvoiceUpdate,
     InvoiceUploadResponse,
 )
+from schemas.reconciliation import MatchListResponse
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -127,6 +128,15 @@ async def approve_invoice(
     ctrl: InvoiceController = Depends(get_invoice_controller),
 ):
     return await ctrl.approve(invoice_id, user)
+
+
+@router.get("/{invoice_id}/matches", response_model=MatchListResponse)
+async def list_invoice_matches(
+    invoice_id: int,
+    user: UserContext = Depends(get_current_user),
+    ctrl: InvoiceController = Depends(get_invoice_controller),
+):
+    return await ctrl.list_matches(invoice_id, user)
 
 
 @router.get("/{invoice_id}/file")

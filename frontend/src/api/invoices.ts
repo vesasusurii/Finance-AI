@@ -5,6 +5,7 @@ import type {
   InvoiceListResponse,
   UploadResponse,
 } from "../types/invoice";
+import type { MatchListResponse } from "../types/match";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -19,6 +20,12 @@ export async function uploadInvoices(files: File[]): Promise<UploadResponse> {
 
 export async function getInvoice(id: number): Promise<Invoice> {
   return apiFetch<Invoice>(`/api/invoices/${id}`);
+}
+
+export async function getInvoiceMatches(
+  invoiceId: number,
+): Promise<MatchListResponse> {
+  return apiFetch<MatchListResponse>(`/api/invoices/${invoiceId}/matches`);
 }
 
 export async function listInvoices(

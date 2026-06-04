@@ -112,6 +112,12 @@ async def get_audit_repo(
     return AuditRepository(session)
 
 
+async def get_match_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> MatchRepository:
+    return MatchRepository(session)
+
+
 def get_ai_validation_service() -> AIValidationService:
     return AIValidationService()
 
@@ -172,6 +178,7 @@ async def get_invoice_controller(
     invoice_access_repo: InvoiceAccessRepository = Depends(get_invoice_access_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
     upload_repo: UploadRepository = Depends(get_upload_repo),
+    match_repo: MatchRepository = Depends(get_match_repo),
 ) -> InvoiceController:
     return InvoiceController(
         extraction,
@@ -179,6 +186,7 @@ async def get_invoice_controller(
         invoice_access_repo,
         audit_repo,
         upload_repo,
+        match_repo,
     )
 
 
@@ -237,12 +245,6 @@ async def get_bank_statement_controller(
     transaction_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
 ) -> BankStatementController:
     return BankStatementController(service, statement_repo, transaction_repo)
-
-
-async def get_match_repo(
-    session: AsyncSession = Depends(get_db_session),
-) -> MatchRepository:
-    return MatchRepository(session)
 
 
 def get_bank_comment_extraction_service(
