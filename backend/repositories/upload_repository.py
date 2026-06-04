@@ -21,6 +21,7 @@ class UploadRepository:
         processing_status: str = "pending",
         file_size: int | None = None,
         content_sha256: str | None = None,
+        upload_source: str = "portal",
     ) -> UploadedFile:
         row = UploadedFile(
             original_filename=filename,
@@ -31,6 +32,7 @@ class UploadRepository:
             processing_status=processing_status,
             file_size=file_size,
             content_sha256=content_sha256,
+            upload_source=upload_source,
         )
         self._session.add(row)
         await self._session.flush()
@@ -51,6 +53,30 @@ class UploadRepository:
         if row:
             row.processing_status = status
             await self._session.flush()
+
+    async def update_email_ingest_metadata(
+        self,
+        upload_id: int,
+        *,
+        upload_source: str,
+        sender_email: str | None = None,
+        sender_name: str | None = None,
+        email_subject: str | None = None,
+        message_id: str | None = None,
+    ) -> None:
+        row = await self.get(upload_id)
+        if row is None:
+            return
+        row.upload_source = upload_source
+        if sender_email:
+            row.ingest_sender_email = sender_email[:320]
+        if sender_name:
+            row.ingest_sender_name = sender_name[:300]
+        if email_subject:
+            row.ingest_email_subject = email_subject[:500]
+        if message_id:
+            row.ingest_message_id = message_id[:500]
+        await self._session.flush()
 
     async def delete(self, upload_id: int) -> None:
         row = await self.get(upload_id)

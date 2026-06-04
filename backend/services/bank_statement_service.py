@@ -1,14 +1,19 @@
 from pathlib import Path
 
-from fastapi import UploadFile
+from datetime import date, datetime, timezone
+
+from fastapi import HTTPException, UploadFile
 
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExcelParseError
+from core.invoice_access import upload_owner_user_id
 from repositories.bank_statement_repository import BankStatementRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
+from repositories.review_repository import ReviewRepository
 from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
 from schemas.bank_statement import (
+    BankStatementReparseResponse,
     BankStatementUploadResponse,
     BankTransactionPreview,
 )
@@ -30,10 +35,12 @@ class BankStatementService:
         upload_repo: UploadRepository,
         statement_repo: BankStatementRepository,
         transaction_repo: BankTransactionRepository,
+        review_repo: ReviewRepository,
     ) -> None:
         self._upload_repo = upload_repo
         self._statement_repo = statement_repo
         self._transaction_repo = transaction_repo
+        self._review_repo = review_repo
 
     @debug_trace
     async def upload(
@@ -146,6 +153,110 @@ class BankStatementService:
             unparsed_date_rows=unparsed_date_rows,
             duplicate_rows_skipped=duplicate_rows_skipped,
             preview=preview,
+        )
+
+    @debug_trace
+    async def reparse_statement(
+        self, statement_id: int, user: UserContext
+    ) -> BankStatementReparseResponse:
+        owner = upload_owner_user_id(user)
+        statement = await self._statement_repo.get(
+            statement_id, owner_user_id=owner
+        )
+        if statement is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "bank_statement_not_found",
+                    "message": "Bank statement not found.",
+                },
+            )
+
+        upload = await self._upload_repo.get(statement.source_file_id)
+        if upload is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "source_file_not_found",
+                    "message": "Original bank file is missing.",
+                },
+            )
+
+        data = await read_bytes(upload.storage_path)
+        try:
+            parsed_rows = parse_bank_statement_excel(data, upload.original_filename)
+            parsed_rows, _duplicate_rows_skipped = dedupe_parsed_rows(parsed_rows)
+        except ExcelParseError:
+            raise
+        except ValueError as exc:
+            raise ExcelParseError(str(exc)) from exc
+        except Exception as exc:
+            raise ExcelParseError(str(exc)) from exc
+
+        existing = await self._transaction_repo.list_for_statement(statement_id)
+        if len(existing) != len(parsed_rows):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "row_count_mismatch",
+                    "message": (
+                        f"Re-parse found {len(parsed_rows)} rows but the statement "
+                        f"has {len(existing)} stored transactions. Re-upload the file "
+                        "instead."
+                    ),
+                },
+            )
+
+        now = datetime.now(timezone.utc)
+        rows_updated = 0
+        dates_fixed = 0
+        review_tasks_resolved = 0
+
+        for txn_row, parsed in zip(existing, parsed_rows, strict=True):
+            changed = False
+            if txn_row.transaction_date != parsed.transaction_date:
+                had_date = txn_row.transaction_date is not None
+                txn_row.transaction_date = parsed.transaction_date
+                changed = True
+                if not had_date and parsed.transaction_date is not None:
+                    dates_fixed += 1
+                    if txn_row.reconciliation_status == "needs_review":
+                        txn_row.reconciliation_status = "pending"
+                    review_tasks_resolved += (
+                        await self._review_repo.resolve_missing_transaction_date_tasks(
+                            txn_row.id, now
+                        )
+                    )
+            for field, value in (
+                ("debited_amount", parsed.debited_amount),
+                ("credited_amount", parsed.credited_amount),
+                ("transaction_type", parsed.transaction_type),
+                ("comment", parsed.comment),
+                ("detected_invoice_numbers", parsed.detected_invoice_numbers),
+            ):
+                if getattr(txn_row, field) != value:
+                    setattr(txn_row, field, value)
+                    changed = True
+            if changed:
+                rows_updated += 1
+
+        unparsed_date_rows = sum(
+            1 for r in parsed_rows if r.transaction_date is None
+        )
+        if unparsed_date_rows:
+            logger.warning(
+                "Bank re-parse statement_id=%d: %d/%d rows still lack transaction_date",
+                statement_id,
+                unparsed_date_rows,
+                len(parsed_rows),
+            )
+
+        return BankStatementReparseResponse(
+            bank_statement_id=statement_id,
+            rows_updated=rows_updated,
+            dates_fixed=dates_fixed,
+            unparsed_date_rows=unparsed_date_rows,
+            review_tasks_resolved=review_tasks_resolved,
         )
 
     @debug_trace

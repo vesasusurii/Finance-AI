@@ -214,12 +214,21 @@ async def get_bank_transaction_repo(
     return BankTransactionRepository(session)
 
 
+async def get_review_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> ReviewRepository:
+    return ReviewRepository(session)
+
+
 async def get_bank_statement_service(
     upload_repo: UploadRepository = Depends(get_upload_repo),
     statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
     transaction_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
+    review_repo: ReviewRepository = Depends(get_review_repo),
 ) -> BankStatementService:
-    return BankStatementService(upload_repo, statement_repo, transaction_repo)
+    return BankStatementService(
+        upload_repo, statement_repo, transaction_repo, review_repo
+    )
 
 
 async def get_bank_statement_controller(
@@ -234,12 +243,6 @@ async def get_match_repo(
     session: AsyncSession = Depends(get_db_session),
 ) -> MatchRepository:
     return MatchRepository(session)
-
-
-async def get_review_repo(
-    session: AsyncSession = Depends(get_db_session),
-) -> ReviewRepository:
-    return ReviewRepository(session)
 
 
 def get_bank_comment_extraction_service(
@@ -289,10 +292,16 @@ async def get_reconciliation_controller(
     match_repo: MatchRepository = Depends(get_match_repo),
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
     statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
+    bank_txn_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> ReconciliationController:
     return ReconciliationController(
-        matching, match_repo, invoice_repo, statement_repo, audit_repo
+        matching,
+        match_repo,
+        invoice_repo,
+        statement_repo,
+        bank_txn_repo,
+        audit_repo,
     )
 
 

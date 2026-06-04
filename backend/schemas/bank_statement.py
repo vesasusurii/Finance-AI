@@ -23,6 +23,14 @@ class BankStatementUploadResponse(BaseModel):
     preview: list[BankTransactionPreview]
 
 
+class BankStatementReparseResponse(BaseModel):
+    bank_statement_id: int
+    rows_updated: int
+    dates_fixed: int
+    unparsed_date_rows: int
+    review_tasks_resolved: int
+
+
 class BankStatementListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

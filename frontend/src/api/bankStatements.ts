@@ -1,6 +1,7 @@
 import { apiFetch } from "./client";
 import type {
   BankStatementListResponse,
+  BankStatementReparseResponse,
   BankStatementUploadResponse,
   BankTransactionFilters,
   BankTransactionListResponse,
@@ -29,6 +30,15 @@ export async function listBankStatements(
 
 export async function deleteBankStatement(id: number): Promise<void> {
   return apiFetch(`/api/bank-statements/${id}`, { method: "DELETE" });
+}
+
+export async function reparseBankStatement(
+  id: number,
+): Promise<BankStatementReparseResponse> {
+  return apiFetch<BankStatementReparseResponse>(
+    `/api/bank-statements/${id}/reparse`,
+    { method: "POST" },
+  );
 }
 
 export async function listBankTransactions(

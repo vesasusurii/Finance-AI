@@ -37,6 +37,7 @@ export default function App() {
                   <Route path="bank-transactions" element={<BankTransactionsPage />} />
                   <Route path="matching" element={<MatchingPage />} />
                   <Route path="manual-review" element={<ManualReviewPage />} />
+                  <Route path="review" element={<Navigate to="/manual-review" replace />} />
                   <Route path="exports" element={<ExportsPage />} />
                 </Route>
                 <Route element={<AdminRoute />}>

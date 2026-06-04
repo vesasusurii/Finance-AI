@@ -5,6 +5,7 @@ from api.dependencies import get_bank_statement_controller, get_current_user
 from schemas.auth import UserContext
 from schemas.bank_statement import (
     BankStatementListResponse,
+    BankStatementReparseResponse,
     BankStatementUploadResponse,
     BankTransactionListResponse,
 )
@@ -42,6 +43,18 @@ async def delete_bank_statement(
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
     await ctrl.delete_statement(statement_id, user)
+
+
+@router.post(
+    "/bank-statements/{statement_id}/reparse",
+    response_model=BankStatementReparseResponse,
+)
+async def reparse_bank_statement(
+    statement_id: int,
+    user: UserContext = Depends(get_current_user),
+    ctrl: BankStatementController = Depends(get_bank_statement_controller),
+):
+    return await ctrl.reparse_statement(statement_id, user)
 
 
 @router.get("/bank-transactions", response_model=BankTransactionListResponse)

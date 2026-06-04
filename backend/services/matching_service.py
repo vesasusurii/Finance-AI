@@ -295,11 +295,25 @@ class MatchingService:
                     continue
 
                 before = {"paid_at_date": None}
+                txn_amount = txn.debited_amount or txn.credited_amount
+                effective_paid = (
+                    Decimal(str(txn_amount)) if txn_amount is not None else None
+                )
                 await self._invoice_repo.update_paid_at_date(
                     invoice.id, txn.transaction_date
                 )
+                if effective_paid is not None and invoice.amount is not None:
+                    remaining = max(
+                        Decimal(str(invoice.amount)) - effective_paid, Decimal("0")
+                    )
+                    await self._invoice_repo.update_debt(invoice.id, remaining)
+                    match_status = (
+                        "matched" if remaining <= 0 else "partially_matched"
+                    )
+                else:
+                    match_status = "matched"
                 await self._invoice_repo.update_match_status(
-                    invoice.id, "matched"
+                    invoice.id, match_status
                 )
                 await self._match_repo.create(
                     invoice_id=invoice.id,
@@ -313,6 +327,7 @@ class MatchingService:
                     match_confidence=1.0,
                     paid_at_date=txn.transaction_date,
                     status="matched",
+                    paid_amount=effective_paid,
                 )
                 logger.debug(
                     "    MATCH created: invoice_id=%d (int) txn_id=%d (int) "
@@ -396,6 +411,7 @@ class MatchingService:
         bank_transaction_id: int,
         user: UserContext,
         review_task_id: int | None = None,
+        paid_amount: Decimal | None = None,
     ) -> ManualMatchResponse:
         owner = invoice_owner_user_id(user)
         invoice = await self._invoice_repo.get(invoice_id, owner_user_id=owner)
@@ -439,21 +455,23 @@ class MatchingService:
                 },
             )
 
-        other_txn_match = await self._match_repo.active_for_invoice(
-            invoice_id, exclude_bank_transaction_id=bank_transaction_id
-        )
-        if other_txn_match:
+        if invoice.debt is not None and invoice.debt <= 0:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "error": "invoice_already_matched",
-                    "message": "This invoice is already matched to another bank line.",
+                    "error": "invoice_fully_paid",
+                    "message": "This invoice has already been fully paid.",
                 },
             )
 
         invoice_number = (invoice.invoice_number or "").strip() or "MANUAL"
         paid_date = txn.transaction_date
         now = datetime.now(timezone.utc)
+
+        txn_amount = txn.credited_amount or txn.debited_amount
+        effective_paid_amount: Decimal | None = paid_amount
+        if effective_paid_amount is None and txn_amount is not None:
+            effective_paid_amount = Decimal(str(txn_amount))
 
         existing = await self._match_repo.get_pair(invoice_id, bank_transaction_id)
         if existing:
@@ -480,6 +498,7 @@ class MatchingService:
                 match_confidence=1.0,
                 paid_at_date=paid_date,
                 status="approved",
+                paid_amount=effective_paid_amount,
             )
             match_id = row.id
             status = row.status
@@ -493,6 +512,9 @@ class MatchingService:
                     "invoice_id": invoice_id,
                     "bank_transaction_id": bank_transaction_id,
                     "match_type": "manual",
+                    "paid_amount": str(effective_paid_amount)
+                    if effective_paid_amount
+                    else None,
                     "status": status,
                 },
             )
@@ -501,7 +523,14 @@ class MatchingService:
             "paid_at_date": str(invoice.paid_at_date) if invoice.paid_at_date else None
         }
         await self._invoice_repo.update_paid_at_date(invoice_id, paid_date)
-        await self._invoice_repo.update_match_status(invoice_id, "matched")
+        if effective_paid_amount is not None and invoice.amount is not None:
+            total_paid = await self._match_repo.sum_paid_for_invoice(invoice_id)
+            remaining = max(Decimal(str(invoice.amount)) - total_paid, Decimal("0"))
+            await self._invoice_repo.update_debt(invoice_id, remaining)
+            new_match_status = "matched" if remaining <= 0 else "partially_matched"
+        else:
+            new_match_status = "matched"
+        await self._invoice_repo.update_match_status(invoice_id, new_match_status)
         await self._audit_repo.log(
             user.user_id,
             "payment_date_set",

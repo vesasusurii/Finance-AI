@@ -278,7 +278,7 @@ export function InvoiceDocumentEditor({
                 type="number"
               />
               <FieldRow
-                label="Debt / outstanding"
+                label="Remaining balance"
                 value={form.debt}
                 confidence={conf.debt}
                 onChange={(v) => handleField("debt", v)}
@@ -321,6 +321,34 @@ export function InvoiceDocumentEditor({
               onChange={(v) => handleField("client_employee_related", v)}
             />
 
+            {invoice.match_status === "partially_matched" && (
+              <div className="rounded-md border border-border bg-surface-muted px-3 py-2">
+                <p className="text-[12px] font-medium text-foreground">
+                  Partially paid — split payment in progress
+                </p>
+                {invoice.debt != null && invoice.amount != null && (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    Remaining:{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {Number(invoice.debt).toLocaleString("de-DE", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      {invoice.currency ?? "EUR"}
+                    </span>{" "}
+                    of{" "}
+                    <span className="tabular-nums">
+                      {Number(invoice.amount).toLocaleString("de-DE", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      {invoice.currency ?? "EUR"}
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="mt-2 border-t border-border pt-4">
               <FieldRow
                 label="Paid by"
@@ -330,7 +358,9 @@ export function InvoiceDocumentEditor({
               />
               {invoice.paid_at_date && (
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  Paid at (date):{" "}
+                  {invoice.match_status === "partially_matched"
+                    ? "First payment date: "
+                    : "Paid at (date): "}
                   <span className="tabular-nums text-foreground">
                     {formatDate(invoice.paid_at_date)}
                   </span>

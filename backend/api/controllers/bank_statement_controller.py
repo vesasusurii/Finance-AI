@@ -9,6 +9,7 @@ from repositories.bank_transaction_repository import BankTransactionRepository
 from schemas.auth import UserContext
 from schemas.bank_statement import (
     BankStatementListResponse,
+    BankStatementReparseResponse,
     BankStatementUploadResponse,
     BankTransactionListResponse,
 )
@@ -100,6 +101,21 @@ class BankStatementController:
         )
         cache.set_model(cache_key, response, ttl_seconds=30)
         return response
+
+    @debug_trace
+    async def reparse_statement(
+        self, statement_id: int, user: UserContext
+    ) -> BankStatementReparseResponse:
+        try:
+            response = await self._service.reparse_statement(statement_id, user)
+            cache.delete_pattern("bank_tx:*")
+            cache.delete_pattern("review:*")
+            return response
+        except ExcelParseError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "parse_error", "message": str(exc)},
+            ) from exc
 
     @debug_trace
     async def delete_statement(

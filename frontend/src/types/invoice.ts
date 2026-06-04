@@ -1,7 +1,7 @@
 /** Phase 3: Documents drawer Save sends partial Invoice (writable fields only). */
 
 export type ReviewStatus = "pending" | "approved" | "needs_review" | "manual_review";
-export type MatchStatus = "unmatched" | "matched" | "needs_review";
+export type MatchStatus = "unmatched" | "matched" | "partially_matched" | "needs_review";
 
 export interface Invoice {
   id: number;
@@ -30,6 +30,11 @@ export interface Invoice {
   source_file_id: number | null;
   source_filename: string | null;
   source_mime_type: string | null;
+  upload_source?: string | null;
+  ingest_sender_email?: string | null;
+  ingest_sender_name?: string | null;
+  ingest_email_subject?: string | null;
+  ingest_message_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +54,7 @@ export interface InvoiceFilters {
   company?: string;
   search?: string;
   sort?: string;
+  upload_source?: string;
   page?: number;
   limit?: number;
 }

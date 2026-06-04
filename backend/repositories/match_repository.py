@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.invoice_access import invoice_visible_to_user_clause
@@ -54,6 +54,7 @@ def _to_response(
         match_confidence=float(row.match_confidence),
         status=row.status,
         paid_at_date=row.paid_at_date,
+        paid_amount=row.paid_amount,
         created_at=row.created_at,
         invoice=inv_snapshot,
         bank_transaction=txn_snapshot,
@@ -74,6 +75,7 @@ class MatchRepository:
         paid_at_date: date,
         status: str = "matched",
         *,
+        paid_amount: Decimal | None = None,
         flush: bool = True,
     ) -> InvoicePaymentMatch:
         row = InvoicePaymentMatch(
@@ -84,6 +86,7 @@ class MatchRepository:
             match_confidence=Decimal(str(match_confidence)),
             paid_at_date=paid_at_date,
             status=status,
+            paid_amount=paid_amount,
         )
         self._session.add(row)
         if flush:
@@ -271,6 +274,17 @@ class MatchRepository:
             q = q.where(InvoicePaymentMatch.invoice_id != exclude_invoice_id)
         return (await self._session.execute(q)).scalar_one_or_none()
 
+    async def sum_paid_for_invoice(self, invoice_id: int) -> Decimal:
+        q = select(func.coalesce(func.sum(InvoicePaymentMatch.paid_amount), 0)).where(
+            and_(
+                InvoicePaymentMatch.invoice_id == invoice_id,
+                InvoicePaymentMatch.status.in_(("matched", "approved")),
+                InvoicePaymentMatch.paid_amount.isnot(None),
+            )
+        )
+        result = (await self._session.execute(q)).scalar_one()
+        return Decimal(str(result))
+
     async def list_active_for_invoice(
         self, invoice_id: int
     ) -> list[InvoicePaymentMatch]:
@@ -280,3 +294,12 @@ class MatchRepository:
             InvoicePaymentMatch.status.in_(("matched", "approved")),
         )
         return list((await self._session.execute(q)).scalars().all())
+
+    async def set_paid_amount_if_missing(
+        self, match_id: int, paid_amount: Decimal
+    ) -> None:
+        row = await self.get(match_id)
+        if row is None or row.paid_amount is not None:
+            return
+        row.paid_amount = paid_amount
+        await self._session.flush()
