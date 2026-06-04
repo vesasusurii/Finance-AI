@@ -16,6 +16,7 @@ import { ApiError } from "@/api/client";
 import { listBankTransactions } from "@/api/bankStatements";
 import { manualMatch } from "@/api/reconciliation";
 import { rejectReviewTask } from "@/api/review";
+import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { reviewReasonLabel } from "@/lib/labels";
 import type { ReviewTask } from "@/types/review";
 import type { BankTransaction } from "@/types/bank";
@@ -82,6 +83,7 @@ export function BankTransactionCandidatesPanel({
   const [matchingTxnId, setMatchingTxnId] = useState<number | null>(null);
   const [autoHints, setAutoHints] = useState<AutoSearchHints>(() => hintsFromInvoice(invoice));
   const [searchInput, setSearchInput] = useState(() => hintsLabel(hintsFromInvoice(invoice)));
+  const { confirm, prompt } = useAppDialog();
 
   useEffect(() => {
     setExpandedTxnId(null);
@@ -128,10 +130,12 @@ export function BankTransactionCandidatesPanel({
 
   const handleReject = async () => {
     if (!task) return;
-    const reason = window.prompt(
-      "Reason for rejection (optional):",
-      "",
-    );
+    const reason = await prompt({
+      title: "Reject task",
+      description: "Reason for rejection (optional):",
+      defaultValue: "",
+      confirmLabel: "Reject",
+    });
     if (reason === null) return;
     setBusy("reject");
     setError(null);
@@ -145,9 +149,12 @@ export function BankTransactionCandidatesPanel({
   };
 
   const handleMatch = async (bankTransactionId: number) => {
-    const ok = window.confirm(
-      "Match this invoice to the selected bank line? Paid date will be set from the transaction date.",
-    );
+    const ok = await confirm({
+      title: "Match invoice",
+      description:
+        "Match this invoice to the selected bank line? Paid date will be set from the transaction date.",
+      confirmLabel: "Match",
+    });
     if (!ok) return;
     setBusy("match");
     setMatchingTxnId(bankTransactionId);

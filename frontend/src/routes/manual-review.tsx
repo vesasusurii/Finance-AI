@@ -18,6 +18,7 @@ import {
   reviewReasonLabel,
   reviewStatusLabel,
 } from "@/lib/labels";
+import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { cn } from "@/lib/utils";
 
 const FILTERS: { id: ReviewQueueFilter; label: string }[] = [
@@ -53,6 +54,7 @@ function TaskDismissActions({
   onDone: () => void;
   showApprove: boolean;
 }) {
+  const { prompt } = useAppDialog();
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,10 +71,12 @@ function TaskDismissActions({
   };
 
   const handleReject = async () => {
-    const reason = window.prompt(
-      "Reason for rejection (optional):",
-      "",
-    );
+    const reason = await prompt({
+      title: "Reject task",
+      description: "Reason for rejection (optional):",
+      defaultValue: "",
+      confirmLabel: "Reject",
+    });
     if (reason === null) return;
     setBusy("reject");
     setError(null);

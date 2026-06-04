@@ -13,6 +13,8 @@ import { FilterBar } from "@/components/ui-finance/FilterBar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/auth/AuthContext";
 import { deleteInvoice, listInvoices } from "@/api/invoices";
+import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
+import { useInvoices } from "@/hooks/useInvoices";
 import { uploadProgressEvents } from "@/services/uploadProgressEvents";
 import type { Invoice } from "@/types/invoice";
 import { isAdminRole } from "@/types/auth";
@@ -481,6 +483,7 @@ function DocumentDrawer({
   onApproved: () => Promise<void>;
 }) {
   const { user } = useAuth();
+  const { confirm } = useAppDialog();
   const [busy, setBusy] = useState(false);
   const [drawerError, setDrawerError] = useState<string | null>(null);
 
@@ -491,12 +494,15 @@ function DocumentDrawer({
 
   const handleDelete = async () => {
     const label = invoice.invoice_number ?? `#${invoice.id}`;
-    const confirmMessage = isSharedView
-      ? `Remove invoice ${label} from your documents list? The original upload stays in the system for other users.`
-      : `Delete invoice ${label}? This cannot be undone.`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
+    const ok = await confirm({
+      title: isSharedView ? "Remove from your list" : "Delete invoice",
+      description: isSharedView
+        ? `Remove invoice ${label} from your documents list? The original upload stays in the system for other users.`
+        : `Delete invoice ${label}? This cannot be undone.`,
+      confirmLabel: isSharedView ? "Remove" : "Delete",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setBusy(true);
     setDrawerError(null);
     try {

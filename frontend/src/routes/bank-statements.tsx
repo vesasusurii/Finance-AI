@@ -16,6 +16,7 @@ import type {
   BankStatementUploadResponse,
   BankTransactionPreview,
 } from "@/types/bank";
+import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import {
   formatCurrency,
   formatDate,
@@ -26,6 +27,7 @@ import {
 type PreviewRow = BankTransactionPreview & { id: string };
 
 export function BankPage() {
+  const { confirm } = useAppDialog();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -90,13 +92,13 @@ export function BankPage() {
   const handleDelete = useCallback(
     async (statement: BankStatement) => {
       const label = formatStatementId(statement);
-      if (
-        !window.confirm(
-          `Delete bank statement ${label} (${statement.original_filename})? This cannot be undone.`,
-        )
-      ) {
-        return;
-      }
+      const ok = await confirm({
+        title: "Delete bank statement",
+        description: `Delete bank statement ${label} (${statement.original_filename})? This cannot be undone.`,
+        confirmLabel: "Delete",
+        variant: "destructive",
+      });
+      if (!ok) return;
       setDeletingId(statement.id);
       setError(null);
       try {
@@ -112,7 +114,7 @@ export function BankPage() {
         setDeletingId(null);
       }
     },
-    [loadStatements, uploadResult?.bank_statement_id],
+    [confirm, loadStatements, uploadResult?.bank_statement_id],
   );
 
   const handleReparse = useCallback(

@@ -14,6 +14,7 @@ import {
   rejectMatch,
   runReconciliation,
 } from "@/api/reconciliation";
+import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { ApiError } from "@/api/client";
 import { refreshSession } from "@/api/auth";
 import { listReviewTasks } from "@/api/review";
@@ -68,6 +69,7 @@ function isMatchingTab(value: string | null): value is MatchingTab {
 }
 
 export function MatchingPage() {
+  const { prompt } = useAppDialog();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<MatchingTab>(() => {
     const tab = searchParams.get("tab");
@@ -318,7 +320,11 @@ export function MatchingPage() {
 
   const onReject = async (matchId: number) => {
     if (busyMatchId != null) return;
-    const reason = window.prompt("Reason for rejecting this match (optional):");
+    const reason = await prompt({
+      title: "Reject match",
+      description: "Reason for rejecting this match (optional):",
+      confirmLabel: "Reject",
+    });
     if (reason === null) return;
     setBusyMatchId(matchId);
     setError(null);
