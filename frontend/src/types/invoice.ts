@@ -12,6 +12,10 @@ export interface Invoice {
   amount: number | null;
   debt: number | null;
   currency: string | null;
+  original_amount: number | null;
+  original_currency: string | null;
+  exchange_rate: number | null;
+  exchange_rate_date: string | null;
   account_details: string | null;
   internal_note_description: string | null;
   client_employee_related: string | null;

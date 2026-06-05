@@ -104,6 +104,9 @@ class Settings(BaseSettings):
         default=2, validation_alias="BANK_COMMENT_LLM_MAX_RETRIES"
     )
 
+    fx_conversion_enabled: bool = Field(
+        default=True, validation_alias="FX_CONVERSION_ENABLED"
+    )
     match_amount_tolerance_eur: float = Field(
         default=0.02, validation_alias="MATCH_AMOUNT_TOLERANCE_EUR"
     )

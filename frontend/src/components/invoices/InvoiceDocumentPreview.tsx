@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import { getInvoice } from "@/api/invoices";
-import { formatCurrency, formatDate } from "@/lib/labels";
+import { InvoiceAmountDisplay } from "@/components/invoices/InvoiceAmountDisplay";
+import { formatDate } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
 export function InvoiceDocumentPreview({
@@ -84,8 +85,8 @@ export function InvoiceDocumentPreview({
             <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Value
             </dt>
-            <dd className="mt-0.5 tabular-nums text-[13px] font-medium text-foreground">
-              {formatCurrency(invoice.amount, invoice.currency)}
+            <dd className="mt-0.5">
+              <InvoiceAmountDisplay invoice={invoice} />
             </dd>
           </div>
           <div>

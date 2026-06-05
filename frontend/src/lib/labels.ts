@@ -78,6 +78,41 @@ export function formatCurrency(amount: number | null, currency: string | null): 
   }
 }
 
+export function hasForeignOriginalCurrency(invoice: {
+  original_currency?: string | null;
+}): boolean {
+  const code = (invoice.original_currency ?? "EUR").trim().toUpperCase();
+  return code !== "" && code !== "EUR";
+}
+
+export function formatOriginalCurrencySubtitle(invoice: {
+  original_amount: number | null;
+  original_currency: string | null;
+}): string | null {
+  if (!hasForeignOriginalCurrency(invoice)) return null;
+  if (invoice.original_amount == null) return null;
+  return `Original: ${formatCurrency(
+    Number(invoice.original_amount),
+    invoice.original_currency,
+  )}`;
+}
+
+export function debtInOriginalCurrency(invoice: {
+  debt: number | null;
+  original_currency?: string | null;
+  exchange_rate?: number | null;
+}): number | null {
+  if (invoice.debt == null) return null;
+  if (
+    !hasForeignOriginalCurrency(invoice) ||
+    invoice.exchange_rate == null ||
+    Number(invoice.exchange_rate) === 0
+  ) {
+    return Number(invoice.debt);
+  }
+  return Number((Number(invoice.debt) / Number(invoice.exchange_rate)).toFixed(2));
+}
+
 export function formatDate(value: string | null): string {
   if (!value) return "—";
   const iso = isoDateFromInput(value);

@@ -20,6 +20,7 @@ import { listBankTransactions } from "@/api/bankStatements";
 import { manualMatch } from "@/api/reconciliation";
 import { rejectReviewTask } from "@/api/review";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
+import { InvoiceAmountDisplay } from "@/components/invoices/InvoiceAmountDisplay";
 import { formatDate, reviewReasonLabel } from "@/lib/labels";
 import type { ReviewTask } from "@/types/review";
 import type { BankTransaction } from "@/types/bank";
@@ -235,6 +236,14 @@ export function BankTransactionCandidatesPanel({
           Open a transaction to see full details, then match it to the invoice on
           the left. Lines matching this invoice number are listed first.
         </p>
+        <div className="mt-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Invoice amount
+          </p>
+          <div className="mt-1">
+            <InvoiceAmountDisplay invoice={invoice} />
+          </div>
+        </div>
         {task?.bank_transaction && (
           <div className="mt-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">

@@ -61,6 +61,8 @@ class InvoiceUpdate(BaseModel):
     amount: Decimal | None = None
     debt: Decimal | None = None
     currency: str | None = None
+    original_amount: Decimal | None = None
+    original_currency: str | None = None
     account_details: str | None = None
     internal_note_description: str | None = None
     client_employee_related: str | None = None
@@ -85,6 +87,10 @@ class InvoiceResponse(BaseModel):
     amount: Decimal | None
     debt: Decimal | None
     currency: str | None
+    original_amount: Decimal | None
+    original_currency: str | None
+    exchange_rate: Decimal | None
+    exchange_rate_date: date | None
     account_details: str | None
     internal_note_description: str | None
     client_employee_related: str | None

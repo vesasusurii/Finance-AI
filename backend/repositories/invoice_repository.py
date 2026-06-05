@@ -15,6 +15,11 @@ from models.uploaded_file import UploadedFile
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
 from sqlalchemy.orm import joinedload
 from core.invoice_access import apply_invoice_visibility, user_may_delete_invoice
+from utils.invoice_currency import (
+    monetary_fields_changed,
+    normalize_from_extraction,
+    normalize_invoice_amounts,
+)
 from utils.normalization import normalize_invoice_number
 
 logger = get_logger(__name__)
@@ -75,15 +80,14 @@ class InvoiceRepository:
         uploaded_by: int,
     ) -> InvoiceResponse:
         formatted = normalize_invoice_number(data.invoice_number)
+        ext_amount = Decimal(str(data.amount)) if data.amount is not None else None
+        ext_debt = Decimal(str(data.debt)) if data.debt is not None else None
         row = Invoice(
             invoice_date=_parse_date(data.invoice_date),
             name_of_company=data.name_of_company,
             address_of_company=data.address_of_company,
             invoice_number=formatted,
             invoice_number_normalized=formatted,
-            amount=Decimal(str(data.amount)) if data.amount is not None else None,
-            debt=Decimal(str(data.debt)) if data.debt is not None else None,
-            currency=data.currency,
             account_details=data.account_details,
             internal_note_description=data.internal_note_description,
             client_employee_related=data.client_employee_related,
@@ -95,6 +99,12 @@ class InvoiceRepository:
             match_status="unmatched",
             source_file_id=source_file_id,
             uploaded_by=uploaded_by,
+        )
+        await normalize_from_extraction(
+            row,
+            amount=ext_amount,
+            debt=ext_debt,
+            currency=data.currency,
         )
         self._session.add(row)
         try:
@@ -289,8 +299,42 @@ class InvoiceRepository:
             formatted = normalize_invoice_number(payload["invoice_number"])
             payload["invoice_number"] = formatted
             row.invoice_number_normalized = formatted
+
+        monetary_payload = monetary_fields_changed(payload)
+        original_amount = payload.pop("original_amount", None)
+        original_currency = payload.pop("original_currency", None)
+        amount_in = payload.pop("amount", None)
+        debt_in = payload.pop("debt", None)
+        currency_in = payload.pop("currency", None)
+
         for key, value in payload.items():
             setattr(row, key, value)
+
+        if monetary_payload:
+            src_amount = (
+                original_amount
+                if original_amount is not None
+                else amount_in
+                if amount_in is not None
+                else row.original_amount
+            )
+            src_currency = (
+                original_currency
+                if original_currency is not None
+                else currency_in
+                if currency_in is not None
+                else row.original_currency or row.currency
+            )
+            debt_kw: dict = {}
+            if debt_in is not None:
+                debt_kw["original_debt"] = debt_in
+            await normalize_invoice_amounts(
+                row,
+                original_amount=src_amount,
+                original_currency=src_currency,
+                **debt_kw,
+            )
+
         try:
             await self._session.flush()
         except IntegrityError as exc:
@@ -446,6 +490,19 @@ class InvoiceRepository:
         if row:
             row.match_status = match_status
             await self._session.flush()
+
+    async def settle_invoice_from_transaction(
+        self, invoice_id: int, txn_amount_eur: Decimal
+    ) -> None:
+        """Set invoice amount to settled bank amount; preserve original currency fields."""
+        row = await self._session.get(Invoice, invoice_id)
+        if row is None:
+            return
+        row.amount = txn_amount_eur
+        row.debt = Decimal("0")
+        row.currency = "EUR"
+        row.match_status = "matched"
+        await self._session.flush()
 
     async def update_debt(self, invoice_id: int, remaining: Decimal) -> None:
         row = await self._session.get(Invoice, invoice_id)

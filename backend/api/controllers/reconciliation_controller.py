@@ -181,7 +181,24 @@ class ReconciliationController:
         await self._invoice_repo.update_paid_by(
             row.invoice_id, approver_paid_by(user)
         )
-        await self._recalculate_invoice_payment(row.invoice_id, user)
+        row = await self._match_repo.get(body.match_id) or row
+        paid = row.paid_amount
+        if paid is not None:
+            total_paid = await self._match_repo.sum_paid_for_invoice(row.invoice_id)
+            owner = invoice_owner_user_id(user)
+            invoice = await self._invoice_repo.get_owned_row(
+                row.invoice_id, owner_user_id=owner
+            )
+            if invoice and invoice.amount is not None and total_paid >= Decimal(
+                str(invoice.amount)
+            ):
+                await self._invoice_repo.settle_invoice_from_transaction(
+                    row.invoice_id, Decimal(str(paid))
+                )
+            else:
+                await self._recalculate_invoice_payment(row.invoice_id, user)
+        else:
+            await self._recalculate_invoice_payment(row.invoice_id, user)
         await self._audit_repo.log(
             user.user_id,
             "match_approved",

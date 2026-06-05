@@ -27,6 +27,10 @@ def _invoice(amount: str = "1000.00", debt: str | None = "1000.00") -> InvoiceRe
         address_of_company=None,
         amount=Decimal(amount),
         currency="EUR",
+        original_amount=Decimal(amount),
+        original_currency="EUR",
+        exchange_rate=Decimal("1"),
+        exchange_rate_date=date(2026, 1, 15),
         invoice_date=date(2026, 1, 15),
         paid_at_date=None,
         debt=Decimal(debt) if debt is not None else None,
@@ -125,11 +129,8 @@ async def test_manual_match_full_payment_sets_matched_status(
     result = await matching_service.manual_match(1, 10, _user())
 
     assert result.status == "approved"
-    matching_service._invoice_repo.update_debt.assert_awaited_once_with(
-        1, Decimal("0")
-    )
-    matching_service._invoice_repo.update_match_status.assert_awaited_once_with(
-        1, "matched"
+    matching_service._invoice_repo.settle_invoice_from_transaction.assert_awaited_once_with(
+        1, Decimal("1000.00")
     )
 
 

@@ -527,12 +527,19 @@ class MatchingService:
         await self._invoice_repo.update_paid_by(invoice_id, approver_paid_by(user))
         if effective_paid_amount is not None and invoice.amount is not None:
             total_paid = await self._match_repo.sum_paid_for_invoice(invoice_id)
-            remaining = max(Decimal(str(invoice.amount)) - total_paid, Decimal("0"))
-            await self._invoice_repo.update_debt(invoice_id, remaining)
-            new_match_status = "matched" if remaining <= 0 else "partially_matched"
+            invoice_total = Decimal(str(invoice.amount))
+            if total_paid >= invoice_total:
+                await self._invoice_repo.settle_invoice_from_transaction(
+                    invoice_id, effective_paid_amount
+                )
+            else:
+                remaining = max(invoice_total - total_paid, Decimal("0"))
+                await self._invoice_repo.update_debt(invoice_id, remaining)
+                await self._invoice_repo.update_match_status(
+                    invoice_id, "partially_matched"
+                )
         else:
-            new_match_status = "matched"
-        await self._invoice_repo.update_match_status(invoice_id, new_match_status)
+            await self._invoice_repo.update_match_status(invoice_id, "matched")
         await self._audit_repo.log(
             user.user_id,
             "payment_date_set",

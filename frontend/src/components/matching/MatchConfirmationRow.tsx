@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, X, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
+import { InvoiceAmountDisplay } from "@/components/invoices/InvoiceAmountDisplay";
 import { formatCurrency, formatDate } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import type { InvoicePaymentMatch } from "@/types/match";
@@ -101,9 +102,16 @@ export function MatchConfirmationRow({
                 {invoice?.name_of_company?.trim() || "—"}
               </p>
             </div>
-            <p className="shrink-0 tabular-nums text-[17px] font-bold tracking-tight text-foreground">
-              {invoice ? formatCurrency(invoice.amount, invoice.currency) : "—"}
-            </p>
+            <div className="shrink-0 text-right">
+              {invoice ? (
+                <InvoiceAmountDisplay
+                  invoice={invoice}
+                  className="text-[17px] font-bold tracking-tight text-foreground"
+                />
+              ) : (
+                <p className="text-[17px] font-bold text-foreground">—</p>
+              )}
+            </div>
           </div>
 
           {/* Secondary info row */}

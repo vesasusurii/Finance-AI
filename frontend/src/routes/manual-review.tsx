@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import { EmptyState } from "@/components/EmptyState";
+import { InvoiceAmountDisplay } from "@/components/invoices/InvoiceAmountDisplay";
 import { InvoiceDocumentPreview } from "@/components/invoices/InvoiceDocumentPreview";
 import { BankTransactionCandidatesPanel } from "@/components/review/BankTransactionCandidatesPanel";
 import { approveReviewTask, rejectReviewTask } from "@/api/review";
@@ -14,7 +15,6 @@ import {
   type ReviewQueueFilter,
 } from "@/hooks/useManualReviewQueue";
 import {
-  formatCurrency,
   formatDate,
   reviewReasonLabel,
   reviewStatusLabel,
@@ -207,6 +207,18 @@ function ExtractionView({
               <dt className="text-muted-foreground">Review status</dt>
               <dd>{reviewStatusLabel(invoice.review_status)}</dd>
             </div>
+            <div>
+              <dt className="text-muted-foreground">Bill amount (EUR)</dt>
+              <dd>
+                <InvoiceAmountDisplay invoice={invoice} />
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Original currency</dt>
+              <dd className="text-foreground">
+                {invoice.original_currency ?? invoice.currency ?? "EUR"}
+              </dd>
+            </div>
           </dl>
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
             <Link to="/documents">
@@ -382,9 +394,11 @@ export function ManualReviewPage() {
             <span className="tabular-nums">
               {formatDate(entry.invoice.invoice_date)}
             </span>
-            <span className="tabular-nums">
-              {formatCurrency(entry.invoice.amount, entry.invoice.currency)}
-            </span>
+            <InvoiceAmountDisplay
+              invoice={entry.invoice}
+              className="text-[12px] font-medium text-muted-foreground"
+              subtitleClassName="text-[10px] text-muted-foreground/80"
+            />
           </div>
           {entry.mode === "extraction" ? (
             <ExtractionView

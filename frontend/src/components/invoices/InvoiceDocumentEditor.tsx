@@ -14,7 +14,11 @@ import {
 } from "@/api/invoices";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import {
+  debtInOriginalCurrency,
+  formatCurrency,
   formatDate,
+  formatOriginalCurrencySubtitle,
+  hasForeignOriginalCurrency,
   isoDateFromInput,
   reviewReasonLabel,
 } from "@/lib/labels";
@@ -37,9 +41,9 @@ type FormData = {
   address_of_company: string;
   invoice_date: string;
   invoice_number: string;
-  amount: string;
+  original_amount: string;
   debt: string;
-  currency: string;
+  original_currency: string;
   account_details: string;
   internal_note_description: string;
   client_employee_related: string;
@@ -47,14 +51,20 @@ type FormData = {
 };
 
 function toFormData(inv: Invoice): FormData {
+  const originalAmount =
+    inv.original_amount != null ? inv.original_amount : inv.amount;
+  const originalCurrency =
+    inv.original_currency ?? inv.currency ?? "EUR";
+  const debtDisplay = debtInOriginalCurrency(inv);
+
   return {
     name_of_company: inv.name_of_company ?? "",
     address_of_company: inv.address_of_company ?? "",
     invoice_date: inv.invoice_date ? formatDate(inv.invoice_date) : "",
     invoice_number: inv.invoice_number ?? "",
-    amount: inv.amount != null ? String(inv.amount) : "",
-    debt: inv.debt != null ? String(inv.debt) : "",
-    currency: inv.currency ?? "",
+    original_amount: originalAmount != null ? String(originalAmount) : "",
+    debt: debtDisplay != null ? String(debtDisplay) : "",
+    original_currency: originalCurrency,
     account_details: inv.account_details ?? "",
     internal_note_description: inv.internal_note_description ?? "",
     client_employee_related: inv.client_employee_related ?? "Borek Solutions",
@@ -128,9 +138,11 @@ export function InvoiceDocumentEditor({
         address_of_company: form.address_of_company || null,
         invoice_date: invoiceDateIso,
         invoice_number: form.invoice_number || null,
-        amount: form.amount ? Number(form.amount) : null,
+        original_amount: form.original_amount
+          ? Number(form.original_amount)
+          : null,
         debt: form.debt ? Number(form.debt) : null,
-        currency: form.currency || null,
+        original_currency: form.original_currency || null,
         account_details: form.account_details || null,
         internal_note_description: form.internal_note_description || null,
         client_employee_related:
@@ -281,10 +293,15 @@ export function InvoiceDocumentEditor({
             <div className="grid grid-cols-2 gap-3">
               <FieldRow
                 label="Bill amount"
-                value={form.amount}
+                value={form.original_amount}
                 confidence={conf.amount}
-                onChange={(v) => handleField("amount", v)}
+                onChange={(v) => handleField("original_amount", v)}
                 type="number"
+                footer={
+                  hasForeignOriginalCurrency(invoice) && invoice.amount != null
+                    ? formatOriginalCurrencySubtitle(invoice)
+                    : null
+                }
               />
               <FieldRow
                 label="Remaining balance"
@@ -296,10 +313,10 @@ export function InvoiceDocumentEditor({
             </div>
             <FieldRowSelect
               label="Currency"
-              value={form.currency}
+              value={form.original_currency}
               confidence={conf.currency}
               options={CURRENCIES}
-              onChange={(v) => handleField("currency", v)}
+              onChange={(v) => handleField("original_currency", v)}
             />
             <FieldRowSelect
               label="Category"
@@ -339,19 +356,11 @@ export function InvoiceDocumentEditor({
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                     Remaining:{" "}
                     <span className="font-semibold tabular-nums text-foreground">
-                      {Number(invoice.debt).toLocaleString("de-DE", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      {invoice.currency ?? "EUR"}
+                      {formatCurrency(Number(invoice.debt), invoice.currency)}
                     </span>{" "}
                     of{" "}
                     <span className="tabular-nums">
-                      {Number(invoice.amount).toLocaleString("de-DE", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      {invoice.currency ?? "EUR"}
+                      {formatCurrency(Number(invoice.amount), invoice.currency)}
                     </span>
                   </p>
                 )}
@@ -483,6 +492,7 @@ function FieldRow({
   multiline = false,
   mono = false,
   placeholder,
+  footer,
 }: {
   label: string;
   value: string;
@@ -492,6 +502,7 @@ function FieldRow({
   multiline?: boolean;
   mono?: boolean;
   placeholder?: string;
+  footer?: string | null;
 }) {
   const tone = confidenceTone(confidence);
   const pct = confidence != null ? Math.round(confidence * 100) : null;
@@ -536,6 +547,11 @@ function FieldRow({
           )}
         />
       )}
+      {footer ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
+          {footer}
+        </p>
+      ) : null}
     </div>
   );
 }

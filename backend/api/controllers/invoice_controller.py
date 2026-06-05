@@ -28,6 +28,7 @@ from schemas.invoice import (
     UploadItemResponse,
 )
 from services.invoice_extraction_service import InvoiceExtractionService
+from utils.invoice_currency import CurrencyConversionError
 from utils.file_storage import resolve_upload_bytes, resolve_upload_path
 from utils.user_display import approver_paid_by
 
@@ -357,6 +358,14 @@ class InvoiceController:
                         f"Another invoice with number {exc.args[0]!r} already exists "
                         "in your documents."
                     ),
+                },
+            ) from exc
+        except CurrencyConversionError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "currency_conversion_failed",
+                    "message": str(exc),
                 },
             ) from exc
         if updated is None:
