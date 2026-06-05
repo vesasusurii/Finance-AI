@@ -80,7 +80,10 @@ export function formatCurrency(amount: number | null, currency: string | null): 
 
 export function formatDate(value: string | null): string {
   if (!value) return "—";
-  return value.slice(0, 10);
+  const iso = value.slice(0, 10);
+  const [year, month, day] = iso.split("-");
+  if (!year || !month || !day) return iso;
+  return `${day}/${month}/${year}`;
 }
 
 export function formatStatementId(

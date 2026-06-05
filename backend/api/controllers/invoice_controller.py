@@ -29,6 +29,7 @@ from schemas.invoice import (
 )
 from services.invoice_extraction_service import InvoiceExtractionService
 from utils.file_storage import resolve_upload_bytes, resolve_upload_path
+from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
 
@@ -438,6 +439,7 @@ class InvoiceController:
         invoice = await self._invoice_repo.approve(
             invoice_id,
             owner_user_id=invoice_owner_user_id(user),
+            paid_by=approver_paid_by(user),
         )
         if not invoice:
             raise HTTPException(

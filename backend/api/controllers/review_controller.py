@@ -24,6 +24,8 @@ class ReviewController:
         limit: int,
         has_invoice: bool | None,
         reasons: list[str] | None = None,
+        *,
+        enrich: bool = True,
     ) -> ReviewTaskListResponse:
         return await self._service.list_open(
             task_type,
@@ -32,6 +34,7 @@ class ReviewController:
             owner_user_id=upload_owner_user_id(user),
             has_invoice=has_invoice,
             reasons=reasons,
+            enrich=enrich,
         )
 
     @debug_trace

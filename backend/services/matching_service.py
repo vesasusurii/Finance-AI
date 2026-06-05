@@ -27,6 +27,7 @@ from utils.batch_payment_matching import (
 )
 from utils.invoice_number_parser import extract_invoice_numbers, needs_llm_fallback
 from utils.normalization import normalize_invoice_number
+from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
 
@@ -523,6 +524,7 @@ class MatchingService:
             "paid_at_date": str(invoice.paid_at_date) if invoice.paid_at_date else None
         }
         await self._invoice_repo.update_paid_at_date(invoice_id, paid_date)
+        await self._invoice_repo.update_paid_by(invoice_id, approver_paid_by(user))
         if effective_paid_amount is not None and invoice.amount is not None:
             total_paid = await self._match_repo.sum_paid_for_invoice(invoice_id)
             remaining = max(Decimal(str(invoice.amount)) - total_paid, Decimal("0"))

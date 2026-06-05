@@ -79,6 +79,29 @@ async def test_list_open_enriches_invoice_and_bank(service: ReviewService):
 
 
 @pytest.mark.asyncio
+async def test_list_open_skips_enrich_when_disabled(service: ReviewService):
+    base = ReviewTaskResponse(
+        id=1,
+        task_type="bank_match",
+        invoice_id=5,
+        bank_transaction_id=6,
+        reason="no_invoice_in_db",
+        status="open",
+        payload=None,
+        created_at=datetime.now(timezone.utc),
+        resolved_at=None,
+    )
+    service._review_repo.list_open.return_value = ([base], 1)
+
+    result = await service.list_open(None, 1, 50, enrich=False)
+
+    assert result.total == 1
+    assert result.items[0].invoice is None
+    service._invoice_repo.get.assert_not_called()
+    service._bank_txn_repo.get.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_approve_extraction_sets_invoice_approved(service: ReviewService):
     task = _open_extraction_task()
     service._review_repo.get.return_value = task
@@ -88,7 +111,9 @@ async def test_approve_extraction_sets_invoice_approved(service: ReviewService):
     result = await service.approve(10, _user())
 
     assert result.status == "approved"
-    service._invoice_repo.approve.assert_awaited_once_with(5)
+    service._invoice_repo.approve.assert_awaited_once_with(
+        5, paid_by="f@b.com"
+    )
     service._review_repo.resolve.assert_awaited_once()
     assert service._audit_repo.log.await_count == 2
 

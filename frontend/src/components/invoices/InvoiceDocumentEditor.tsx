@@ -40,7 +40,6 @@ type FormData = {
   internal_note_description: string;
   client_employee_related: string;
   category: string;
-  paid_by: string;
 };
 
 function toFormData(inv: Invoice): FormData {
@@ -56,7 +55,6 @@ function toFormData(inv: Invoice): FormData {
     internal_note_description: inv.internal_note_description ?? "",
     client_employee_related: inv.client_employee_related ?? "Borek Solutions",
     category: inv.category ?? "",
-    paid_by: inv.paid_by ?? "",
   };
 }
 
@@ -126,7 +124,6 @@ export function InvoiceDocumentEditor({
         client_employee_related:
           form.client_employee_related.trim() || "Borek Solutions",
         category: form.category || null,
-        paid_by: form.paid_by.trim() || null,
       } as Partial<Invoice>);
       setSaved(true);
       onSaved(updated);
@@ -350,12 +347,20 @@ export function InvoiceDocumentEditor({
             )}
 
             <div className="mt-2 border-t border-border pt-4">
-              <FieldRow
-                label="Paid by"
-                value={form.paid_by}
-                onChange={(v) => handleField("paid_by", v)}
-                placeholder="Name of the person who paid"
-              />
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Paid by
+                </label>
+                <p className="min-h-[2rem] rounded-md border border-border bg-muted/30 px-3 py-2 text-[13px] text-foreground">
+                  {invoice.paid_by?.trim() ? (
+                    invoice.paid_by
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Set when you approve this invoice
+                    </span>
+                  )}
+                </p>
+              </div>
               {invoice.paid_at_date && (
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   {invoice.match_status === "partially_matched"

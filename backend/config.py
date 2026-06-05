@@ -166,10 +166,10 @@ class Settings(BaseSettings):
         default=600, validation_alias="WORKER_METRICS_WINDOW_SECONDS"
     )
 
-    # Keep Supabase pooler usage modest by default; deployments can tune these
-    # without code changes based on their Supabase plan and expected concurrency.
-    db_pool_size: int = Field(default=5, validation_alias="DB_POOL_SIZE")
-    db_max_overflow: int = Field(default=3, validation_alias="DB_MAX_OVERFLOW")
+    # Supabase Session pooler caps total clients (often 15). Backend + worker each
+    # hold a SQLAlchemy pool — keep defaults conservative; tune via .env per plan.
+    db_pool_size: int = Field(default=2, validation_alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=2, validation_alias="DB_MAX_OVERFLOW")
     db_pool_timeout_seconds: int = Field(
         default=10, validation_alias="DB_POOL_TIMEOUT_SECONDS"
     )

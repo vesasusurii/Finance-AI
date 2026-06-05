@@ -23,7 +23,7 @@ export function useNotificationSummary(enabled: boolean) {
       const [needsReview, unmatched, reviewTasks] = await Promise.all([
         listInvoices({ review_status: "needs_review", limit: 1 }),
         listInvoices({ match_status: "unmatched", limit: 1 }),
-        listReviewTasks({ limit: 1 }),
+        listReviewTasks({ limit: 1, slim: true }),
       ]);
 
       const next: NotificationItem[] = [];
