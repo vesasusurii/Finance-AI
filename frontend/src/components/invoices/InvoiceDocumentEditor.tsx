@@ -13,7 +13,11 @@ import {
   updateInvoice,
 } from "@/api/invoices";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
-import { formatDate, reviewReasonLabel } from "@/lib/labels";
+import {
+  formatDate,
+  isoDateFromInput,
+  reviewReasonLabel,
+} from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
 const CATEGORIES = [
@@ -46,7 +50,7 @@ function toFormData(inv: Invoice): FormData {
   return {
     name_of_company: inv.name_of_company ?? "",
     address_of_company: inv.address_of_company ?? "",
-    invoice_date: inv.invoice_date ?? "",
+    invoice_date: inv.invoice_date ? formatDate(inv.invoice_date) : "",
     invoice_number: inv.invoice_number ?? "",
     amount: inv.amount != null ? String(inv.amount) : "",
     debt: inv.debt != null ? String(inv.debt) : "",
@@ -110,11 +114,19 @@ export function InvoiceDocumentEditor({
   const handleSave = async (): Promise<boolean> => {
     setSaving(true);
     setSaveError(null);
+    const invoiceDateIso = form.invoice_date.trim()
+      ? isoDateFromInput(form.invoice_date)
+      : null;
+    if (form.invoice_date.trim() && !invoiceDateIso) {
+      setSaveError("Invoice date must be dd/mm/yyyy");
+      setSaving(false);
+      return false;
+    }
     try {
       const updated = await updateInvoice(invoice.id, {
         name_of_company: form.name_of_company || null,
         address_of_company: form.address_of_company || null,
-        invoice_date: form.invoice_date || null,
+        invoice_date: invoiceDateIso,
         invoice_number: form.invoice_number || null,
         amount: form.amount ? Number(form.amount) : null,
         debt: form.debt ? Number(form.debt) : null,
@@ -256,7 +268,7 @@ export function InvoiceDocumentEditor({
                 value={form.invoice_date}
                 confidence={conf.invoice_date}
                 onChange={(v) => handleField("invoice_date", v)}
-                type="date"
+                placeholder="dd/mm/yyyy"
               />
               <FieldRow
                 label="Invoice number"

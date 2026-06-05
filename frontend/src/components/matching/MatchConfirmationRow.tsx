@@ -112,7 +112,9 @@ export function MatchConfirmationRow({
               {invoice?.invoice_number?.trim() || match.invoice_number}
             </DataPoint>
             <DataPoint label="Paid">
-              {formatDate(match.paid_at_date)}
+              <span className="tabular-nums">
+                {formatDate(match.paid_at_date)}
+              </span>
             </DataPoint>
           </div>
         </div>
@@ -154,7 +156,7 @@ export function MatchConfirmationRow({
           ) : (
             <div className="flex flex-col items-center gap-1.5">
               <StatusBadge value={match.status} />
-              <span className="text-[10px] text-muted-foreground/60">
+              <span className="text-[10px] tabular-nums text-muted-foreground/60">
                 {formatDate(match.paid_at_date)}
               </span>
             </div>
@@ -179,7 +181,7 @@ export function MatchConfirmationRow({
           {/* Primary: amount large */}
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] tabular-nums text-muted-foreground">
                 {formatDate(txn?.transaction_date ?? null)}
               </p>
               {txn && txn.detected_invoice_numbers.length > 0 && (

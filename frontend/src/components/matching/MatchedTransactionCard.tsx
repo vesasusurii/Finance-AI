@@ -323,8 +323,10 @@ export function MatchedTransactionCard({
                     {item.invoiceNumber ?? "—"}
                   </DetailField>
                   <DetailField label="Amount">{invoiceAmountLabel}</DetailField>
-                  <DetailField label="Invoice date">
-                    {formatDate(item.invoiceDate)}
+                  <DetailField label="Paid at">
+                    <span className="tabular-nums">
+                      {formatDate(item.invoiceDate)}
+                    </span>
                   </DetailField>
                   <DetailField label="Company">{item.companyName}</DetailField>
                 </div>
@@ -344,7 +346,9 @@ export function MatchedTransactionCard({
                     {transactionAmountLabel}
                   </DetailField>
                   <DetailField label="Date">
-                    {formatDate(item.transactionDate)}
+                    <span className="tabular-nums">
+                      {formatDate(item.transactionDate)}
+                    </span>
                   </DetailField>
                   <DetailField label="Comment">
                     <ExpandableComment

@@ -5,6 +5,7 @@ import {
   downloadPurchaseInvoicesExcel,
   type PurchaseInvoicesExportParams,
 } from "@/api/export";
+import { isoDateFromInput } from "@/lib/labels";
 
 const MATCH_STATUSES = [
   { value: "", label: "Any match status" },
@@ -46,9 +47,25 @@ export function PurchaseInvoicesExportPanel() {
   async function handleDownload() {
     setDownloading(true);
     setError(null);
+    const dateFromIso = invoiceDateFrom.trim()
+      ? isoDateFromInput(invoiceDateFrom)
+      : null;
+    const dateToIso = invoiceDateTo.trim()
+      ? isoDateFromInput(invoiceDateTo)
+      : null;
+    if (invoiceDateFrom.trim() && !dateFromIso) {
+      setError("Invoice date from must be dd/mm/yyyy");
+      setDownloading(false);
+      return;
+    }
+    if (invoiceDateTo.trim() && !dateToIso) {
+      setError("Invoice date to must be dd/mm/yyyy");
+      setDownloading(false);
+      return;
+    }
     const params: PurchaseInvoicesExportParams = {};
-    if (invoiceDateFrom) params.invoice_date_from = invoiceDateFrom;
-    if (invoiceDateTo) params.invoice_date_to = invoiceDateTo;
+    if (dateFromIso) params.invoice_date_from = dateFromIso;
+    if (dateToIso) params.invoice_date_to = dateToIso;
     if (matchStatus) params.match_status = matchStatus;
     if (reviewStatus) params.review_status = reviewStatus;
     if (category) params.category = category;
@@ -80,10 +97,11 @@ export function PurchaseInvoicesExportPanel() {
             Invoice date from
           </span>
           <input
-            type="date"
+            type="text"
             value={invoiceDateFrom}
             onChange={(e) => setInvoiceDateFrom(e.target.value)}
-            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px]"
+            placeholder="dd/mm/yyyy"
+            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
           />
         </label>
         <label className="space-y-1">
@@ -91,10 +109,11 @@ export function PurchaseInvoicesExportPanel() {
             Invoice date to
           </span>
           <input
-            type="date"
+            type="text"
             value={invoiceDateTo}
             onChange={(e) => setInvoiceDateTo(e.target.value)}
-            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px]"
+            placeholder="dd/mm/yyyy"
+            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
           />
         </label>
         <label className="space-y-1">

@@ -80,10 +80,40 @@ export function formatCurrency(amount: number | null, currency: string | null): 
 
 export function formatDate(value: string | null): string {
   if (!value) return "—";
-  const iso = value.slice(0, 10);
+  const iso = isoDateFromInput(value);
+  if (!iso) return value.slice(0, 10);
   const [year, month, day] = iso.split("-");
-  if (!year || !month || !day) return iso;
   return `${day}/${month}/${year}`;
+}
+
+/** Parse dd/mm/yyyy (or dd.mm.yyyy, dd-mm-yyyy) and ISO yyyy-mm-dd to ISO date string. */
+export function isoDateFromInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix) {
+    return isoPrefix[1];
+  }
+
+  const match = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export function formatStatementId(

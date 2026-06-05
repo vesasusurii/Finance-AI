@@ -1,4 +1,5 @@
 import type { BankTransaction } from "@/types/bank";
+import { formatDate } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
 function normalise(s: string | null | undefined): string {
@@ -55,6 +56,7 @@ function freeTextMatches(txn: BankTransaction, query: string): boolean {
     txn.comment,
     txn.transaction_type,
     txn.transaction_date,
+    txn.transaction_date ? formatDate(txn.transaction_date) : null,
     txn.reconciliation_status,
     ...txn.detected_invoice_numbers,
     txn.debited_amount != null ? String(txn.debited_amount) : null,

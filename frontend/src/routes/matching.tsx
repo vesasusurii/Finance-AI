@@ -26,7 +26,6 @@ import type { ReviewTask } from "@/types/review";
 import type { Invoice } from "@/types/invoice";
 import {
   formatDate,
-  formatStatementId,
   formatCurrency,
   matchStatusLabel,
   reconciliationStatusLabel,
@@ -66,6 +65,17 @@ const MATCHING_TABS: { id: MatchingTab; label: string }[] = [
 
 function isMatchingTab(value: string | null): value is MatchingTab {
   return MATCHING_TABS.some((tab) => tab.id === value);
+}
+
+function formatStatementOptionLabel(statement: BankStatement): string {
+  const dateLabel = statement.statement_date
+    ? formatDate(statement.statement_date)
+    : `#${statement.id}`;
+  return `${dateLabel} — ${statement.original_filename}`;
+}
+
+function DateCell({ value }: { value: string | null | undefined }) {
+  return <span className="tabular-nums">{formatDate(value ?? null)}</span>;
 }
 
 export function MatchingPage() {
@@ -403,7 +413,7 @@ export function MatchingPage() {
     {
       key: "paid",
       header: "Paid at",
-      cell: (r) => formatDate(r.paid_at_date),
+      cell: (r) => <DateCell value={r.paid_at_date} />,
     },
     {
       key: "status",
@@ -442,7 +452,7 @@ export function MatchingPage() {
     {
       key: "first_paid",
       header: "First payment",
-      cell: (r) => formatDate(r.paid_at_date),
+      cell: (r) => <DateCell value={r.paid_at_date} />,
     },
     {
       key: "status",
@@ -455,7 +465,7 @@ export function MatchingPage() {
     {
       key: "date",
       header: "Date",
-      cell: (r) => formatDate(r.transaction_date),
+      cell: (r) => <DateCell value={r.transaction_date} />,
     },
     {
       key: "comment",
@@ -496,7 +506,7 @@ export function MatchingPage() {
               <option value="">All statements</option>
               {statements.map((s) => (
                 <option key={s.id} value={String(s.id)}>
-                  {formatStatementId(s)} — {s.original_filename}
+                  {formatStatementOptionLabel(s)}
                 </option>
               ))}
             </select>

@@ -15,6 +15,7 @@ import {
 } from "@/hooks/useManualReviewQueue";
 import {
   formatCurrency,
+  formatDate,
   reviewReasonLabel,
   reviewStatusLabel,
 } from "@/lib/labels";
@@ -188,6 +189,12 @@ function ExtractionView({
         </div>
         <div className="flex flex-1 flex-col justify-between gap-4 p-4">
           <dl className="grid gap-3 text-[13px] sm:grid-cols-2">
+            <div>
+              <dt className="text-muted-foreground">Invoice date</dt>
+              <dd className="tabular-nums text-foreground">
+                {formatDate(invoice.invoice_date)}
+              </dd>
+            </div>
             {invoice.extraction_confidence != null && (
               <div>
                 <dt className="text-muted-foreground">AI confidence</dt>
@@ -372,6 +379,9 @@ export function ManualReviewPage() {
                   : "warning"
               }
             />
+            <span className="tabular-nums">
+              {formatDate(entry.invoice.invoice_date)}
+            </span>
             <span className="tabular-nums">
               {formatCurrency(entry.invoice.amount, entry.invoice.currency)}
             </span>

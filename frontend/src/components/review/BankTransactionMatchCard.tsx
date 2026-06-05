@@ -93,11 +93,17 @@ export function BankTransactionMatchCard({
         onClick={onExpand}
         className="w-full rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-secondary/30"
       >
-        <div className="grid gap-2 sm:grid-cols-3 sm:items-start">
+        <div className="grid gap-2 sm:grid-cols-4 sm:items-start">
           <div className="min-w-0 sm:col-span-1">
             <span className="text-[11px] text-muted-foreground">Company</span>
             <p className="truncate text-[13px] font-medium text-foreground">
               <HighlightText text={company} terms={hl} />
+            </p>
+          </div>
+          <div>
+            <span className="text-[11px] text-muted-foreground">Date</span>
+            <p className="tabular-nums text-[13px] font-medium text-foreground">
+              {formatDate(transaction.transaction_date)}
             </p>
           </div>
           <div>
@@ -131,9 +137,14 @@ export function BankTransactionMatchCard({
     >
       <div className="border-b border-border px-3 py-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[13px] font-semibold text-foreground">
-            <HighlightText text={company} terms={hl} />
-          </span>
+          <div className="min-w-0 flex-1">
+            <span className="text-[13px] font-semibold text-foreground">
+              <HighlightText text={company} terms={hl} />
+            </span>
+            <p className="mt-0.5 tabular-nums text-[11px] text-muted-foreground">
+              {formatDate(transaction.transaction_date)}
+            </p>
+          </div>
           <StatusBadge
             value={reconciliationStatusLabel(transaction.reconciliation_status)}
             tone="neutral"

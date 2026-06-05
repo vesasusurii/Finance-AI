@@ -5,27 +5,33 @@ import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { fetchPeriodReport, downloadPeriodReportExcel } from "@/api/export";
 import type { CategorySummary, PeriodReport, ReportPeriod } from "@/types/report";
 import { REPORT_PERIOD_OPTIONS } from "@/types/report";
-import { formatCurrency, formatDate } from "@/lib/labels";
+import { formatCurrency, formatDate, isoDateFromInput } from "@/lib/labels";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+function todayDisplay(): string {
+  return formatDate(new Date().toISOString().slice(0, 10));
 }
 
 export function PeriodReportPanel() {
   const [period, setPeriod] = useState<ReportPeriod>("month");
-  const [anchorDate, setAnchorDate] = useState(todayIso);
+  const [anchorDateInput, setAnchorDateInput] = useState(todayDisplay);
   const [report, setReport] = useState<PeriodReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const anchorDateIso = isoDateFromInput(anchorDateInput);
+
   const loadReport = useCallback(async () => {
+    if (!anchorDateIso) {
+      setError("Reference date must be dd/mm/yyyy");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const data = await fetchPeriodReport({
         period,
-        anchor_date: anchorDate,
+        anchor_date: anchorDateIso,
       });
       setReport(data);
     } catch (e) {
@@ -34,17 +40,22 @@ export function PeriodReportPanel() {
     } finally {
       setLoading(false);
     }
-  }, [period, anchorDate]);
+  }, [period, anchorDateIso]);
 
   useEffect(() => {
+    if (!anchorDateIso) return;
     void loadReport();
-  }, [loadReport]);
+  }, [loadReport, anchorDateIso]);
 
   async function handleDownload() {
+    if (!anchorDateIso) {
+      setError("Reference date must be dd/mm/yyyy");
+      return;
+    }
     setDownloading(true);
     setError(null);
     try {
-      await downloadPeriodReportExcel({ period, anchor_date: anchorDate });
+      await downloadPeriodReportExcel({ period, anchor_date: anchorDateIso });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Download failed");
     } finally {
@@ -99,10 +110,11 @@ export function PeriodReportPanel() {
             Reference date
           </span>
           <input
-            type="date"
-            value={anchorDate}
-            onChange={(e) => setAnchorDate(e.target.value)}
-            className="block h-9 rounded-md border border-input bg-background px-2 text-[13px]"
+            type="text"
+            value={anchorDateInput}
+            onChange={(e) => setAnchorDateInput(e.target.value)}
+            placeholder="dd/mm/yyyy"
+            className="block h-9 rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
           />
         </label>
 
@@ -152,7 +164,9 @@ export function PeriodReportPanel() {
               {report.period_label}
             </p>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              {formatDate(report.start_date)} – {formatDate(report.end_date)}
+              <span className="tabular-nums">
+                {formatDate(report.start_date)} – {formatDate(report.end_date)}
+              </span>
               {" · "}
               Invoice date basis
             </p>

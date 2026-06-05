@@ -11,13 +11,16 @@ import {
 } from "@/lib/bankTransactionSearch";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
-import { BankTransactionMatchCard } from "@/components/review/BankTransactionMatchCard";
+import {
+  BankTransactionMatchCard,
+  transactionDisplayValue,
+} from "@/components/review/BankTransactionMatchCard";
 import { ApiError } from "@/api/client";
 import { listBankTransactions } from "@/api/bankStatements";
 import { manualMatch } from "@/api/reconciliation";
 import { rejectReviewTask } from "@/api/review";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
-import { reviewReasonLabel } from "@/lib/labels";
+import { formatDate, reviewReasonLabel } from "@/lib/labels";
 import type { ReviewTask } from "@/types/review";
 import type { BankTransaction } from "@/types/bank";
 import type { Invoice } from "@/types/invoice";
@@ -232,13 +235,33 @@ export function BankTransactionCandidatesPanel({
           Open a transaction to see full details, then match it to the invoice on
           the left. Lines matching this invoice number are listed first.
         </p>
+        {task?.bank_transaction && (
+          <div className="mt-3 rounded-md border border-border bg-surface-muted/40 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Linked bank line
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-foreground">
+              <span className="tabular-nums">
+                {formatDate(task.bank_transaction.transaction_date)}
+              </span>
+              <span className="tabular-nums font-medium">
+                {transactionDisplayValue(task.bank_transaction)}
+              </span>
+              {task.bank_transaction.detected_invoice_numbers.length > 0 && (
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {task.bank_transaction.detected_invoice_numbers.join(", ")}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div className="relative mt-2">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search comment, amount, invoice #…"
+            placeholder="Search comment, amount, invoice #, date (dd/mm/yyyy)…"
             className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-7 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           {searchInput && (

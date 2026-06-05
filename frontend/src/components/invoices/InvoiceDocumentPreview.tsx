@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import { getInvoice } from "@/api/invoices";
-import { formatCurrency } from "@/lib/labels";
+import { formatCurrency, formatDate } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
 export function InvoiceDocumentPreview({
@@ -63,13 +63,21 @@ export function InvoiceDocumentPreview({
   return (
     <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card">
       <div className="shrink-0 border-b border-border px-4 py-3">
-        <dl className="grid gap-3 sm:grid-cols-3">
+        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Company
             </dt>
             <dd className="mt-0.5 text-[13px] font-medium text-foreground">
               {invoice.name_of_company?.trim() || "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Invoice date
+            </dt>
+            <dd className="mt-0.5 tabular-nums text-[13px] font-medium text-foreground">
+              {formatDate(invoice.invoice_date)}
             </dd>
           </div>
           <div>
