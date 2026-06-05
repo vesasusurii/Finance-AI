@@ -23,12 +23,18 @@ async def list_review_tasks(
         None,
         description="When set, only tasks whose reason is in this list.",
     ),
+    enrich: bool = Query(
+        True,
+        description="When false, skip loading linked invoice and bank transaction details.",
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     user: UserContext = Depends(get_current_user),
     ctrl: ReviewController = Depends(get_review_controller),
 ):
-    return await ctrl.list_open(user, task_type, page, limit, has_invoice, reasons)
+    return await ctrl.list_open(
+        user, task_type, page, limit, has_invoice, reasons, enrich=enrich
+    )
 
 
 @router.post("/{task_id}/approve", response_model=ReviewTaskDecisionResponse)

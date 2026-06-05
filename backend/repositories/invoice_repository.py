@@ -322,14 +322,23 @@ class InvoiceRepository:
         invoice_id: int,
         *,
         owner_user_id: int | None = None,
+        paid_by: str | None = None,
     ) -> InvoiceResponse | None:
         row = await self._get_row(invoice_id, owner_user_id=owner_user_id)
         if not row:
             return None
         row.review_status = "approved"
         row.review_reasons = None
+        if paid_by:
+            row.paid_by = paid_by[:300]
         await self._session.flush()
         return await self.get(invoice_id, owner_user_id=owner_user_id)
+
+    async def update_paid_by(self, invoice_id: int, paid_by: str) -> None:
+        row = await self._session.get(Invoice, invoice_id)
+        if row:
+            row.paid_by = paid_by[:300]
+            await self._session.flush()
 
     async def find_by_number(
         self,

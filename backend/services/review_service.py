@@ -16,6 +16,7 @@ from schemas.review import (
     ReviewTaskResponse,
 )
 from utils.normalization import normalize_invoice_number
+from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
 
@@ -67,9 +68,10 @@ class ReviewService:
         owner_user_id: int | None = None,
         has_invoice: bool | None = None,
         reasons: list[str] | None = None,
+        enrich: bool = True,
     ) -> ReviewTaskListResponse:
         if has_invoice is not None:
-            # Invoice-centric vs bank-line-only queues (filter after enrichment).
+            # Invoice-centric vs bank-line-only queues require enrichment.
             fetch_limit = min(500, max(limit * 10, 200))
             items, _ = await self._review_repo.list_open(
                 task_type,
@@ -95,7 +97,10 @@ class ReviewService:
         items, total = await self._review_repo.list_open(
             task_type, page, limit, owner_user_id=owner_user_id, reasons=reasons
         )
-        enriched = [await self._enrich_task(item) for item in items]
+        if enrich:
+            enriched = [await self._enrich_task(item) for item in items]
+        else:
+            enriched = items
         return ReviewTaskListResponse(
             items=enriched, total=total, page=page, limit=limit
         )
@@ -137,7 +142,10 @@ class ReviewService:
                         "message": "Extraction task has no linked invoice.",
                     },
                 )
-            approved = await self._invoice_repo.approve(task.invoice_id)
+            approved = await self._invoice_repo.approve(
+                task.invoice_id,
+                paid_by=approver_paid_by(user),
+            )
             if not approved:
                 raise HTTPException(
                     status_code=404,

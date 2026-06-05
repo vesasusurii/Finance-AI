@@ -22,7 +22,7 @@ _COLOR_ROW_EVEN = "FFFFFF"
 _COLOR_TEXT = "1A1F4D"
 _COLOR_BORDER = "C8CDDF"
 
-_FMT_DATE = "DD.MM.YYYY"
+_FMT_DATE = "DD/MM/YYYY"
 _FMT_AMOUNT = "#,##0.00"
 
 _FONT_HEADER = Font(name="Calibri", bold=True, color=_COLOR_HEADER_TEXT, size=11)

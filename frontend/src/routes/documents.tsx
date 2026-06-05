@@ -131,19 +131,19 @@ export function DocumentsPage() {
   );
 
   const loadTotals = useCallback(async () => {
-    const results = await Promise.all(
-      DOCUMENT_TABS.map(async (tab) => {
-        const res = await listInvoices({
-          ...sharedFilters,
-          ...tabFilters(tab.id),
-          page: 1,
-          limit: 1,
-        });
-        return [tab.id, res.total] as const;
-      }),
-    );
-    setTabTotals(Object.fromEntries(results) as Record<DocumentsTab, number>);
-  }, [sharedFilters]);
+    const countFilters = debouncedSearch ? { search: debouncedSearch } : {};
+    const totals = {} as Record<DocumentsTab, number>;
+    for (const tab of DOCUMENT_TABS) {
+      const res = await listInvoices({
+        ...countFilters,
+        ...tabFilters(tab.id),
+        page: 1,
+        limit: 1,
+      });
+      totals[tab.id] = res.total;
+    }
+    setTabTotals(totals);
+  }, [debouncedSearch]);
 
   const loadActiveTab = useCallback(async () => {
     setLoadingTab(true);
@@ -168,8 +168,8 @@ export function DocumentsPage() {
   }, [activeTab, page, sharedFilters]);
 
   const reload = useCallback(async () => {
-    await loadTotals();
     await loadActiveTab();
+    await loadTotals();
   }, [loadTotals, loadActiveTab]);
 
   useEffect(() => {

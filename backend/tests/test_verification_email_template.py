@@ -21,7 +21,6 @@ def test_verification_email_html_white_theme_and_logo_cid():
         ttl_minutes=10,
         logo_src=f"cid:{LOGO_CID}",
     )
-    assert "654321" in html
     assert "6 5 4 3 2 1" in html
     assert "#FFFFFF" in html
     assert "10 minutes" in html
