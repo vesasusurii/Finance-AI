@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import {
+  LoadingSpinner,
+  SectionLoadingSpinner,
+} from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
@@ -102,7 +106,7 @@ function TaskDismissActions({
         onClick={() => void handleReject()}
       >
         {busy === "reject" ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <LoadingSpinner size="sm" />
         ) : (
           "Reject"
         )}
@@ -115,7 +119,7 @@ function TaskDismissActions({
           onClick={() => void handleApprove()}
         >
           {busy === "approve" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <LoadingSpinner size="sm" />
           ) : (
             "Approve"
           )}
@@ -135,7 +139,7 @@ function BankMatchView({
   const { invoice, task } = entry;
   return (
     <div className="grid min-h-[calc(100vh-14rem)] grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
-      <div className="flex h-full min-h-[480px] flex-col lg:min-h-0">
+      <div className="flex h-full min-h-[960px] flex-col lg:min-h-0">
         <InvoiceDocumentPreview
           key={invoice.id}
           invoiceId={invoice.id}
@@ -164,14 +168,14 @@ function ExtractionView({
 
   return (
     <div className="grid min-h-[calc(100vh-14rem)] grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
-      <div className="flex h-full min-h-[480px] flex-col lg:min-h-0">
+      <div className="flex h-full min-h-[960px] flex-col lg:min-h-0">
         <InvoiceDocumentPreview
           key={invoice.id}
           invoiceId={invoice.id}
           invoice={invoice}
         />
       </div>
-      <div className="flex h-full min-h-[480px] flex-col rounded-lg border border-border bg-card lg:min-h-0">
+      <div className="flex h-full min-h-[960px] flex-col rounded-lg border border-border bg-card lg:min-h-0">
         <div className="border-b border-border px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold text-foreground">
@@ -364,10 +368,7 @@ export function ManualReviewPage() {
       {error && <p className="mb-4 text-[13px] text-destructive">{error}</p>}
 
       {loading || !entry ? (
-        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading review queue…
-        </div>
+        <SectionLoadingSpinner label="Loading review queue…" />
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">

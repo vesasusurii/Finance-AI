@@ -129,7 +129,7 @@ export function InvoiceDetailsDrawer({
                     <span className="text-foreground">{row.field}</span>
                     <span
                       className={
-                        row.ok ? "text-success" : "text-[oklch(0.45_0.13_60)]"
+                        row.ok ? "text-success" : "text-warning"
                       }
                     >
                       {Math.round(row.score * 100)}%

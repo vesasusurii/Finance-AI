@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Plus, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -225,7 +226,7 @@ export function UsersPage() {
       )}
 
       {loading ? (
-        <p className="text-[13px] text-muted-foreground">Loading users…</p>
+        <LoadingSpinner centered className="text-muted-foreground" />
       ) : (
         <>
           <p className="mb-3 text-[13px] text-muted-foreground">

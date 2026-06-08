@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import {
   hintsFromInvoice,
   hintsLabel,
@@ -204,7 +205,7 @@ export function BankTransactionCandidatesPanel({
   }, [searchInput, isAutoSearch, autoHints]);
 
   return (
-    <div className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
+    <div className="flex h-full min-h-[960px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -226,7 +227,7 @@ export function BankTransactionCandidatesPanel({
               onClick={() => void handleReject()}
               icon={
                 busy === "reject" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <LoadingSpinner size="sm" />
                 ) : (
                   <X className="h-3.5 w-3.5" />
                 )
@@ -294,10 +295,13 @@ export function BankTransactionCandidatesPanel({
           <p className="mb-3 text-[12px] text-destructive">{error}</p>
         )}
         {loadingTxns ? (
-          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading transactions…
-          </div>
+          <LoadingSpinner
+            centered
+            size="md"
+            className="text-muted-foreground"
+            label="Loading transactions…"
+            containerClassName="py-12"
+          />
         ) : transactions.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             No candidate bank lines found. Upload a bank statement and run

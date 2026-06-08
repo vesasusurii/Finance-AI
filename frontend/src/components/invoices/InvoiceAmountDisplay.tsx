@@ -9,14 +9,17 @@ export function InvoiceAmountDisplay({
   className = "text-[13px] font-medium text-foreground",
   subtitleClassName = "mt-0.5 text-[11px] text-muted-foreground",
 }: {
-  invoice: Pick<
-    Invoice,
-    "amount" | "currency" | "original_amount" | "original_currency"
-  >;
+  invoice: Pick<Invoice, "amount" | "currency"> & {
+    original_amount?: Invoice["original_amount"];
+    original_currency?: Invoice["original_currency"];
+  };
   className?: string;
   subtitleClassName?: string;
 }) {
-  const subtitle = formatOriginalCurrencySubtitle(invoice);
+  const subtitle = formatOriginalCurrencySubtitle({
+    original_amount: invoice.original_amount ?? null,
+    original_currency: invoice.original_currency ?? null,
+  });
 
   return (
     <div>

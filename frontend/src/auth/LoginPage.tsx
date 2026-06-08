@@ -4,6 +4,7 @@ import { useAuth } from "./AuthContext";
 import { isAdminRole, needsOnboarding } from "@/types/auth";
 import { Button } from "@/components/ui-finance/Button";
 import { BrandLogo } from "@/components/shell/BrandLogo";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 export function LoginPage() {
   const { user, login, isAdmin } = useAuth();
@@ -39,7 +40,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-md">
         <header className="mb-8 text-center">
           <BrandLogo className="mb-4 justify-center" imageClassName="h-14" />

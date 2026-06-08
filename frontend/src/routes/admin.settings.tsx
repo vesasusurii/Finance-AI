@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { getSettings } from "@/api/admin";
 import type { SettingItem } from "@/types/admin";
@@ -52,7 +53,7 @@ export function SettingsPage() {
       )}
 
       {loading ? (
-        <p className="text-[13px] text-muted-foreground">Loading…</p>
+        <LoadingSpinner centered className="text-muted-foreground" />
       ) : (
         <>
           <p className="text-[12px] text-muted-foreground">{note}</p>

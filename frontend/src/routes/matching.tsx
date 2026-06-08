@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Play } from "lucide-react";
+import { SectionLoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -104,7 +105,7 @@ export function MatchingPage() {
   }, []);
 
   const [running, setRunning] = useState(false);
-  const [loadingTab, setLoadingTab] = useState(false);
+  const [loadingTab, setLoadingTab] = useState(true);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<InvoicePaymentMatch[]>([]);
@@ -720,14 +721,13 @@ function TabPanel({
   loading: boolean;
   children: ReactNode;
 }) {
-  return (
-    <div className="relative min-h-[200px]">
-      {loading && (
-        <p className="absolute right-0 top-0 text-[12px] text-muted-foreground">
-          Loading…
-        </p>
-      )}
-      {children}
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="min-h-[200px]">
+        <SectionLoadingSpinner />
+      </div>
+    );
+  }
+
+  return <div className="min-h-[200px]">{children}</div>;
 }

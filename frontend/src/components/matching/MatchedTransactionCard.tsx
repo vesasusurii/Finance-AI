@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Loader2, X } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import {
   formatCurrency,
@@ -12,9 +13,9 @@ import type { MatchedTransactionItem } from "./matchedTransactionTypes";
 
 /** Muted action tones aligned with StatusBadge success / danger. */
 const approveActionClass =
-  "border border-[oklch(0.88_0.08_145)] bg-[oklch(0.96_0.05_145)] text-success hover:bg-[oklch(0.94_0.06_145)]";
+  "border border-success/30 bg-success/15 text-success hover:bg-success/25";
 const rejectActionClass =
-  "border border-[oklch(0.9_0.07_27)] bg-[oklch(0.97_0.04_27)] text-destructive hover:bg-[oklch(0.95_0.05_27)]";
+  "border border-destructive/30 bg-destructive/15 text-destructive hover:bg-destructive/25";
 const neutralActionClass =
   "border border-border bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground";
 
@@ -260,7 +261,7 @@ export function MatchedTransactionCard({
                 className={approveActionClass}
               >
                 {busy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <LoadingSpinner size="sm" />
                 ) : (
                   <Check className="h-3.5 w-3.5" />
                 )}

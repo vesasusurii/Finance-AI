@@ -5,9 +5,9 @@ type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "primary";
 const toneClass: Record<Tone, string> = {
   neutral: "bg-secondary text-muted-foreground border-border",
   info: "bg-accent text-primary border-accent",
-  success: "bg-[oklch(0.96_0.05_145)] text-success border-[oklch(0.88_0.08_145)]",
-  warning: "bg-[oklch(0.97_0.06_75)] text-[oklch(0.45_0.13_60)] border-[oklch(0.9_0.08_75)]",
-  danger: "bg-[oklch(0.97_0.04_27)] text-destructive border-[oklch(0.9_0.07_27)]",
+  success: "bg-success/15 text-success border-success/30 dark:bg-success/20 dark:border-success/40",
+  warning: "bg-warning/15 text-warning border-warning/30 dark:bg-warning/20 dark:border-warning/40",
+  danger: "bg-destructive/15 text-destructive border-destructive/30 dark:bg-destructive/20 dark:border-destructive/40",
   primary: "bg-accent text-primary border-accent",
 };
 

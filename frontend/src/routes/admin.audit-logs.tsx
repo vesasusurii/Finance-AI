@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
@@ -151,16 +152,28 @@ export function AuditPage() {
         </p>
       )}
 
-      <p className="text-[12px] text-muted-foreground tabular-nums">
-        {loading ? "Loading…" : `${total} event${total === 1 ? "" : "s"}`}
-      </p>
+      {loading ? (
+        <LoadingSpinner
+          centered
+          size="md"
+          className="text-muted-foreground"
+          label="Loading audit logs…"
+          containerClassName="py-16"
+        />
+      ) : (
+        <>
+          <p className="text-[12px] text-muted-foreground tabular-nums">
+            {total} event{total === 1 ? "" : "s"}
+          </p>
 
-      <DataTable
-        columns={columns}
-        rows={items}
-        onRowClick={setSelected}
-        empty={loading ? "Loading audit logs…" : "No audit events found."}
-      />
+          <DataTable
+            columns={columns}
+            rows={items}
+            onRowClick={setSelected}
+            empty="No audit events found."
+          />
+        </>
+      )}
 
       {selected && (
         <aside className="rounded-lg border border-border bg-surface-muted/40 p-4">

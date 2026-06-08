@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Download, Loader2, RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { DateTextInput } from "@/components/ui-finance/DateTextInput";
@@ -121,7 +122,7 @@ export function PeriodReportPanel() {
           size="sm"
           icon={
             loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <LoadingSpinner size="sm" />
             ) : (
               <RefreshCw className="h-3.5 w-3.5" />
             )
@@ -137,7 +138,7 @@ export function PeriodReportPanel() {
           size="sm"
           icon={
             downloading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <LoadingSpinner size="sm" />
             ) : (
               <Download className="h-3.5 w-3.5" />
             )

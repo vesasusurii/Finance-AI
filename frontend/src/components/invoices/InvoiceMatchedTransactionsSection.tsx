@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getInvoiceMatches } from "@/api/invoices";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import {
   formatCurrency,
@@ -165,7 +166,13 @@ export function InvoiceMatchedTransactionsSection({
       </h3>
 
       {loading && (
-        <p className="mt-2 text-[12px] text-muted-foreground">Loading…</p>
+        <LoadingSpinner
+          centered
+          size="sm"
+          className="text-muted-foreground"
+          label="Loading…"
+          containerClassName="mt-2 py-8"
+        />
       )}
       {error && (
         <p className="mt-2 text-[12px] text-destructive">{error}</p>

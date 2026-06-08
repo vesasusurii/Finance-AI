@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, FileText, Loader2 } from "lucide-react";
+import { ExternalLink, FileText } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { fetchInvoiceFile } from "@/api/invoices";
 import { cn } from "@/lib/utils";
 
@@ -110,14 +111,13 @@ export function InvoiceFilePreview({
 
       <div className="relative min-h-[400px] flex-1 overflow-hidden bg-muted/30">
         {loading && (
-          <div
-            className={`flex ${minHeightClass} flex-col items-center justify-center gap-2`}
-          >
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <p className="text-[13px] text-muted-foreground">
-              Loading preview…
-            </p>
-          </div>
+          <LoadingSpinner
+            centered
+            size="lg"
+            className="text-muted-foreground"
+            label="Loading preview…"
+            containerClassName={cn(minHeightClass, "py-0")}
+          />
         )}
 
         {!loading && error && (

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useSearchParams } from "react-router-dom";
 import { Download, Trash2, X } from "lucide-react";
 import { downloadPurchaseInvoicesExcel } from "@/api/export";
+import {
+  LoadingSpinner,
+  SectionLoadingSpinner,
+} from "@/components/LoadingSpinner";
 import { InvoiceDocumentEditor } from "@/components/invoices/InvoiceDocumentEditor";
 import { InvoiceMatchedTransactionsSection } from "@/components/invoices/InvoiceMatchedTransactionsSection";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
@@ -15,7 +19,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/auth/AuthContext";
 import { deleteInvoice, listInvoices } from "@/api/invoices";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
-import { useInvoices } from "@/hooks/useInvoices";
 import { uploadProgressEvents } from "@/services/uploadProgressEvents";
 import type { Invoice } from "@/types/invoice";
 import { isAdminRole } from "@/types/auth";
@@ -82,7 +85,7 @@ export function DocumentsPage() {
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [loadingTab, setLoadingTab] = useState(false);
+  const [loadingTab, setLoadingTab] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
@@ -345,7 +348,13 @@ export function DocumentsPage() {
           <Button
             variant="secondary"
             size="sm"
-            icon={<Download className="h-3.5 w-3.5" />}
+            icon={
+              exporting ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )
+            }
             disabled={exporting || loadingTab}
             onClick={() => {
               setExporting(true);
@@ -458,16 +467,15 @@ function TabPanel({
   loading: boolean;
   children: ReactNode;
 }) {
-  return (
-    <div className="relative min-h-[200px]">
-      {loading && (
-        <p className="absolute right-0 top-0 text-[12px] text-muted-foreground">
-          Loading…
-        </p>
-      )}
-      {children}
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="min-h-[200px]">
+        <SectionLoadingSpinner />
+      </div>
+    );
+  }
+
+  return <div className="min-h-[200px]">{children}</div>;
 }
 
 function DocumentDrawer({

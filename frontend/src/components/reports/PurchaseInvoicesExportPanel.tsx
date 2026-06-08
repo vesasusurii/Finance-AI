@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Download } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui-finance/Button";
 import { DateTextInput } from "@/components/ui-finance/DateTextInput";
 import {
@@ -185,7 +186,7 @@ export function PurchaseInvoicesExportPanel() {
         size="sm"
         icon={
           downloading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <LoadingSpinner size="sm" />
           ) : (
             <Download className="h-3.5 w-3.5" />
           )

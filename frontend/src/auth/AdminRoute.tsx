@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from "react-router-dom";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useAuth } from "./AuthContext";
 
 export function AdminRoute() {
@@ -6,9 +7,11 @@ export function AdminRoute() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <p className="text-[13px] text-muted-foreground">Loading…</p>
-      </div>
+      <LoadingSpinner
+        centered
+        className="text-muted-foreground"
+        containerClassName="min-h-[40vh] py-0"
+      />
     );
   }
 

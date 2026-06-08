@@ -1,11 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from "react";
-import {
-  AlertTriangle,
-  Check,
-  Loader2,
-  Save,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Check, Save, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui-finance/Button";
 import {
@@ -435,7 +430,7 @@ export function InvoiceDocumentEditor({
                   onClick={handleReject}
                   icon={
                     rejecting ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <LoadingSpinner size="sm" />
                     ) : (
                       <X className="h-3.5 w-3.5" />
                     )
@@ -451,7 +446,7 @@ export function InvoiceDocumentEditor({
                 onClick={handleSave}
                 icon={
                   saving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <LoadingSpinner size="sm" />
                   ) : (
                     <Save className="h-3.5 w-3.5" />
                   )
@@ -471,7 +466,7 @@ export function InvoiceDocumentEditor({
                   onClick={handleApprove}
                   icon={
                     approving ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <LoadingSpinner size="sm" />
                     ) : (
                       <Check className="h-3.5 w-3.5" />
                     )

@@ -1,4 +1,5 @@
-import { Check, Loader2, X } from "lucide-react";
+import { Check, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui-finance/Button";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
 import {
@@ -27,7 +28,7 @@ function HighlightText({
         lowerTerms.has(part.toLowerCase()) ? (
           <mark
             key={i}
-            className="rounded-sm bg-yellow-200 px-0.5 text-foreground dark:bg-yellow-700"
+            className="rounded-sm bg-warning/30 px-0.5 text-foreground"
           >
             {part}
           </mark>
@@ -226,7 +227,7 @@ export function BankTransactionMatchCard({
             onClick={onMatch}
             icon={
               matching ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <LoadingSpinner size="sm" />
               ) : (
                 <Check className="h-3.5 w-3.5" />
               )

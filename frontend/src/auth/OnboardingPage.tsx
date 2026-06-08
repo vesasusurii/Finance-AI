@@ -3,8 +3,10 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { changePassword, resendVerificationCode, verifyEmail } from "@/api/auth";
 import { ApiError } from "@/api/client";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui-finance/Button";
 import { BrandLogo } from "@/components/shell/BrandLogo";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { isAdminRole, needsOnboarding } from "@/types/auth";
 
 const RESEND_COOLDOWN_SECONDS = 120;
@@ -53,8 +55,12 @@ export function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-[13px] text-muted-foreground">Loading…</p>
+      <div className="min-h-screen bg-background">
+        <LoadingSpinner
+          centered
+          className="text-muted-foreground"
+          containerClassName="min-h-screen py-0"
+        />
       </div>
     );
   }
@@ -134,7 +140,8 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-md">
         <header className="mb-8 text-center">
           <BrandLogo className="mb-4 justify-center" imageClassName="h-14" />

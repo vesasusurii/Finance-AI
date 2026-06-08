@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Trash2, Upload, FileSpreadsheet, RefreshCw } from "lucide-react";
+import {
+  LoadingSpinner,
+  SectionLoadingSpinner,
+} from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
@@ -324,6 +328,7 @@ export function BankPage() {
           <Button
             variant="primary"
             disabled={uploading}
+            icon={uploading ? <LoadingSpinner size="sm" className="text-primary-foreground" /> : <Upload className="h-3.5 w-3.5" />}
             onClick={() => inputRef.current?.click()}
           >
             {uploading ? "Parsing…" : "Choose file"}
@@ -404,7 +409,7 @@ export function BankPage() {
           Uploaded statements
         </h2>
         {loadingList ? (
-          <p className="text-[13px] text-muted-foreground">Loading…</p>
+          <SectionLoadingSpinner />
         ) : (
           <DataTable
             columns={statementColumns}

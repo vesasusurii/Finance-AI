@@ -10,6 +10,7 @@ import {
 import { listInvoices } from "@/api/invoices";
 import type { Invoice } from "@/types/invoice";
 import { formatCurrency } from "@/lib/labels";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import {
   Command,
@@ -92,9 +93,15 @@ function GlobalSearchResults({
     <Command shouldFilter={false} className="bg-popover">
       <CommandList id="global-search-results">
         <CommandEmpty>
-          {searching
-            ? "Searching…"
-            : query.trim().length < 2
+          {searching ? (
+            <LoadingSpinner
+              centered
+              size="sm"
+              className="text-muted-foreground"
+              label="Searching…"
+              containerClassName="py-6"
+            />
+          ) : query.trim().length < 2
               ? "Type at least 2 characters to search invoices"
               : "No invoices found"}
         </CommandEmpty>

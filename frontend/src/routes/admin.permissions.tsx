@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { getPermissions, updateUserRole } from "@/api/admin";
@@ -125,7 +126,7 @@ export function PermissionsPage() {
           Capability matrix
         </h2>
         {loading ? (
-          <p className="text-[13px] text-muted-foreground">Loading…</p>
+          <LoadingSpinner centered className="text-muted-foreground" />
         ) : (
           <DataTable
             columns={matrixColumns}
@@ -140,7 +141,7 @@ export function PermissionsPage() {
           User role assignments
         </h2>
         {loading ? (
-          <p className="text-[13px] text-muted-foreground">Loading…</p>
+          <LoadingSpinner centered className="text-muted-foreground" />
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full text-[13px]">

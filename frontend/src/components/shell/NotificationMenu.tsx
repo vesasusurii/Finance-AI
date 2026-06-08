@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Bell } from "lucide-react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import { useNotificationSummary } from "@/hooks/useNotificationSummary";
 import {
@@ -46,9 +47,13 @@ export function NotificationMenu({ enabled }: NotificationMenuProps) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {loading && items.length === 0 ? (
-          <p className="px-2 py-3 text-[12px] text-muted-foreground">
-            Loading…
-          </p>
+          <LoadingSpinner
+            centered
+            size="sm"
+            className="text-muted-foreground"
+            label="Loading…"
+            containerClassName="px-2 py-3"
+          />
         ) : items.length === 0 ? (
           <p className="px-2 py-3 text-[12px] text-muted-foreground">
             Nothing needs attention right now.

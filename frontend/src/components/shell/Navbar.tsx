@@ -6,6 +6,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { roleLabel } from "@/types/auth";
 import { BrandLogo } from "./BrandLogo";
 import { GlobalSearchDialog } from "./GlobalSearchDialog";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 const financeNav = [
   { to: "/", label: "Upload" },
@@ -164,6 +165,8 @@ export function Navbar() {
                 />
               </div>
             ) : null}
+
+            <ThemeToggle />
 
             <div className="relative">
               <button

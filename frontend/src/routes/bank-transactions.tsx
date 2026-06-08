@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
 import { StatusBadge } from "@/components/ui-finance/StatusBadge";
@@ -131,7 +132,7 @@ export function BankTransactionsPage() {
       )}
 
       {loading ? (
-        <p className="text-[13px] text-muted-foreground">Loading…</p>
+        <LoadingSpinner centered className="text-muted-foreground" />
       ) : (
         <>
           <p className="text-[12px] text-muted-foreground">

@@ -51,6 +51,7 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 0.5rem;
   /* Brand: navy #0D1240 */
   --background: oklch(1 0 0);
@@ -91,6 +92,91 @@
   --sidebar-accent-foreground: oklch(0.235 0.118 277);
   --sidebar-border: oklch(0.92 0.005 255);
   --sidebar-ring: oklch(0.235 0.118 277);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.17 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.17 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.55 0.12 277);
+  --primary-foreground: oklch(0.98 0 0);
+  --soft-navy: oklch(0.48 0.11 277);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.55 0.2 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.65 0.17 145);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.75 0.15 75);
+  --warning-foreground: oklch(0.15 0 0);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.55 0.12 277);
+  --surface-muted: oklch(0.2 0 0);
+  --chart-1: oklch(0.55 0.12 277);
+  --chart-2: oklch(0.65 0.17 145);
+  --chart-3: oklch(0.75 0.15 75);
+  --chart-4: oklch(0.55 0.2 27);
+  --chart-5: oklch(0.708 0 0);
+  --sidebar: oklch(0.17 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.55 0.12 277);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.55 0.12 277);
+}
+
+.loader {
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: currentColor;
+  border-bottom-color: transparent;
+  animation: rotation 1s linear infinite;
+}
+
+.loader-xl {
+  width: 48px;
+  height: 48px;
+  border-width: 5px;
+}
+
+.loader-lg {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+.loader-md {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.loader-sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 @layer base {
