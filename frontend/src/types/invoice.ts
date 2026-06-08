@@ -9,6 +9,8 @@ export interface Invoice {
   name_of_company: string | null;
   address_of_company: string | null;
   invoice_number: string | null;
+  /** Canonical matching key; may differ from display (e.g. slashes/hyphens stripped). */
+  invoice_number_normalized: string | null;
   amount: number | null;
   debt: number | null;
   currency: string | null;

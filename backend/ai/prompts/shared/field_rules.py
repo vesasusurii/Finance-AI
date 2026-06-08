@@ -23,7 +23,7 @@ FIELD_RULES = """
   If the city is partially visible or uncertain → copy what you can read and set needs_review true.
 
 ### invoice_number  ← EXACT reference from document, never a tax/registration ID
-- **Output format:** continuous uppercase letters and digits only — **no** `/`, `-`, or whitespace. Remove separators from the printed value (e.g. `1/2026/0048` → `120260048`, `INV-2024-001` → `INV2024001`).
+- **Output format:** copy **exactly as printed** on the document — keep `/`, `-`, spaces, and letter case if shown (e.g. `1/2026/0048`, `3807F638-0011`, `INV-2024-001`). Do not strip or reformat separators; matching normalization happens in software later.
 - Read the value printed on **this** document — never reuse numbers from examples or prior extractions.
 - **Generic invoices:** Invoice Ref, Fatura Nr., Belegnummer, Bill No., etc.
 - **KESCO (`electricity_kesco`):** use utility rules — **Nr. Ref.** near bill end (alphanumeric pattern shape `1900……B`, value varies).

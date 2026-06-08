@@ -10,7 +10,9 @@ import {
 import { listInvoices } from "@/api/invoices";
 import type { Invoice } from "@/types/invoice";
 import { formatCurrency } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -41,23 +43,24 @@ const QUICK_LINKS = [
 type GlobalSearchDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  query?: string;
+  onQueryChange?: (query: string) => void;
+  onSubmit?: () => void;
+  /** Render results below the navbar input instead of a modal (keeps input focus). */
+  anchored?: boolean;
+  className?: string;
 };
 
-export function GlobalSearchDialog({
-  open,
+function GlobalSearchResults({
+  query,
   onOpenChange,
-}: GlobalSearchDialogProps) {
+}: {
+  query: string;
+  onOpenChange: (open: boolean) => void;
+}) {
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setInvoices([]);
-    }
-  }, [open]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -86,13 +89,8 @@ export function GlobalSearchDialog({
   );
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput
-        placeholder="Search invoices, vendors, invoice numbers…"
-        value={query}
-        onValueChange={setQuery}
-      />
-      <CommandList>
+    <Command shouldFilter={false} className="bg-popover">
+      <CommandList id="global-search-results">
         <CommandEmpty>
           {searching
             ? "Searching…"
@@ -159,6 +157,58 @@ export function GlobalSearchDialog({
           </>
         ) : null}
       </CommandList>
+    </Command>
+  );
+}
+
+export function GlobalSearchDialog({
+  open,
+  onOpenChange,
+  query: queryProp,
+  onQueryChange,
+  onSubmit,
+  anchored = false,
+  className,
+}: GlobalSearchDialogProps) {
+  const [internalQuery, setInternalQuery] = useState("");
+  const query = queryProp ?? internalQuery;
+  const setQuery = onQueryChange ?? setInternalQuery;
+
+  useEffect(() => {
+    if (!open && queryProp === undefined) {
+      setInternalQuery("");
+    }
+  }, [open, queryProp]);
+
+  if (anchored) {
+    if (!open) return null;
+
+    return (
+      <div
+        className={cn(
+          "absolute top-full left-0 z-50 mt-1 w-full overflow-hidden rounded-md border border-border bg-popover shadow-lg",
+          className,
+        )}
+      >
+        <GlobalSearchResults query={query} onOpenChange={onOpenChange} />
+      </div>
+    );
+  }
+
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <CommandInput
+        placeholder="Search invoices, vendors, invoice numbers…"
+        value={query}
+        onValueChange={setQuery}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onSubmit?.();
+          }
+        }}
+      />
+      <GlobalSearchResults query={query} onOpenChange={onOpenChange} />
     </CommandDialog>
   );
 }

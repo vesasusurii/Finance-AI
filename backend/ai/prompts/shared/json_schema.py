@@ -16,7 +16,7 @@ def build_json_schema() -> str:
 {{{JSON_KEYS}}}
 ```
 
-- String values: trimmed. **`invoice_number`:** alphanumeric only (no `/`, `-`, or spaces).
+- String values: trimmed. **`invoice_number`:** exact text as printed on the document (preserve `/`, `-`, spaces, and case).
 - Numeric values: unquoted floats (amount, confidence_score).
 - Boolean values: unquoted true/false (needs_review).
 - Missing/not-found fields: null (unquoted).
@@ -32,7 +32,7 @@ OUTPUT_EXAMPLE = """
   "invoice_date": "2026-01-28",
   "name_of_company": "Example Consulting SH.P.K.",
   "address_of_company": "Str. Garibaldi 12, Prishtina, Kosovo",
-  "invoice_number": "120260048",
+  "invoice_number": "1/2026/0048",
   "amount": 1931.78,
   "debt": null,
   "currency": "EUR",

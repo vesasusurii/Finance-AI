@@ -53,7 +53,11 @@ function rankForInvoice(
   transactions: BankTransaction[],
   invoice: Invoice,
 ): BankTransaction[] {
-  const num = invoice.invoice_number?.trim().toLowerCase();
+  const num = (
+    invoice.invoice_number_normalized ?? invoice.invoice_number
+  )
+    ?.trim()
+    .toLowerCase();
   return [...transactions].sort((a, b) => {
     const da = a.transaction_date ?? "";
     const db = b.transaction_date ?? "";

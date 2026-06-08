@@ -3,14 +3,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from utils.normalization import normalize_invoice_number
-
-
-def _format_invoice_number(v: str | None) -> str | None:
+def _trim_invoice_number(v: str | None) -> str | None:
     if v is None:
         return None
     text = str(v).strip()
-    return normalize_invoice_number(text) if text else None
+    return text if text else None
 
 
 def _clean_paid_by(v: str | None) -> str | None:
@@ -31,7 +28,7 @@ class ExtractionResult(BaseModel):
     @field_validator("invoice_number", mode="before")
     @classmethod
     def _invoice_number_format(cls, v: str | None) -> str | None:
-        return _format_invoice_number(v)
+        return _trim_invoice_number(v)
     amount: float | None = None
     debt: float | None = None
     currency: str | None = None
@@ -57,7 +54,7 @@ class InvoiceUpdate(BaseModel):
     @field_validator("invoice_number", mode="before")
     @classmethod
     def _invoice_number_format(cls, v: str | None) -> str | None:
-        return _format_invoice_number(v)
+        return _trim_invoice_number(v)
     amount: Decimal | None = None
     debt: Decimal | None = None
     currency: str | None = None
@@ -84,6 +81,7 @@ class InvoiceResponse(BaseModel):
     name_of_company: str | None
     address_of_company: str | None
     invoice_number: str | None
+    invoice_number_normalized: str | None = None
     amount: Decimal | None
     debt: Decimal | None
     currency: str | None

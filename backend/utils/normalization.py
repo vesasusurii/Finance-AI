@@ -59,3 +59,11 @@ def normalize_invoice_number(raw: str | None) -> str | None:
         return None
 
     return s if s else None
+
+
+def split_invoice_number(raw: str | None) -> tuple[str | None, str | None]:
+    """Return (display, normalized) for DB storage."""
+    if not raw or not str(raw).strip():
+        return None, None
+    display = str(raw).strip()
+    return display, normalize_invoice_number(display)

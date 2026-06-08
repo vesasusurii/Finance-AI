@@ -760,7 +760,7 @@ class InvoiceExtractionService:
             instruction_parts += [
                 "",
                 "KESCO bill detected:",
-                "• invoice_number = alphanumeric value after Nr. Ref. / Nr. Ret. on the BOTTOM payment strip (below barcode).",
+                "• invoice_number = exact value after Nr. Ref. / Nr. Ret. on the BOTTOM payment strip (below barcode), as printed.",
                 "• NEVER use Shifra e konsumatorit, Customer ID, DPR codes, or other numeric-only header IDs.",
             ]
         elif any(

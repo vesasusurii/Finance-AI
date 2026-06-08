@@ -38,14 +38,22 @@ function amountMatches(txn: BankTransaction, amount: number): boolean {
   );
 }
 
-function invoiceNumberMatches(txn: BankTransaction, invoiceNumber: string): boolean {
-  const needle = normalise(invoiceNumber);
-  if (!needle) return true;
-  const inDetected = txn.detected_invoice_numbers.some(
-    (n) => normalise(n) === needle,
-  );
-  if (inDetected) return true;
-  return normalise(txn.comment).includes(needle);
+function invoiceNumberMatches(
+  txn: BankTransaction,
+  display: string | null,
+  normalized: string | null,
+): boolean {
+  const matchKey = normalise(normalized ?? display ?? "");
+  if (matchKey) {
+    const inDetected = txn.detected_invoice_numbers.some(
+      (n) => normalise(n) === matchKey,
+    );
+    if (inDetected) return true;
+  }
+  const displayNeedle = normalise(display ?? "");
+  if (!displayNeedle && !matchKey) return true;
+  if (displayNeedle && normalise(txn.comment).includes(displayNeedle)) return true;
+  return Boolean(matchKey && normalise(txn.comment).includes(matchKey));
 }
 
 function freeTextMatches(txn: BankTransaction, query: string): boolean {
@@ -72,6 +80,7 @@ export type AutoSearchHints = {
   company: string | null;
   amount: number | null;
   invoiceNumber: string | null;
+  invoiceNumberNormalized: string | null;
 };
 
 export function hintsFromInvoice(invoice: Invoice): AutoSearchHints {
@@ -81,6 +90,10 @@ export function hintsFromInvoice(invoice: Invoice): AutoSearchHints {
     company: invoice.name_of_company?.trim() || null,
     amount: amount != null && !isNaN(amount) ? amount : null,
     invoiceNumber: invoice.invoice_number?.trim() || null,
+    invoiceNumberNormalized:
+      invoice.invoice_number_normalized?.trim() ||
+      invoice.invoice_number?.trim() ||
+      null,
   };
 }
 
@@ -89,13 +102,26 @@ export function scoreHints(txn: BankTransaction, hints: AutoSearchHints): number
   let score = 0;
   if (hints.company && companyMatches(txn, hints.company)) score++;
   if (hints.amount != null && amountMatches(txn, hints.amount)) score++;
-  if (hints.invoiceNumber && invoiceNumberMatches(txn, hints.invoiceNumber)) score++;
+  if (
+    (hints.invoiceNumber || hints.invoiceNumberNormalized) &&
+    invoiceNumberMatches(
+      txn,
+      hints.invoiceNumber,
+      hints.invoiceNumberNormalized,
+    )
+  ) {
+    score++;
+  }
   return score;
 }
 
 /** Returns true when the transaction matches at least one non-null hint (OR logic). */
 export function matchesHints(txn: BankTransaction, hints: AutoSearchHints): boolean {
-  const hasAnyHint = hints.company || hints.amount != null || hints.invoiceNumber;
+  const hasAnyHint =
+    hints.company ||
+    hints.amount != null ||
+    hints.invoiceNumber ||
+    hints.invoiceNumberNormalized;
   if (!hasAnyHint) return true;
   return scoreHints(txn, hints) > 0;
 }
@@ -128,6 +154,10 @@ export function getHighlightTerms(hints: AutoSearchHints): string[] {
   if (hints.invoiceNumber) {
     const n = normalise(hints.invoiceNumber);
     if (n) terms.push(n);
+  }
+  if (hints.invoiceNumberNormalized) {
+    const n = normalise(hints.invoiceNumberNormalized);
+    if (n && !terms.includes(n)) terms.push(n);
   }
 
   if (hints.amount != null) {

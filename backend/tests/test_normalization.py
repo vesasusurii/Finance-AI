@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from utils.normalization import normalize_invoice_number
+from utils.normalization import normalize_invoice_number, split_invoice_number
 
 _INVALID_CHARS = re.compile(r"[/\-\s]")
 
@@ -50,3 +50,26 @@ def test_year_rejected():
 def test_empty():
     assert normalize_invoice_number("") is None
     assert normalize_invoice_number(None) is None
+
+
+def test_split_preserves_display():
+    display, normalized = split_invoice_number("1/2026/0048")
+    assert display == "1/2026/0048"
+    assert normalized == "120260048"
+
+
+def test_split_hyphenated_display():
+    display, normalized = split_invoice_number("3807F638-0011")
+    assert display == "3807F638-0011"
+    assert normalized == "3807F6380011"
+
+
+def test_split_plain_alnum_same():
+    display, normalized = split_invoice_number("613260192")
+    assert display == "613260192"
+    assert normalized == "613260192"
+
+
+def test_split_empty():
+    assert split_invoice_number("") == (None, None)
+    assert split_invoice_number(None) == (None, None)

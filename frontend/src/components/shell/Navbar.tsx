@@ -1,12 +1,11 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Search, ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/auth/AuthContext";
 import { roleLabel } from "@/types/auth";
 import { BrandLogo } from "./BrandLogo";
 import { GlobalSearchDialog } from "./GlobalSearchDialog";
-import { NotificationMenu } from "./NotificationMenu";
 
 const financeNav = [
   { to: "/", label: "Upload" },
@@ -27,6 +26,9 @@ const adminNav = [
 export function Navbar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
@@ -39,19 +41,39 @@ export function Navbar() {
   const initials = displayName.slice(0, 2).toUpperCase();
   const role = user?.role ? roleLabel(user.role) : "";
 
-  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    searchInputRef.current?.focus();
+  }, []);
+
+  const submitSearch = useCallback(() => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return;
+    setSearchOpen(false);
+    navigate(`/documents?search=${encodeURIComponent(trimmed)}`);
+  }, [navigate, searchQuery]);
 
   useEffect(() => {
     if (!showFinanceTools) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setSearchOpen(true);
+        openSearch();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showFinanceTools]);
+  }, [openSearch, showFinanceTools]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (searchContainerRef.current?.contains(event.target as Node)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [searchOpen]);
 
   async function handleSignOut() {
     setUserMenuOpen(false);
@@ -92,22 +114,56 @@ export function Navbar() {
 
           <div className="ml-auto flex items-center gap-2">
             {showFinanceTools ? (
-              <button
-                type="button"
-                onClick={openSearch}
-                className="relative hidden h-8 w-[320px] rounded-md border border-input bg-surface-muted text-left md:block"
-              >
+              <div ref={searchContainerRef} className="relative hidden md:block">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <span className="block truncate pl-8 pr-12 text-[13px] text-muted-foreground">
-                  Search invoices, vendors, transactions…
-                </span>
-                <kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground">
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onFocus={() => setSearchOpen(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      submitSearch();
+                    }
+                    if (event.key === "Escape") {
+                      setSearchOpen(false);
+                      searchInputRef.current?.blur();
+                    }
+                  }}
+                  placeholder="Search invoices, vendors, transactions…"
+                  className={cn(
+                    "h-8 w-[320px] rounded-md border border-input bg-background pl-8 pr-12 text-[13px] text-foreground",
+                    "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring/60",
+                    "[&::-webkit-search-cancel-button]:appearance-none",
+                  )}
+                  aria-label="Search invoices"
+                  aria-expanded={searchOpen}
+                  aria-controls="global-search-results"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={openSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground hover:text-foreground"
+                  title="Focus search (⌘K)"
+                >
                   ⌘K
-                </kbd>
-              </button>
+                </button>
+                <GlobalSearchDialog
+                  anchored
+                  open={searchOpen}
+                  onOpenChange={setSearchOpen}
+                  query={searchQuery}
+                  onQueryChange={setSearchQuery}
+                  onSubmit={submitSearch}
+                />
+              </div>
             ) : null}
-
-            <NotificationMenu enabled={showFinanceTools} />
 
             <div className="relative">
               <button
@@ -152,9 +208,6 @@ export function Navbar() {
         </div>
       </header>
 
-      {showFinanceTools ? (
-        <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
-      ) : null}
     </>
   );
 }

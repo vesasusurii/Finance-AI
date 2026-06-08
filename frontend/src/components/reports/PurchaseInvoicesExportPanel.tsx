@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui-finance/Button";
+import { DateTextInput } from "@/components/ui-finance/DateTextInput";
 import {
   downloadPurchaseInvoicesExcel,
   type PurchaseInvoicesExportParams,
@@ -96,24 +97,18 @@ export function PurchaseInvoicesExportPanel() {
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             Invoice date from
           </span>
-          <input
-            type="text"
+          <DateTextInput
             value={invoiceDateFrom}
-            onChange={(e) => setInvoiceDateFrom(e.target.value)}
-            placeholder="dd/mm/yyyy"
-            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
+            onChange={setInvoiceDateFrom}
           />
         </label>
         <label className="space-y-1">
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             Invoice date to
           </span>
-          <input
-            type="text"
+          <DateTextInput
             value={invoiceDateTo}
-            onChange={(e) => setInvoiceDateTo(e.target.value)}
-            placeholder="dd/mm/yyyy"
-            className="block h-9 w-full rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
+            onChange={setInvoiceDateTo}
           />
         </label>
         <label className="space-y-1">

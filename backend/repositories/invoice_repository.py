@@ -20,7 +20,7 @@ from utils.invoice_currency import (
     normalize_from_extraction,
     normalize_invoice_amounts,
 )
-from utils.normalization import normalize_invoice_number
+from utils.normalization import normalize_invoice_number, split_invoice_number
 
 logger = get_logger(__name__)
 
@@ -79,15 +79,15 @@ class InvoiceRepository:
         review_status: str,
         uploaded_by: int,
     ) -> InvoiceResponse:
-        formatted = normalize_invoice_number(data.invoice_number)
+        display, normalized = split_invoice_number(data.invoice_number)
         ext_amount = Decimal(str(data.amount)) if data.amount is not None else None
         ext_debt = Decimal(str(data.debt)) if data.debt is not None else None
         row = Invoice(
             invoice_date=_parse_date(data.invoice_date),
             name_of_company=data.name_of_company,
             address_of_company=data.address_of_company,
-            invoice_number=formatted,
-            invoice_number_normalized=formatted,
+            invoice_number=display,
+            invoice_number_normalized=normalized,
             account_details=data.account_details,
             internal_note_description=data.internal_note_description,
             client_employee_related=data.client_employee_related,
@@ -111,7 +111,7 @@ class InvoiceRepository:
             await self._session.flush()
         except IntegrityError as exc:
             if _is_duplicate_invoice_number_error(exc):
-                raise DuplicateInvoiceNumberError(formatted or "") from exc
+                raise DuplicateInvoiceNumberError(normalized or display or "") from exc
             raise
         return await self.get(row.id, owner_user_id=None)  # type: ignore[return-value]
 
@@ -296,9 +296,9 @@ class InvoiceRepository:
             return None
         payload = data.model_dump(exclude_unset=True)
         if "invoice_number" in payload:
-            formatted = normalize_invoice_number(payload["invoice_number"])
-            payload["invoice_number"] = formatted
-            row.invoice_number_normalized = formatted
+            display, normalized = split_invoice_number(payload["invoice_number"])
+            payload["invoice_number"] = display
+            row.invoice_number_normalized = normalized
 
         monetary_payload = monetary_fields_changed(payload)
         original_amount = payload.pop("original_amount", None)
@@ -311,29 +311,66 @@ class InvoiceRepository:
             setattr(row, key, value)
 
         if monetary_payload:
-            src_amount = (
-                original_amount
-                if original_amount is not None
-                else amount_in
-                if amount_in is not None
-                else row.original_amount
-            )
-            src_currency = (
+            from services.currency_conversion_service import normalize_currency_code
+
+            src_currency = normalize_currency_code(
                 original_currency
                 if original_currency is not None
                 else currency_in
                 if currency_in is not None
                 else row.original_currency or row.currency
             )
-            debt_kw: dict = {}
-            if debt_in is not None:
-                debt_kw["original_debt"] = debt_in
-            await normalize_invoice_amounts(
-                row,
-                original_amount=src_amount,
-                original_currency=src_currency,
-                **debt_kw,
+            currency_changed = (
+                original_currency is not None or currency_in is not None
+            ) and src_currency != normalize_currency_code(
+                row.original_currency or row.currency
             )
+            direct_eur_edit = (
+                amount_in is not None
+                and original_amount is None
+                and not currency_changed
+                and src_currency != "EUR"
+            )
+
+            if direct_eur_edit:
+                row.amount = amount_in
+                row.currency = "EUR"
+                if debt_in is not None:
+                    row.debt = debt_in
+                if original_currency is not None:
+                    row.original_currency = src_currency
+            else:
+                if currency_changed:
+                    src_amount = (
+                        original_amount
+                        if original_amount is not None
+                        else row.original_amount
+                    )
+                elif src_currency == "EUR":
+                    src_amount = (
+                        amount_in
+                        if amount_in is not None
+                        else row.original_amount or row.amount
+                    )
+                else:
+                    src_amount = (
+                        original_amount
+                        if original_amount is not None
+                        else row.original_amount
+                    )
+                debt_kw: dict = {}
+                if debt_in is not None and src_currency == "EUR":
+                    debt_kw["original_debt"] = debt_in
+                await normalize_invoice_amounts(
+                    row,
+                    original_amount=src_amount,
+                    original_currency=src_currency,
+                    **debt_kw,
+                )
+
+        if debt_in is not None and Decimal(str(debt_in)) <= 0:
+            row.debt = Decimal("0")
+            row.match_status = "matched"
 
         try:
             await self._session.flush()

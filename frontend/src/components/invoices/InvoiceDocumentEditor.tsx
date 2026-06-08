@@ -14,7 +14,6 @@ import {
 } from "@/api/invoices";
 import { InvoiceFilePreview } from "@/components/invoices/InvoiceFilePreview";
 import {
-  debtInOriginalCurrency,
   formatCurrency,
   formatDate,
   formatOriginalCurrencySubtitle,
@@ -41,7 +40,7 @@ type FormData = {
   address_of_company: string;
   invoice_date: string;
   invoice_number: string;
-  original_amount: string;
+  amount: string;
   debt: string;
   original_currency: string;
   account_details: string;
@@ -51,19 +50,16 @@ type FormData = {
 };
 
 function toFormData(inv: Invoice): FormData {
-  const originalAmount =
-    inv.original_amount != null ? inv.original_amount : inv.amount;
   const originalCurrency =
     inv.original_currency ?? inv.currency ?? "EUR";
-  const debtDisplay = debtInOriginalCurrency(inv);
 
   return {
     name_of_company: inv.name_of_company ?? "",
     address_of_company: inv.address_of_company ?? "",
     invoice_date: inv.invoice_date ? formatDate(inv.invoice_date) : "",
     invoice_number: inv.invoice_number ?? "",
-    original_amount: originalAmount != null ? String(originalAmount) : "",
-    debt: debtDisplay != null ? String(debtDisplay) : "",
+    amount: inv.amount != null ? String(inv.amount) : "",
+    debt: inv.debt != null ? String(inv.debt) : "",
     original_currency: originalCurrency,
     account_details: inv.account_details ?? "",
     internal_note_description: inv.internal_note_description ?? "",
@@ -121,6 +117,10 @@ export function InvoiceDocumentEditor({
     setSaveError(null);
   }, []);
 
+  const handleZeroOutDebt = useCallback(() => {
+    handleField("debt", "0");
+  }, [handleField]);
+
   const handleSave = async (): Promise<boolean> => {
     setSaving(true);
     setSaveError(null);
@@ -138,9 +138,7 @@ export function InvoiceDocumentEditor({
         address_of_company: form.address_of_company || null,
         invoice_date: invoiceDateIso,
         invoice_number: form.invoice_number || null,
-        original_amount: form.original_amount
-          ? Number(form.original_amount)
-          : null,
+        amount: form.amount ? Number(form.amount) : null,
         debt: form.debt ? Number(form.debt) : null,
         original_currency: form.original_currency || null,
         account_details: form.account_details || null,
@@ -293,12 +291,12 @@ export function InvoiceDocumentEditor({
             <div className="grid grid-cols-2 gap-3">
               <FieldRow
                 label="Bill amount"
-                value={form.original_amount}
+                value={form.amount}
                 confidence={conf.amount}
-                onChange={(v) => handleField("original_amount", v)}
+                onChange={(v) => handleField("amount", v)}
                 type="number"
                 footer={
-                  hasForeignOriginalCurrency(invoice) && invoice.amount != null
+                  hasForeignOriginalCurrency(invoice)
                     ? formatOriginalCurrencySubtitle(invoice)
                     : null
                 }
@@ -309,6 +307,22 @@ export function InvoiceDocumentEditor({
                 confidence={conf.debt}
                 onChange={(v) => handleField("debt", v)}
                 type="number"
+                hideNumberSpinners
+                inputAction={
+                  <button
+                    type="button"
+                    onClick={handleZeroOutDebt}
+                    disabled={form.debt === "0" || form.debt === ""}
+                    title="Mark as fully paid"
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                      "text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+                      "disabled:pointer-events-none disabled:opacity-40",
+                    )}
+                  >
+                    Zero out
+                  </button>
+                }
               />
             </div>
             <FieldRowSelect
@@ -493,6 +507,9 @@ function FieldRow({
   mono = false,
   placeholder,
   footer,
+  headerAction,
+  inputAction,
+  hideNumberSpinners = false,
 }: {
   label: string;
   value: string;
@@ -503,6 +520,9 @@ function FieldRow({
   mono?: boolean;
   placeholder?: string;
   footer?: string | null;
+  headerAction?: React.ReactNode;
+  inputAction?: React.ReactNode;
+  hideNumberSpinners?: boolean;
 }) {
   const tone = confidenceTone(confidence);
   const pct = confidence != null ? Math.round(confidence * 100) : null;
@@ -521,7 +541,10 @@ function FieldRow({
           {tone === "low" && <AlertTriangle className="h-3 w-3 text-warning" />}
           {label}
         </label>
-        {pct != null && <MiniConfidence pct={pct} tone={tone} />}
+        <div className="flex items-center gap-2">
+          {headerAction}
+          {pct != null && <MiniConfidence pct={pct} tone={tone} />}
+        </div>
       </div>
       {multiline ? (
         <textarea
@@ -535,17 +558,28 @@ function FieldRow({
           )}
         />
       ) : (
-        <input
-          type={type}
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          className={cn(
-            "w-full rounded border border-input bg-background px-2.5 py-1.5 text-[13px]",
-            "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring/60",
-            mono && "font-mono",
-          )}
-        />
+        <div className="relative">
+          <input
+            type={type}
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className={cn(
+              "w-full rounded border border-input bg-background px-2.5 py-1.5 text-[13px]",
+              "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring/60",
+              mono && "font-mono",
+              hideNumberSpinners &&
+                type === "number" &&
+                "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+              inputAction && "pr-[4.75rem]",
+            )}
+          />
+          {inputAction ? (
+            <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center">
+              <div className="pointer-events-auto">{inputAction}</div>
+            </div>
+          ) : null}
+        </div>
       )}
       {footer ? (
         <p className="mt-1.5 text-[11px] text-muted-foreground tabular-nums">

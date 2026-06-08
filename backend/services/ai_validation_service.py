@@ -213,10 +213,6 @@ class AIValidationService:
         data = self._apply_utility_document_rules(data)
         data = self._apply_review_rules(data)
         data["review_reasons"] = self.collect_review_reasons(data)
-
-        inv = data.get("invoice_number")
-        if inv:
-            data["invoice_number"] = normalize_invoice_number(inv) or None
         log_typed_fields(logger, "sanitize: outgoing", data)
         return ExtractionResult.model_validate(data)
 
@@ -248,12 +244,11 @@ class AIValidationService:
         cleaned = _ZERO_WIDTH.sub("", str(raw)).strip()
         if not cleaned:
             return None
-        formatted = normalize_invoice_number(cleaned)
-        if formatted is None:
+        if normalize_invoice_number(cleaned) is None:
             return None
-        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", formatted)):
+        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", cleaned)):
             return None
-        return formatted
+        return cleaned
 
     @debug_trace
     def _invoice_number_is_tax_id(self, invoice_number: str | None) -> bool:

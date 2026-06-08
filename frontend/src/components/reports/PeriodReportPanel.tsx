@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui-finance/Button";
 import { DataTable, type Column } from "@/components/ui-finance/DataTable";
+import { DateTextInput } from "@/components/ui-finance/DateTextInput";
 import { fetchPeriodReport, downloadPeriodReportExcel } from "@/api/export";
 import type { CategorySummary, PeriodReport, ReportPeriod } from "@/types/report";
 import { REPORT_PERIOD_OPTIONS } from "@/types/report";
@@ -109,12 +110,9 @@ export function PeriodReportPanel() {
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             Reference date
           </span>
-          <input
-            type="text"
+          <DateTextInput
             value={anchorDateInput}
-            onChange={(e) => setAnchorDateInput(e.target.value)}
-            placeholder="dd/mm/yyyy"
-            className="block h-9 rounded-md border border-input bg-background px-2 text-[13px] tabular-nums"
+            onChange={setAnchorDateInput}
           />
         </label>
 
