@@ -41,10 +41,59 @@ def test_mixed_separators():
 
 def test_tax_id_rejected():
     assert normalize_invoice_number("811915159") is None
+    assert normalize_invoice_number("810858475") is None
+
+
+def test_fatura_invoice_prefix_stripped():
+    assert_formatted(
+        normalize_invoice_number("FATURA - INVOICE 14465", min_digit_length=1),
+        "14465",
+    )
+
+
+def test_bank_account_rejected():
+    assert normalize_invoice_number("2011000129521812", min_digit_length=1) is None
 
 
 def test_year_rejected():
     assert normalize_invoice_number("2026") is None
+
+
+def test_short_numeric_invoice_for_extraction():
+    assert_formatted(
+        normalize_invoice_number("007", min_digit_length=1),
+        "007",
+    )
+    assert_formatted(
+        normalize_invoice_number("INVOICE 007", min_digit_length=1),
+        "007",
+    )
+
+
+def test_short_numeric_rejected_for_bank_matching_default():
+    assert normalize_invoice_number("007") is None
+
+
+def test_invoice_no_prefix_stripped():
+    assert_formatted(
+        normalize_invoice_number("Invoice No: 007", min_digit_length=1),
+        "007",
+    )
+
+
+def test_date_like_invoice_number_rejected():
+    from utils.normalization import is_date_like_invoice_number
+
+    assert is_date_like_invoice_number("2026-05-22")
+    assert is_date_like_invoice_number("20260522")
+    assert normalize_invoice_number("2026-05-22", min_digit_length=1) is None
+
+
+def test_iban_rejected():
+    from utils.normalization import is_iban_like
+
+    assert is_iban_like("XK051701010500018287")
+    assert normalize_invoice_number("XK051701010500018287", min_digit_length=1) is None
 
 
 def test_empty():

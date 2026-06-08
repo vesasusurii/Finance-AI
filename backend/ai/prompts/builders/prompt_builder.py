@@ -4,6 +4,7 @@ Prompt assembly — composes system prompts from shared and utility modules.
 No extraction logic here; only joins pre-defined text blocks in a fixed order.
 """
 
+from ai.prompts.document_types.rules import build_document_type_rules
 from ai.prompts.shared.examples import GOLDEN_EXAMPLES
 from ai.prompts.shared.field_rules import FIELD_RULES
 from ai.prompts.shared.json_schema import OUTPUT_EXAMPLE, build_json_schema
@@ -11,6 +12,7 @@ from ai.prompts.shared.multilingual_labels import MULTILINGUAL_LABELS
 from ai.prompts.shared.quality_guidance import QUALITY_GUIDANCE
 from ai.prompts.shared.scan_strategy import VISUAL_SCAN_STRATEGY
 from ai.prompts.utilities.utility_rules import build_utility_document_rules
+from core.document_categories import DocumentCategory
 
 SECTION_SEPARATOR = "\n\n---\n\n"
 
@@ -20,15 +22,36 @@ def join_sections(*sections: str) -> str:
     return SECTION_SEPARATOR.join(s for s in sections if s)
 
 
-def build_vision_system_prompt() -> str:
+def _typed_rules_section(
+    document_category: DocumentCategory | None,
+    *,
+    legacy_include_utility: bool,
+) -> str:
+    if document_category is not None:
+        return build_document_type_rules(document_category)
+    if legacy_include_utility:
+        return build_utility_document_rules()
+    return ""
+
+
+def build_vision_system_prompt(
+    document_category: DocumentCategory | None = None,
+    *,
+    legacy_include_utility: bool = True,
+) -> str:
     """Single-page / full-document Vision OCR system prompt."""
     header = """You are the invoice OCR and data extraction system for Borek Finance (Kosovo).
 You receive document images — PDF pages rasterised to JPEG, or direct JPEG/PNG uploads.
-You are the ONLY extraction system. Extract everything visually. There is no text layer available.
+You may also receive supplemental text extracted from the PDF text layer — use it to cross-check fields.
 
 Your job: read each image with maximum precision and return structured JSON.
 
 Never hardcode field values from examples — especially `invoice_number`, `amount`, and `debt`. Examples teach patterns and locations only; each document has unique values."""
+
+    typed_rules = _typed_rules_section(
+        document_category,
+        legacy_include_utility=legacy_include_utility,
+    )
 
     tail = f"{build_json_schema()}\n\n{OUTPUT_EXAMPLE}\n"
 
@@ -39,12 +62,16 @@ Never hardcode field values from examples — especially `invoice_number`, `amou
         FIELD_RULES,
         QUALITY_GUIDANCE,
         GOLDEN_EXAMPLES,
-        build_utility_document_rules(),
+        typed_rules,
         tail,
     )
 
 
-def build_batch_system_prompt() -> str:
+def build_batch_system_prompt(
+    document_category: DocumentCategory | None = None,
+    *,
+    legacy_include_utility: bool = True,
+) -> str:
     """Multi-page batch extraction system prompt."""
     header = """You are the invoice OCR system for Borek Finance.
 You are processing a PAGE RANGE of a longer multi-page invoice — not the complete document.
@@ -62,6 +89,11 @@ Your task: extract only the fields visible on the pages you receive. Set any fie
 
     tail = f"{build_json_schema()}\n\n{OUTPUT_EXAMPLE}\n"
 
+    typed_rules = _typed_rules_section(
+        document_category,
+        legacy_include_utility=legacy_include_utility,
+    )
+
     return join_sections(
         header,
         VISUAL_SCAN_STRATEGY,
@@ -69,7 +101,7 @@ Your task: extract only the fields visible on the pages you receive. Set any fie
         FIELD_RULES,
         QUALITY_GUIDANCE,
         batch_rules,
-        build_utility_document_rules(),
+        typed_rules,
         tail,
     )
 

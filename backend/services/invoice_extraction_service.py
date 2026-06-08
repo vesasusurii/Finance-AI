@@ -1,9 +1,9 @@
 """
-Invoice extraction — OpenAI Vision only (DOCS/8).
+Invoice extraction — OpenAI Vision primary with optional PDF text-layer hybrid (DOCS/8).
 
-PDFs are rasterised page-by-page for OpenAI Vision. JPEG, JPG, and PNG uploads
-are sent directly to Vision without conversion. No pdfplumber, Document AI,
-Tesseract, or other OCR providers.
+PDFs are rasterised page-by-page for OpenAI Vision. When a text layer is present,
+pdfplumber hints are merged with Vision output. JPEG, JPG, and PNG uploads are
+sent directly to Vision without conversion.
 """
 
 import asyncio
@@ -28,11 +28,20 @@ from repositories.upload_repository import UploadRepository
 from utils.content_hash import sha256_hex
 from schemas.auth import UserContext
 from schemas.invoice import ExtractionResult, UploadItemResponse
+from ai.prompts import MERGE_SYSTEM_PROMPT, VISION_SYSTEM_PROMPT
+from ai.prompts.builders.prompt_builder import (
+    build_batch_system_prompt,
+    build_vision_system_prompt,
+)
+from core.document_categories import DocumentCategory
 from services.ai_validation_service import AIValidationService
-from ai.prompts import (
-    BATCH_SYSTEM_PROMPT,
-    MERGE_SYSTEM_PROMPT,
-    VISION_SYSTEM_PROMPT,
+from services.document_classifier_service import DocumentClassifierService
+from services.field_recovery_service import FieldRecoveryService
+from services.hybrid_extraction_service import HybridExtractionService
+from services.ocr.pdf_text_extractor import (
+    TextLayerHints,
+    extract_pdf_text,
+    parse_text_layer_hints,
 )
 from services.ocr.pdf_reader import (
     pdf_is_encrypted,
@@ -63,6 +72,15 @@ _MAX_TOKENS = 2400
 
 
 @dataclass(frozen=True)
+class _ExtractionContext:
+    document_category: DocumentCategory
+    text_hints: TextLayerHints
+    supplemental_text: str | None
+    vision_system_prompt: str
+    batch_system_prompt: str
+
+
+@dataclass(frozen=True)
 class PreparedUpload:
     upload_id: int
     stored_filename: str
@@ -88,10 +106,25 @@ class InvoiceExtractionService:
         self._audit_repo = audit_repo
         self._ai_validation = ai_validation
         self._openai = openai_client
+        self._classifier = DocumentClassifierService()
+        self._hybrid = HybridExtractionService(ai_validation)
+        self._field_recovery = FieldRecoveryService(openai_client, ai_validation)
 
     # ─────────────────────────────────────────────────────────────────────
     # Public entry point
     # ─────────────────────────────────────────────────────────────────────
+
+    @debug_trace
+    async def extract_from_bytes(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        mime: str | None = None,
+    ) -> tuple[ExtractionResult, dict]:
+        """Run extraction without DB — used by eval scripts and tests."""
+        resolved_mime = mime or resolve_document_mime(filename, None)
+        return await self._extract(filename, resolved_mime, content)
 
     @debug_trace
     async def prepare_upload(
@@ -396,6 +429,77 @@ class InvoiceExtractionService:
     # Extraction routing
     # ─────────────────────────────────────────────────────────────────────
 
+    def _build_extraction_context(
+        self,
+        *,
+        filename: str,
+        content: bytes | None,
+        mime: str,
+    ) -> _ExtractionContext:
+        raw_text = ""
+        hints = TextLayerHints(raw_text="")
+        if (
+            mime == "application/pdf"
+            and content
+            and settings.openai_hybrid_text_enabled
+        ):
+            raw_text = extract_pdf_text(content)
+            hints = parse_text_layer_hints(raw_text)
+
+        category = self._classifier.classify(hints.raw_text or raw_text, filename=filename)
+        supplemental: str | None = None
+        if hints.has_usable_text:
+            supplemental = raw_text[: settings.openai_max_supplemental_chars]
+
+        logger.info(
+            "Extraction context filename=%r category=%s text_chars=%d",
+            filename,
+            category.value,
+            len(raw_text),
+        )
+
+        return _ExtractionContext(
+            document_category=category,
+            text_hints=hints,
+            supplemental_text=supplemental,
+            vision_system_prompt=build_vision_system_prompt(
+                category,
+                legacy_include_utility=False,
+            ),
+            batch_system_prompt=build_batch_system_prompt(
+                category,
+                legacy_include_utility=False,
+            ),
+        )
+
+    async def _apply_post_vision_pipeline(
+        self,
+        result: ExtractionResult,
+        *,
+        ctx: _ExtractionContext,
+        images: list[tuple[bytes, str]],
+        filename: str,
+        model: str,
+    ) -> ExtractionResult:
+        if settings.openai_hybrid_text_enabled:
+            result = self._hybrid.merge(result, ctx.text_hints)
+
+        if settings.openai_field_recovery_enabled:
+            missing = self._ai_validation.validate_required_fields(result)
+            if missing:
+                logger.info(
+                    "Field recovery triggered for %s (missing=%s)",
+                    filename,
+                    missing,
+                )
+                result = await self._field_recovery.recover_missing_fields(
+                    result,
+                    images=images,
+                    model=model,
+                    filename=filename,
+                )
+        return result
+
     @debug_trace
     async def _extract(
         self, filename: str, mime: str, content: bytes
@@ -428,21 +532,36 @@ class InvoiceExtractionService:
             if not images:
                 raise ExtractionError("PDF has no readable pages")
 
+            ctx = self._build_extraction_context(
+                filename=filename, content=content, mime=mime
+            )
             meta: dict = {
                 "pages_processed": len(images),
                 "total_pdf_pages": total_pages,
+                "document_category": ctx.document_category.value,
+                "text_layer_chars": len(ctx.text_hints.raw_text),
             }
-            try:
-                result, model_used, mode = await self._extract_pdf_pages(
-                    filename, images, total_pages=total_pages
+
+            async def _run_pdf(model: str):
+                r, m, mode = await self._extract_pdf_pages(
+                    filename,
+                    images,
+                    total_pages=total_pages,
+                    model=model,
+                    ctx=ctx,
                 )
+                r = await self._apply_post_vision_pipeline(
+                    r, ctx=ctx, images=images, filename=filename, model=m
+                )
+                return r, m, mode
+
+            try:
+                result, model_used, mode = await _run_pdf(settings.openai_model)
             except ExtractionError as exc:
                 result, model_used, mode = await self._retry_strong_after_failure(
                     filename,
                     exc,
-                    extract_fn=lambda m: self._extract_pdf_pages(
-                        filename, images, total_pages=total_pages, model=m
-                    ),
+                    extract_fn=_run_pdf,
                 )
             meta["extraction_mode"] = mode
             meta["model"] = model_used
@@ -451,12 +570,15 @@ class InvoiceExtractionService:
                 result,
                 model_used,
                 meta,
-                extract_fn=lambda m: self._extract_pdf_pages(
-                    filename, images, total_pages=total_pages, model=m
-                ),
+                extract_fn=_run_pdf,
+                images=images,
+                ctx=ctx,
             )
 
         # Direct image upload
+        ctx = self._build_extraction_context(
+            filename=filename, content=None, mime=mime
+        )
         vision_mime = "image/jpeg" if mime == "image/jpg" else mime
         images = [(content, vision_mime)]
 
@@ -468,6 +590,12 @@ class InvoiceExtractionService:
                 model=model,
                 page_range=None,
                 total_pages=1,
+                system_prompt=ctx.vision_system_prompt,
+                supplemental_text=ctx.supplemental_text,
+                document_category=ctx.document_category,
+            )
+            r = await self._apply_post_vision_pipeline(
+                r, ctx=ctx, images=images, filename=filename, model=model
             )
             return r, model, "vision_single"
 
@@ -479,9 +607,20 @@ class InvoiceExtractionService:
                 exc,
                 extract_fn=_extract_image,
             )
-        meta = {"pages_processed": 1, "extraction_mode": mode, "model": model_used}
+        meta = {
+            "pages_processed": 1,
+            "extraction_mode": mode,
+            "model": model_used,
+            "document_category": ctx.document_category.value,
+        }
         return await self._maybe_retry_strong(
-            filename, result, model_used, meta, extract_fn=_extract_image
+            filename,
+            result,
+            model_used,
+            meta,
+            extract_fn=_extract_image,
+            images=images,
+            ctx=ctx,
         )
 
     # ─────────────────────────────────────────────────────────────────────
@@ -496,10 +635,15 @@ class InvoiceExtractionService:
         *,
         total_pages: int,
         model: str | None = None,
+        ctx: _ExtractionContext | None = None,
     ) -> tuple[ExtractionResult, str, str]:
         model = model or settings.openai_model
         per_request = max(1, settings.openai_vision_pages_per_request)
         batch_size = max(1, settings.openai_vision_page_batch_size)
+        vision_prompt = ctx.vision_system_prompt if ctx else VISION_SYSTEM_PROMPT
+        batch_prompt = ctx.batch_system_prompt if ctx else build_batch_system_prompt()
+        supplemental = ctx.supplemental_text if ctx else None
+        category = ctx.document_category if ctx else None
 
         # Single request — all pages fit in one call
         if len(images) <= per_request:
@@ -510,7 +654,9 @@ class InvoiceExtractionService:
                 model=model,
                 page_range=(1, len(images)),
                 total_pages=total_pages,
-                system_prompt=VISION_SYSTEM_PROMPT,
+                system_prompt=vision_prompt,
+                supplemental_text=supplemental,
+                document_category=category,
             )
             return result, model, "vision_full_document"
 
@@ -535,8 +681,10 @@ class InvoiceExtractionService:
             model=model,
             page_range=(first_page_start, first_page_end),
             total_pages=total_pages,
-            system_prompt=BATCH_SYSTEM_PROMPT,
+            system_prompt=batch_prompt,
             context_hint=None,
+            supplemental_text=supplemental if first_page_start == 1 else None,
+            document_category=category,
         )
         partials.append(first_partial)
 
@@ -575,8 +723,9 @@ class InvoiceExtractionService:
                         model=model,
                         page_range=(page_start, page_end),
                         total_pages=total_pages,
-                        system_prompt=BATCH_SYSTEM_PROMPT,
+                        system_prompt=batch_prompt,
                         context_hint=header_context,
+                        document_category=category,
                     )
 
             # asyncio.gather preserves input order, so merge semantics remain deterministic.
@@ -650,6 +799,8 @@ class InvoiceExtractionService:
         meta: dict,
         *,
         extract_fn,
+        images: list[tuple[bytes, str]] | None = None,
+        ctx: _ExtractionContext | None = None,
     ) -> tuple[ExtractionResult, str, dict]:
         result = self._ai_validation.sanitize_and_validate(result)
         missing = self._ai_validation.validate_required_fields(result)
@@ -662,12 +813,14 @@ class InvoiceExtractionService:
         )
 
         retry_reasons: list[str] = []
-        if missing:
-            retry_reasons.append("missing_fields")
+        for field in missing:
+            retry_reasons.append(f"missing_{field}")
         if result.confidence_score < VISION_RETRY_CONFIDENCE:
-            retry_reasons.append("low_confidence")
-        if suspicious:
-            retry_reasons.append("suspicious_values")
+            retry_reasons.append(
+                f"low_confidence:{result.confidence_score:.2f}<{VISION_RETRY_CONFIDENCE}"
+            )
+        for issue in suspicious:
+            retry_reasons.append(f"suspicious:{issue}")
 
         should_retry = (
             settings.openai_strong_retry_enabled
@@ -677,13 +830,12 @@ class InvoiceExtractionService:
 
         if should_retry:
             logger.info(
-                "Retrying %s with %s (reasons=%s confidence=%.2f missing=%s)",
+                "Strong-model retry for %s: model=%s reasons=%s",
                 filename,
                 settings.openai_model_strong,
                 retry_reasons,
-                result.confidence_score,
-                missing,
             )
+            meta["strong_retry_reasons"] = retry_reasons
             retry_result, retry_model, retry_mode = await extract_fn(
                 settings.openai_model_strong
             )
@@ -721,6 +873,8 @@ class InvoiceExtractionService:
         total_pages: int,
         system_prompt: str = VISION_SYSTEM_PROMPT,
         context_hint: str | None = None,
+        supplemental_text: str | None = None,
+        document_category: DocumentCategory | None = None,
     ) -> ExtractionResult:
         if page_range:
             start, end = page_range
@@ -747,6 +901,16 @@ class InvoiceExtractionService:
             instruction_parts.append(
                 f"Context from earlier pages of this document: {context_hint}"
             )
+        if document_category is not None:
+            instruction_parts.append(
+                f"Classified document category: {document_category.value}"
+            )
+        if supplemental_text:
+            instruction_parts += [
+                "",
+                "Supplemental text extracted from PDF text layer (cross-check with images):",
+                supplemental_text[: settings.openai_max_supplemental_chars],
+            ]
         instruction_parts += [
             "",
             "Instructions:",

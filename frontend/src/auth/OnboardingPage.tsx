@@ -36,6 +36,11 @@ export function OnboardingPage() {
       return;
     }
     setResendCooldown(user.verification_resend_in_seconds ?? 0);
+    if (!user.email_verified) {
+      setNotice(
+        `A verification code was sent to ${user.email}. It expires in 10 minutes.`,
+      );
+    }
   }, [user]);
 
   useEffect(() => {
@@ -134,12 +139,12 @@ export function OnboardingPage() {
         <header className="mb-8 text-center">
           <BrandLogo className="mb-4 justify-center" imageClassName="h-14" />
           <h1 className="mt-2 text-[22px] font-semibold tracking-tight text-foreground">
-            {step === "verify" ? "Verify your email" : "Set a new password"}
+            {step === "verify" ? "Enter verification code" : "Set a new password"}
           </h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
             {step === "verify"
-              ? "Enter the 6-digit code sent to your email. Codes expire after 10 minutes. You can request a new code after 2 minutes."
-              : "Change your temporary password before verifying your email."}
+              ? "We sent a 6-digit code to your email. Codes expire after 10 minutes. You can request a new code after 2 minutes."
+              : "Change your temporary password before continuing."}
           </p>
         </header>
 

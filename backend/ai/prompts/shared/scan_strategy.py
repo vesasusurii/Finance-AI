@@ -7,7 +7,9 @@ VISUAL_SCAN_STRATEGY = """
 
 1. **Identify document type** — Is it a tax invoice, proforma, utility bill, SaaS receipt, credit note, receipt, or delivery note? This determines where fields appear.
 2. **Header zone (top 25%)** — Issuer name, logo, address, contact. This is always `name_of_company` + `address_of_company`.
+   On Albanian `FATURA - INVOICE` layouts the buyer block is often at the very top — skip it; read the supplier name from the title area instead.
 3. **Reference block** — Usually top-right or below header: invoice number, invoice date, due date.
+   On freelancer/timesheet invoices the title line may read `INVOICE 007` with the date beside it — extract the number after INVOICE (short numeric refs like `007` are valid).
 4. **Bill-to / client block** — Look for Klienti, Customer, Bill to, Ship to. This block identifies the CLIENT — never use this as `name_of_company`.
 5. **Line items table (middle)** — Products/services and their unit prices. Summarise briefly for `internal_note_description`.
 6. **Totals block (bottom of line items)** — Sub-total, VAT/TVSH, Grand total, Për pagesë / For payment / Amount due. Extract the FINAL payable amount (see Amount rules).

@@ -13,6 +13,8 @@ GOLDEN_EXAMPLES = """
 | Regional water bill        | **Full** footer ref above barcode (`^F[0-9]+[A-Z]?$`, 12+ digits) | Bill Amount row | Truncated header / Customer ID / NUI ≠ invoice # |
 | Pastrimi / KRM waste       | **Nr.-No.-Br.** in header | **Total Due** / Gjithsej borxhi | Monthly total / Për pagesë ≠ amount when Total Due shown |
 | Scanned bilingual services | Labelled invoice ref in header block | Për pagesë row | Sub-total is NOT amount |
+| Albanian retail / catering | `FATURA - INVOICE ####` title line | **Vlera me TVSH** / Amount with VAT | Buyer fiscal ≠ invoice #; pa TVSH ≠ amount |
+| Freelancer / timesheet     | Title `INVOICE ###` on page 1 (e.g. `007`) | Total Amount Due row | IBAN / account ≠ invoice #; hours × rate ≠ total |
 | Trilingual utility bill    | E-payment / platform ref (not header Nr.) | Për pagesë row | Total Due with old debt is NOT amount |
 | SaaS / retail / German     | Belegnummer / invoice ref in header block | Grand total on last page | Line items ≠ amount |
 
@@ -62,6 +64,15 @@ Document: SCHMIEDER it-solutions GmbH, Rechnung, Seite 1/2
 - `client_employee_related`: **Emri i konsumatorit / Customer name** line
 - `amount`: **Totali i faturës / Bill Amount** row only
 - `debt`: **Borxhi Total / Total Debt / Ukupan Dug** row only
+
+### Albanian bilingual retail invoice — field map (sample layout)
+- Buyer block top: **Detajet e blerësit / Buyer detail** (e.g. Borek Solutions) — this is the **client**, NOT `name_of_company`
+- `name_of_company`: supplier beside `FATURA - INVOICE` title (e.g. Sarajeva Steak House SH.P.K.)
+- `invoice_number`: number on `FATURA - INVOICE ####` line or **Numri i faturës / Invoice number** (NOT Numri Fiskal, NOT bank account)
+- `invoice_date`: **Data e faturës / Invoice date**
+- `amount`: **Vlera me TVSH / Amount with VAT** or rightmost total in **Gjithësejt vlerat / Total's** row (NOT Vlera pa TVSH)
+- `client_employee_related`: **Përshkrimi / Description** contact line if present
+- `account_details`: all accounts from **Bankat / Banks** block (TEB, PCB, etc.)
 
 ### Pastrimi / KRM waste bill — field map (sample layout)
 - `document_type`: waste_pastrimi

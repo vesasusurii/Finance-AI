@@ -10,6 +10,7 @@ FIELD_RULES = """
 - Use the legal business name exactly as printed (including "SH.P.K.", "LLC", "GmbH", "d.o.o.", "S.R.L.").
 - If there is a trade name and a legal name on the same line, prefer the legal name.
 - NEVER use: Klienti, Customer, Bill to, Ship to, Blerësi, Klijent — those are the client.
+- **Albanian bilingual retail invoices (`FATURA - INVOICE`):** the **buyer** often appears first under **Detajet e blerësit / Buyer detail** (e.g. Borek Solutions). The **issuer/supplier** is the company name beside or below the `FATURA - INVOICE` title (e.g. Sarajeva Steak House SH.P.K.). Use the supplier, never the buyer block.
 - For SaaS receipts with only a logo: read the company name from the logo area.
 
 ### address_of_company  ← ISSUER address
@@ -23,13 +24,15 @@ FIELD_RULES = """
   If the city is partially visible or uncertain → copy what you can read and set needs_review true.
 
 ### invoice_number  ← EXACT reference from document, never a tax/registration ID
-- **Output format:** copy **exactly as printed** on the document — keep `/`, `-`, spaces, and letter case if shown (e.g. `1/2026/0048`, `3807F638-0011`, `INV-2024-001`). Do not strip or reformat separators; matching normalization happens in software later.
+- **Output format:** copy **exactly as printed** on the document — keep `/`, `-`, spaces, and letter case if shown (e.g. `1/2026/0048`, `3807F638-0011`, `INV-2024-001`, `INVOICE 007`). Do not strip or reformat separators; matching normalization happens in software later.
 - Read the value printed on **this** document — never reuse numbers from examples or prior extractions.
 - **Generic invoices:** Invoice Ref, Fatura Nr., Belegnummer, Bill No., etc.
+- **Freelancer / timesheet invoices:** Top title line `INVOICE ###` or `Invoice ###` with date beside it — the number **immediately after** INVOICE is the reference (may be short, e.g. `007`). Also check `Invoice No.` / `Nr.` in the header block. Short numeric refs are valid — do not skip them.
+- **Albanian bilingual retail (`FATURA - INVOICE ####`):** invoice number is the numeric value on the title line after INVOICE (e.g. `14465`). Also check **Numri i faturës / Invoice number** in the header. NEVER use **Numri Fiskal / Fiscal Number**, **Numri i Biznesit / Business No**, or bank account numbers from the Banks block.
 - **KESCO (`electricity_kesco`):** use utility rules — **Nr. Ref.** near bill end (alphanumeric pattern shape `1900……B`, value varies).
 - **Water (`water_regional`):** use **CRITICAL water bill rules** — footer payment ref above barcode (`^F[0-9]+[A-Z]?$`, 12+ digits). Never truncated header Bill number.
 - **Pastrimi waste (`waste_pastrimi`):** use **Total Due** / **Gjithsej borxhi** for `amount` (includes prior debt) — not Monthly Invoice Total or Për pagesë alone.
-- NEVER use as invoice_number: NUI, UNI, NRF, NIPT, VAT No., customer IDs (Shifra e konsumatorit), meter numbers, bank account numbers.
+- NEVER use as invoice_number: NUI, UNI, NRF, NIPT, VAT No., customer IDs (Shifra e konsumatorit), meter numbers, bank account numbers, IBANs (e.g. `XK05…`).
 - If genuinely not found → null (do not invent).
 
 ### invoice_date  ← date the invoice was issued
@@ -54,7 +57,7 @@ FIELD_RULES = """
 **Decision tree (generic documents only) — follow in order:**
 1. Is there a line labelled "Për pagesë" / "For payment" / "Za naplatu" / "Zahlbetrag" / "Zu zahlen"?  
    → Use that value. STOP. (This excludes prior-period debt on utility bills.)
-2. Is there a line labelled "Bruttobetrag" / "Gesamtbetrag inkl. MwSt" / "Total Amount Due" / "Amount due" / "Grand total" / "Total invoice" / "Gjithsej me TVSH"?  
+2. Is there a line labelled "Bruttobetrag" / "Gesamtbetrag inkl. MwSt" / "Total Amount Due" / "Amount due" / "Grand total" / "Total invoice" / "Gjithsej me TVSH" / **"Vlera me TVSH" / "Amount with VAT"** / **"Gjithësejt vlerat" / "Total's"** (use the **with-VAT** column)?  
    → Use that value. STOP.
 3. Is there a single "Total" / "Gesamtbetrag" line at the bottom of the totals block?  
    → Use that. STOP.
@@ -68,7 +71,8 @@ the totals are on a later page. Set amount to null — do NOT pick the largest l
 Wait until you can read the totals page.
 
 **Do NOT use:**
-- Nettobetrag / Sub-total / Nëntotal / Net amount (before VAT).
+- Nettobetrag / Sub-total / Nëntotal / Net amount (before VAT) / **Vlera pa TVSH / Amount without VAT**.
+- **Vlera e TVSH'së / Amount of VAT** (the VAT component alone).
 - "Total Due" / "Gjithsej borgji" when a separate "Për pagesë" line exists — **except** `waste_pastrimi` bills where Total Due **is** the payment amount.
 - Individual line item prices (Gesamt € per row — these are per-item totals, NOT the invoice total).
 - Any number that appears in the line-items table rows.

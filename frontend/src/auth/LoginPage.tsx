@@ -5,20 +5,11 @@ import { isAdminRole, needsOnboarding } from "@/types/auth";
 import { Button } from "@/components/ui-finance/Button";
 import { BrandLogo } from "@/components/shell/BrandLogo";
 
-/** Matches backend/scripts/seed_users.py — remove hint before production. */
-const DEV_FINANCE_EMAIL = "finance@borek.com";
-const DEV_ADMIN_EMAIL = "admin@borek.com";
-const DEV_PASSWORD = "changeme";
-
-const showDevLoginHint =
-  import.meta.env.VITE_SHOW_DEV_LOGIN_HINT !== "false" &&
-  (import.meta.env.DEV || import.meta.env.VITE_SHOW_DEV_LOGIN_HINT === "true");
-
 export function LoginPage() {
   const { user, login, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(showDevLoginHint ? DEV_FINANCE_EMAIL : "");
-  const [password, setPassword] = useState(showDevLoginHint ? DEV_PASSWORD : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -57,26 +48,6 @@ export function LoginPage() {
             Internal operations platform for Borek Solutions Group
           </p>
         </header>
-
-        {showDevLoginHint && (
-          <div
-            className="mb-4 rounded-lg border border-border bg-surface-muted px-4 py-3 text-[13px] text-muted-foreground"
-            role="note"
-          >
-            <p className="font-medium text-foreground">Dev login (temporary)</p>
-            <p className="mt-1">
-              Finance:{" "}
-              <span className="font-mono text-foreground">{DEV_FINANCE_EMAIL}</span>
-              <br />
-              Admin:{" "}
-              <span className="font-mono text-foreground">{DEV_ADMIN_EMAIL}</span>
-              <br />
-              Password:{" "}
-              <span className="font-mono text-foreground">{DEV_PASSWORD}</span>
-            </p>
-            <p className="mt-2 text-[11px]">Hide: set VITE_SHOW_DEV_LOGIN_HINT=false in .env</p>
-          </div>
-        )}
 
         <form
           className="rounded-lg border border-border bg-card p-6 shadow-sm"
