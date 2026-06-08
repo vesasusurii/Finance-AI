@@ -7,7 +7,13 @@ from datetime import datetime
 
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from schemas.invoice import ExtractionResult
-from utils.normalization import is_tax_or_client_id, normalize_invoice_number
+from utils.normalization import (
+    is_bank_account_number,
+    is_date_like_invoice_number,
+    is_iban_like,
+    is_tax_or_client_id,
+    normalize_invoice_number,
+)
 
 logger = get_logger(__name__)
 # At or above this score with no review flags: auto-save (pending).
@@ -44,8 +50,13 @@ _RE_NUI_NIPT = re.compile(r"^810\d{6,}$")
 _RE_WATER_DATE_LIKE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
 
 # Tax / registration IDs commonly misread as invoice numbers
-_TAX_ID_PATTERN = re.compile(r"^(811\d{6}|330\d{6,})$")
+_TAX_ID_PATTERN = re.compile(r"^(81[01]\d{6}|330\d{6,})$")
+# IBAN-shaped strings (e.g. XK051701010500018287) must not become invoice_number
+_RE_IBAN_LIKE = re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$")
 _ZERO_WIDTH = re.compile(r"[\u200b\u200c\u200d\ufeff\u00ad]")
+
+# Short numeric refs (007, 42) are valid on invoices; bank comments keep min length 4
+_EXTRACTED_INVOICE_MIN_DIGITS = 1
 
 # Amounts that are suspiciously round and very small (likely a sub-total or tax line)
 _SUSPICIOUS_ROUND_AMOUNT = re.compile(r"^\d+\.00$")
@@ -244,9 +255,19 @@ class AIValidationService:
         cleaned = _ZERO_WIDTH.sub("", str(raw)).strip()
         if not cleaned:
             return None
-        if normalize_invoice_number(cleaned) is None:
+        formatted = normalize_invoice_number(
+            cleaned,
+            min_digit_length=_EXTRACTED_INVOICE_MIN_DIGITS,
+        )
+        if formatted is None:
             return None
-        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", cleaned)):
+        if is_iban_like(formatted) or _RE_IBAN_LIKE.fullmatch(formatted):
+            return None
+        if is_bank_account_number(formatted):
+            return None
+        if is_date_like_invoice_number(formatted):
+            return None
+        if _TAX_ID_PATTERN.match(re.sub(r"[^0-9]", "", formatted)):
             return None
         return cleaned
 

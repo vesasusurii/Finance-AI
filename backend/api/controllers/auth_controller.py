@@ -136,6 +136,14 @@ class AuthController:
 
     async def login(self, request: LoginRequest, response: Response) -> LoginResponse:
         user = await self._authenticate(request.email, request.password)
+        if not user.must_change_password:
+            verification_code = generate_verification_code()
+            user = await self._user_repo.set_email_verification_code(
+                user,
+                code_hash=hash_verification_code(verification_code),
+                expires_at=verification_expires_at(),
+            )
+            send_verification_code(user.email, verification_code)
         set_auth_cookies(response, user=user)
         return _login_response(user)
 

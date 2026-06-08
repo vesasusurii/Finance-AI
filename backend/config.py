@@ -59,7 +59,16 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_REASONING_MAX_COMPLETION_TOKENS",
     )
     openai_strong_retry_enabled: bool = Field(
-        default=False, validation_alias="OPENAI_STRONG_RETRY_ENABLED"
+        default=True, validation_alias="OPENAI_STRONG_RETRY_ENABLED"
+    )
+    openai_hybrid_text_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_HYBRID_TEXT_ENABLED"
+    )
+    openai_field_recovery_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_FIELD_RECOVERY_ENABLED"
+    )
+    extraction_eval_baseline_accuracy: float = Field(
+        default=1.0, validation_alias="EXTRACTION_EVAL_BASELINE_ACCURACY"
     )
     openai_max_pdf_pages: int = Field(
         default=25, validation_alias="OPENAI_MAX_PDF_PAGES"

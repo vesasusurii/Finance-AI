@@ -1,0 +1,4 @@
+{
+  "min_accuracy": 1.0,
+  "description": "All critical fields must match expected fixtures when PDFs are present."
+}

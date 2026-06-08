@@ -17,7 +17,11 @@ MULTILINGUAL_LABELS = """
 | Sub-total              | Nëntotal              | Sub-total / Net                | Iznos bez PDV-a      | **Nettobetrag** / Summe netto |
 | VAT                    | TVSH                  | VAT / Tax                      | PDV                  | **MwSt** / USt / Umsatzsteuer |
 | Total (may incl. old debt) | Gjithsej borgji / Total Due | Total due / Balance due  | Ukupno duguje    | Gesamtbetrag        |
-| Grand total w/ VAT     | Gjithsej me TVSH      | Total incl. VAT / Grand total  | Ukupno sa PDV-om     | **Bruttobetrag** / Gesamtbetrag inkl. MwSt |
+| Grand total w/ VAT     | Gjithsej me TVSH / **Vlera me TVSH** / **Gjithësejt vlerat** | Total incl. VAT / **Amount with VAT** / Total's | Ukupno sa PDV-om     | **Bruttobetrag** / Gesamtbetrag inkl. MwSt |
+| Sub-total (no VAT)     | **Vlera pa TVSH**     | Amount without VAT             | Iznos bez PDV-a      | Nettobetrag         |
+| VAT component only     | **Vlera e TVSH'së**   | Amount of VAT                  | PDV                  | MwSt / USt          |
+| Buyer block            | **Detajet e blerësit** / Blerësi | Buyer detail / Bill to   | Kupac                | Rechnungsempfänger  |
+| Fiscal / tax ID        | **Numri Fiskal** / NUI / NRF | Fiscal Number / Business No | PIB              | Steuernummer ← NEVER invoice# |
 | Bank account / IBAN    | Xhirollogaria / IBAN  | Bank account / IBAN            | Žiro račun / IBAN    | **Bankverbindung** / IBAN |
 | Tax ID (never invoice#) | NUI / UNI / NRF / NIPT | VAT No. / EIN / Tax Reg.    | PIB / Matični broj   | **Steuernummer** / USt-IdNr. |
 | Payment reference      | Referenca e pagesës   | Payment ref / Reference no.    | Poziv na broj        | Verwendungszweck    |
