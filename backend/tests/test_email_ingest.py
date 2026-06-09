@@ -89,14 +89,17 @@ def test_verify_email_ingest_user_rejects_bad_key(monkeypatch):
 
     repo = MagicMock()
     repo.find_by_email = AsyncMock()
+    audit = MagicMock()
+    audit.log = AsyncMock()
 
     async def _run():
         with pytest.raises(HTTPException) as exc:
             await verify_email_ingest_user(
                 x_email_ingest_key="wrong",
-                x_api_key=None,
                 user_repo=repo,
+                audit_repo=audit,
             )
         assert exc.value.status_code == 401
+        audit.log.assert_awaited_once()
 
     asyncio.run(_run())

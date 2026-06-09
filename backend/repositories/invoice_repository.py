@@ -21,6 +21,7 @@ from utils.invoice_currency import (
     normalize_invoice_amounts,
 )
 from utils.normalization import normalize_invoice_number, split_invoice_number
+from utils.search_escape import escape_ilike_pattern
 
 logger = get_logger(__name__)
 
@@ -193,24 +194,28 @@ class InvoiceRepository:
                 Invoice.invoice_date <= filters["invoice_date_to"]
             )
         if filters.get("company"):
-            pattern = f"%{filters['company']}%"
-            query = query.where(Invoice.name_of_company.ilike(pattern))
-            count_query = count_query.where(Invoice.name_of_company.ilike(pattern))
+            pattern = f"%{escape_ilike_pattern(str(filters['company']))}%"
+            query = query.where(Invoice.name_of_company.ilike(pattern, escape="\\"))
+            count_query = count_query.where(
+                Invoice.name_of_company.ilike(pattern, escape="\\")
+            )
         if filters.get("search"):
             term = str(filters["search"]).strip()
             if term:
-                pattern = f"%{term}%"
+                pattern = f"%{escape_ilike_pattern(term)}%"
                 text_filter = or_(
-                    Invoice.name_of_company.ilike(pattern),
-                    Invoice.invoice_number.ilike(pattern),
-                    Invoice.internal_note_description.ilike(pattern),
+                    Invoice.name_of_company.ilike(pattern, escape="\\"),
+                    Invoice.invoice_number.ilike(pattern, escape="\\"),
+                    Invoice.internal_note_description.ilike(pattern, escape="\\"),
                 )
                 query = query.where(text_filter)
                 count_query = count_query.where(text_filter)
         if filters.get("category"):
-            pattern = f"%{filters['category']}%"
-            query = query.where(Invoice.category.ilike(pattern))
-            count_query = count_query.where(Invoice.category.ilike(pattern))
+            pattern = f"%{escape_ilike_pattern(str(filters['category']))}%"
+            query = query.where(Invoice.category.ilike(pattern, escape="\\"))
+            count_query = count_query.where(
+                Invoice.category.ilike(pattern, escape="\\")
+            )
         if filters.get("upload_source"):
             source = str(filters["upload_source"])
             query = query.join(

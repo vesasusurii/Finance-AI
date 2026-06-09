@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { createUser, deleteUser, listUsers } from "../api/users";
+import { createUser, deleteUser, listUsers, resetUserPassword } from "../api/users";
 import type { AdminUser, CreateUserRequest } from "../types/user";
 
 export function useAdminUsers() {
@@ -45,5 +45,14 @@ export function useAdminUsers() {
     [reload],
   );
 
-  return { items, total, loading, error, reload, create, remove };
+  const resetPassword = useCallback(
+    async (userId: number, password: string): Promise<AdminUser> => {
+      const user = await resetUserPassword(userId, password);
+      await reload();
+      return user;
+    },
+    [reload],
+  );
+
+  return { items, total, loading, error, reload, create, remove, resetPassword };
 }

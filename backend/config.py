@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -202,6 +202,65 @@ class Settings(BaseSettings):
     debug_max_value_chars: int = Field(
         default=400, validation_alias="DEBUG_MAX_VALUE_CHARS"
     )
+
+    log_verification_codes: bool = Field(
+        default=False, validation_alias="LOG_VERIFICATION_CODES"
+    )
+
+    # Auth rate limits (sliding window via Redis)
+    auth_login_rate_limit: int = Field(default=5, validation_alias="AUTH_LOGIN_RATE_LIMIT")
+    auth_login_rate_window_seconds: int = Field(
+        default=60, validation_alias="AUTH_LOGIN_RATE_WINDOW_SECONDS"
+    )
+    auth_verify_rate_limit: int = Field(
+        default=5, validation_alias="AUTH_VERIFY_RATE_LIMIT"
+    )
+    auth_verify_rate_window_seconds: int = Field(
+        default=600, validation_alias="AUTH_VERIFY_RATE_WINDOW_SECONDS"
+    )
+    auth_verify_max_attempts: int = Field(
+        default=5, validation_alias="AUTH_VERIFY_MAX_ATTEMPTS"
+    )
+    auth_resend_ip_rate_limit: int = Field(
+        default=3, validation_alias="AUTH_RESEND_IP_RATE_LIMIT"
+    )
+    auth_resend_ip_rate_window_seconds: int = Field(
+        default=3600, validation_alias="AUTH_RESEND_IP_RATE_WINDOW_SECONDS"
+    )
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.environment in ("staging", "production")
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        if not self.is_production_like:
+            return self
+        weak_jwt = (
+            len(self.jwt_secret) < 32
+            or "change_me" in self.jwt_secret.lower()
+            or "dev_jwt" in self.jwt_secret.lower()
+        )
+        if weak_jwt:
+            raise ValueError("JWT_SECRET is too weak for staging/production")
+        if not self.cookie_secure:
+            raise ValueError("COOKIE_SECURE must be true in staging/production")
+        if self.debug:
+            raise ValueError("DEBUG must be false in staging/production")
+        return self
+
+
+def validate_settings_on_startup() -> list[str]:
+    """Return non-fatal warnings for local misconfiguration."""
+    warnings: list[str] = []
+    if settings.environment == "local":
+        if len(settings.jwt_secret) < 32:
+            warnings.append("JWT_SECRET is shorter than 32 characters")
+        if "change_me" in settings.jwt_secret.lower():
+            warnings.append("JWT_SECRET still uses a placeholder value")
+        if settings.debug:
+            warnings.append("DEBUG logging is enabled")
+    return warnings
 
 
 settings = Settings()

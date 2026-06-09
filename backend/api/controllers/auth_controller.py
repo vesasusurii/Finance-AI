@@ -4,9 +4,17 @@ import bcrypt
 from fastapi import HTTPException, Request, Response, status
 
 from config import settings
+from core.auth_rate_limiter import (
+    check_verification_attempts,
+    check_verify_rate_limit,
+    clear_verification_attempts,
+    record_verification_failure,
+)
 from core.debug_logger import debug_trace, get_logger
 from core.roles import is_valid_role
+from core.token_version_cache import cache_token_version
 from models.user import User
+from repositories.audit_repository import AuditRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import (
     ChangePasswordRequest,
@@ -28,7 +36,16 @@ from services.jwt_service import (
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
+    get_refresh_token_version,
 )
+from services.refresh_token_store import (
+    consume_refresh_jti,
+    new_refresh_jti,
+    revoke_all_refresh_tokens,
+    store_refresh_jti,
+)
+
+logger = get_logger(__name__)
 
 
 def _cookie_params() -> dict:
@@ -62,12 +79,16 @@ def _login_response(user: User) -> LoginResponse:
 
 def set_auth_cookies(response: Response, *, user: User) -> None:
     email_verified, must_change_password = _user_auth_flags(user)
+    token_version = int(user.token_version or 1)
+    cache_token_version(user.id, token_version)
+    jti = new_refresh_jti()
     access = create_access_token(
         user_id=user.id,
         email=user.email,
         role=user.role,
         email_verified=email_verified,
         must_change_password=must_change_password,
+        token_version=token_version,
     )
     refresh = create_refresh_token(
         user_id=user.id,
@@ -75,7 +96,10 @@ def set_auth_cookies(response: Response, *, user: User) -> None:
         role=user.role,
         email_verified=email_verified,
         must_change_password=must_change_password,
+        token_version=token_version,
+        jti=jti,
     )
+    store_refresh_jti(user.id, jti)
     params = _cookie_params()
     response.set_cookie(
         key="access_token",
@@ -96,12 +120,34 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(key="access_token", **params)
     response.delete_cookie(key="refresh_token", **params)
 
-logger = get_logger(__name__)
-
 
 class AuthController:
-    def __init__(self, user_repo: UserRepository) -> None:
+    def __init__(
+        self,
+        user_repo: UserRepository,
+        audit_repo: AuditRepository | None = None,
+    ) -> None:
         self._user_repo = user_repo
+        self._audit_repo = audit_repo
+
+    async def _audit_security(
+        self,
+        user_id: int | None,
+        action: str,
+        *,
+        entity_id: int = 0,
+        after: dict | None = None,
+    ) -> None:
+        if self._audit_repo is None:
+            return
+        await self._audit_repo.log(
+            user_id,
+            action,
+            "user",
+            entity_id,
+            None,
+            after,
+        )
 
     async def _authenticate(self, email: str, password: str) -> User:
         user = await self._user_repo.find_by_email(email)
@@ -109,6 +155,12 @@ class AuthController:
             password.encode("utf-8"),
             user.password_hash.encode("utf-8"),
         ):
+            await self._audit_security(
+                user.id if user else None,
+                "login_failed",
+                entity_id=user.id if user else 0,
+                after={"email": email.lower()},
+            )
             raise HTTPException(
                 status_code=401,
                 detail={
@@ -117,6 +169,12 @@ class AuthController:
                 },
             )
         if not user.is_active:
+            await self._audit_security(
+                user.id,
+                "login_failed",
+                entity_id=user.id,
+                after={"reason": "account_disabled"},
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -144,7 +202,13 @@ class AuthController:
                 expires_at=verification_expires_at(),
             )
             send_verification_code(user.email, verification_code)
+        revoke_all_refresh_tokens(user.id)
         set_auth_cookies(response, user=user)
+        await self._audit_security(
+            user.id,
+            "login_success",
+            entity_id=user.id,
+        )
         return _login_response(user)
 
     async def refresh(self, request: Request, response: Response) -> LoginResponse:
@@ -158,8 +222,18 @@ class AuthController:
                 },
             )
 
-        ctx = decode_refresh_token(token)
-        if ctx is None:
+        ctx, jti = decode_refresh_token(token)
+        if ctx is None or not jti:
+            clear_auth_cookies(response)
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "invalid_refresh",
+                    "message": "Session expired. Please sign in again.",
+                },
+            )
+
+        if not consume_refresh_jti(ctx.user_id, jti):
             clear_auth_cookies(response)
             raise HTTPException(
                 status_code=401,
@@ -180,11 +254,27 @@ class AuthController:
                 },
             )
 
+        jwt_version = get_refresh_token_version(token)
+        if jwt_version is not None and jwt_version != int(user.token_version or 1):
+            clear_auth_cookies(response)
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "invalid_refresh",
+                    "message": "Session expired. Please sign in again.",
+                },
+            )
+
         set_auth_cookies(response, user=user)
         return _login_response(user)
 
     @debug_trace
-    async def logout(self, response: Response) -> dict:
+    async def logout(self, request: Request, response: Response) -> dict:
+        token = request.cookies.get("refresh_token")
+        if token:
+            ctx, _jti = decode_refresh_token(token)
+            if ctx is not None:
+                revoke_all_refresh_tokens(ctx.user_id)
         clear_auth_cookies(response)
         return {"message": "Logged out."}
 
@@ -207,6 +297,9 @@ class AuthController:
         body: VerifyEmailRequest,
         response: Response,
     ) -> LoginResponse:
+        check_verify_rate_limit(user_ctx.user_id)
+        check_verification_attempts(user_ctx.user_id)
+
         user = await self._user_repo.get(user_ctx.user_id)
         if user is None or not user.is_active:
             raise HTTPException(
@@ -228,6 +321,7 @@ class AuthController:
             )
 
         if not verify_code(user, body.code):
+            record_verification_failure(user_ctx.user_id)
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -239,6 +333,7 @@ class AuthController:
                 },
             )
 
+        clear_verification_attempts(user_ctx.user_id)
         user = await self._user_repo.mark_email_verified(user)
         set_auth_cookies(response, user=user)
         return _login_response(user)
@@ -285,6 +380,7 @@ class AuthController:
             code_hash=hash_verification_code(verification_code),
             expires_at=verification_expires_at(),
         )
+        clear_verification_attempts(user.id)
         send_verification_code(user.email, verification_code)
         set_auth_cookies(response, user=user)
         return _login_response(user)
@@ -337,6 +433,10 @@ class AuthController:
             bcrypt.gensalt(),
         ).decode("utf-8")
         user = await self._user_repo.update_password(user, password_hash)
+        await self._user_repo.bump_token_version(user.id)
+        user = await self._user_repo.get(user.id)
+        assert user is not None
+        revoke_all_refresh_tokens(user.id)
         verification_code = generate_verification_code()
         user = await self._user_repo.set_email_verification_code(
             user,

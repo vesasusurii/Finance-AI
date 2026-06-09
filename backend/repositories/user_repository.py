@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select, update
+
+from core.token_version_cache import cache_token_version, invalidate_token_version_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.audit_log import AuditLog
@@ -25,6 +27,22 @@ class UserRepository:
 
     async def get(self, user_id: int) -> User | None:
         return await self._session.get(User, user_id)
+
+    async def get_token_version(self, user_id: int) -> int | None:
+        user = await self.get(user_id)
+        if user is None or not user.is_active:
+            return None
+        return int(user.token_version)
+
+    async def bump_token_version(self, user_id: int) -> int | None:
+        user = await self.get(user_id)
+        if user is None:
+            return None
+        user.token_version = int(user.token_version or 1) + 1
+        await self._session.flush()
+        invalidate_token_version_cache(user_id)
+        cache_token_version(user_id, user.token_version)
+        return user.token_version
 
     async def list_all(self) -> list[User]:
         result = await self._session.execute(
@@ -68,6 +86,13 @@ class UserRepository:
     async def update_password(self, user: User, password_hash: str) -> User:
         user.password_hash = password_hash
         user.must_change_password = False
+        await self._session.flush()
+        await self._session.refresh(user)
+        return user
+
+    async def reset_password(self, user: User, password_hash: str) -> User:
+        user.password_hash = password_hash
+        user.must_change_password = True
         await self._session.flush()
         await self._session.refresh(user)
         return user

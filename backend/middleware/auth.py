@@ -2,10 +2,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from config import settings
-from core.debug_logger import debug_trace, get_logger
+from core.debug_logger import get_logger
+from core.token_version_check import token_version_valid
 from schemas.auth import UserContext
-from services.jwt_service import decode_access_token
+from services.jwt_service import decode_access_token, get_access_token_version
 
 logger = get_logger(__name__)
 
@@ -16,7 +16,6 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/refresh",
         "/api/health",
         "/api/ready",
-        # API-key auth via verify_email_ingest_user (not session cookie)
         "/api/invoices/email-upload",
     }
 )
@@ -55,8 +54,18 @@ def _unauthorized(
     )
 
 
-def _decode_access(token: str) -> tuple[UserContext | None, str | None]:
-    return decode_access_token(token)
+async def _validate_access_token(
+    token: str,
+) -> tuple[UserContext | None, str | None]:
+    user, err = decode_access_token(token)
+    if err or user is None:
+        return user, err
+    jwt_version = get_access_token_version(token)
+    if jwt_version is None:
+        return None, "invalid_token"
+    if not await token_version_valid(user.user_id, jwt_version):
+        return None, "invalid_token"
+    return user, None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -68,7 +77,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if not token:
                 request.state.user = None
             else:
-                user, err = _decode_access(token)
+                user, err = await _validate_access_token(token)
                 if err == "token_expired":
                     return _unauthorized(
                         error="token_expired",
@@ -86,7 +95,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             token = request.cookies.get("access_token")
             if not token:
                 return _unauthorized()
-            user, err = _decode_access(token)
+            user, err = await _validate_access_token(token)
             if err == "token_expired":
                 return _unauthorized(
                     error="token_expired",

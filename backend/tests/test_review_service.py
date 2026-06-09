@@ -74,7 +74,7 @@ async def test_list_open_enriches_invoice_and_bank(service: ReviewService):
 
     assert result.total == 1
     assert len(result.items) == 1
-    service._invoice_repo.get.assert_awaited_once_with(5)
+    service._invoice_repo.get.assert_awaited_once_with(5, owner_user_id=None)
     service._bank_txn_repo.get.assert_awaited_once_with(6)
 
 
@@ -105,6 +105,7 @@ async def test_list_open_skips_enrich_when_disabled(service: ReviewService):
 async def test_approve_extraction_sets_invoice_approved(service: ReviewService):
     task = _open_extraction_task()
     service._review_repo.get.return_value = task
+    service._review_repo.is_visible_to_user.return_value = True
     service._invoice_repo.approve.return_value = MagicMock(spec=InvoiceResponse)
     service._review_repo.resolve.return_value = task
 
@@ -112,7 +113,7 @@ async def test_approve_extraction_sets_invoice_approved(service: ReviewService):
 
     assert result.status == "approved"
     service._invoice_repo.approve.assert_awaited_once_with(
-        5, paid_by="f@b.com"
+        5, owner_user_id=1, paid_by="f@b.com"
     )
     service._review_repo.resolve.assert_awaited_once()
     assert service._audit_repo.log.await_count == 2
@@ -122,6 +123,7 @@ async def test_approve_extraction_sets_invoice_approved(service: ReviewService):
 async def test_reject_bank_match_resolves_and_audits(service: ReviewService):
     task = _open_bank_task()
     service._review_repo.get.return_value = task
+    service._review_repo.is_visible_to_user.return_value = True
     service._review_repo.resolve.return_value = task
 
     result = await service.reject(20, "Not our invoice", _user())
@@ -143,7 +145,46 @@ async def test_approve_already_resolved_raises_409(service: ReviewService):
     task = _open_extraction_task()
     task.status = "approved"
     service._review_repo.get.return_value = task
+    service._review_repo.is_visible_to_user.return_value = True
 
     with pytest.raises(HTTPException) as exc:
         await service.approve(10, _user())
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_approve_invisible_task_raises_404(service: ReviewService):
+    task = _open_extraction_task()
+    service._review_repo.get.return_value = task
+    service._review_repo.is_visible_to_user.return_value = False
+
+    with pytest.raises(HTTPException) as exc:
+        await service.approve(10, _user())
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reject_invisible_task_raises_404(service: ReviewService):
+    task = _open_bank_task()
+    service._review_repo.get.return_value = task
+    service._review_repo.is_visible_to_user.return_value = False
+
+    with pytest.raises(HTTPException) as exc:
+        await service.reject(20, "reason", _user())
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_skips_visibility_check(service: ReviewService):
+    task = _open_extraction_task()
+    admin = UserContext(user_id=99, email="a@b.com", role="admin")
+    service._review_repo.get.return_value = task
+    service._invoice_repo.approve.return_value = MagicMock(spec=InvoiceResponse)
+    service._review_repo.resolve.return_value = task
+
+    await service.approve(10, admin)
+
+    service._review_repo.is_visible_to_user.assert_not_called()
+    service._invoice_repo.approve.assert_awaited_once_with(
+        5, owner_user_id=None, paid_by="a@b.com"
+    )

@@ -162,8 +162,9 @@ async def get_audit_controller(
 
 async def get_auth_controller(
     user_repo: UserRepository = Depends(get_user_repo),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> AuthController:
-    return AuthController(user_repo)
+    return AuthController(user_repo, audit_repo)
 
 
 async def get_user_controller(

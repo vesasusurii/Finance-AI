@@ -30,6 +30,7 @@ def create_access_token(
     role: str,
     email_verified: bool = True,
     must_change_password: bool = False,
+    token_version: int = 1,
 ) -> str:
     exp = _now_utc() + timedelta(minutes=settings.jwt_access_expire_minutes)
     return _encode(
@@ -39,6 +40,7 @@ def create_access_token(
             "role": role,
             "email_verified": email_verified,
             "must_change_password": must_change_password,
+            "token_version": token_version,
             "type": TOKEN_TYPE_ACCESS,
             "exp": exp,
         }
@@ -52,6 +54,8 @@ def create_refresh_token(
     role: str,
     email_verified: bool = True,
     must_change_password: bool = False,
+    token_version: int = 1,
+    jti: str,
 ) -> str:
     exp = _now_utc() + timedelta(days=settings.jwt_refresh_expire_days)
     return _encode(
@@ -61,10 +65,19 @@ def create_refresh_token(
             "role": role,
             "email_verified": email_verified,
             "must_change_password": must_change_password,
+            "token_version": token_version,
+            "jti": jti,
             "type": TOKEN_TYPE_REFRESH,
             "exp": exp,
         }
     )
+
+
+def _decode_payload(token: str) -> dict[str, Any] | None:
+    try:
+        return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return None
 
 
 def decode_access_token(token: str) -> tuple[UserContext | None, str | None]:
@@ -83,14 +96,41 @@ def decode_access_token(token: str) -> tuple[UserContext | None, str | None]:
     return user, None
 
 
-def decode_refresh_token(token: str) -> UserContext | None:
+def get_access_token_version(token: str) -> int | None:
+    payload = _decode_payload(token)
+    if not payload or payload.get("type") != TOKEN_TYPE_ACCESS:
+        return None
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-    except jwt.PyJWTError:
+        return int(payload.get("token_version", 1))
+    except (TypeError, ValueError):
         return None
+
+
+def decode_refresh_token(token: str) -> tuple[UserContext | None, str | None]:
+    payload = _decode_payload(token)
+    if payload is None:
+        return None, None
     if payload.get("type") != TOKEN_TYPE_REFRESH:
+        return None, None
+    user = _payload_to_context(payload)
+    if user is None:
+        return None, None
+    jti = str(payload.get("jti", ""))
+    try:
+        version = int(payload.get("token_version", 1))
+    except (TypeError, ValueError):
+        version = 1
+    return user, jti if jti else None
+
+
+def get_refresh_token_version(token: str) -> int | None:
+    payload = _decode_payload(token)
+    if not payload or payload.get("type") != TOKEN_TYPE_REFRESH:
         return None
-    return _payload_to_context(payload)
+    try:
+        return int(payload.get("token_version", 1))
+    except (TypeError, ValueError):
+        return None
 
 
 def _payload_to_context(payload: dict[str, Any]) -> UserContext | None:

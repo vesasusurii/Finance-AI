@@ -19,8 +19,9 @@ from db.pool import async_session, engine
 from models.user import User
  
 DEFAULT_USERS = (
-    ("finance@borek.com", "changeme", ROLE_FINANCE),
-    ("admin@borek.com", "changeme", ROLE_ADMIN),
+    ("lum.meta@boreksolutions.de", "changeme", ROLE_ADMIN),
+    ("vesa.susuri@boreksolutions.de", "changeme", ROLE_ADMIN),
+    ("lummeta25@gmail.com", "changeme", ROLE_FINANCE),
 )
  
  
@@ -34,7 +35,7 @@ async def upsert_user(session, email: str, password: str, role: str) -> None:
         user.is_active = True
         user.role = role
         user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
-        user.must_change_password = False
+        user.must_change_password = True
         user.email_verification_code_hash = None
         user.email_verification_expires_at = None
         print(f"Updated user: {email} ({role})")
@@ -46,7 +47,7 @@ async def upsert_user(session, email: str, password: str, role: str) -> None:
                 role=role,
                 is_active=True,
                 email_verified_at=datetime.now(timezone.utc),
-                must_change_password=False,
+                must_change_password=True,
             )
         )
         print(f"Created user: {email} ({role})")

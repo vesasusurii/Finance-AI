@@ -158,6 +158,14 @@ class InvoiceExtractionService:
                 f"Unsupported file type: {mime}. Supported: PDF, JPEG, JPG, PNG."
             )
 
+        from utils.mime_validation import (
+            mime_validation_error,
+            validate_content_matches_mime,
+        )
+
+        if not validate_content_matches_mime(content, mime):
+            raise ExtractionError(mime_validation_error(mime))
+
         content_hash = sha256_hex(content) if settings.ocr_cache_enabled else None
         if content_hash is not None:
             existing = await self._handle_duplicate_upload(

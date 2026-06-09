@@ -15,6 +15,14 @@ def _to_response(row: ReviewTask) -> ReviewTaskResponse:
     return ReviewTaskResponse.model_validate(row)
 
 
+def _owner_visibility_filter(owner_user_id: int):
+    """Tasks visible to a finance user (invoice access or bank statement owner)."""
+    return or_(
+        invoice_visible_to_user_clause(owner_user_id),
+        BankStatement.uploaded_by == owner_user_id,
+    )
+
+
 class ReviewRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -83,10 +91,7 @@ class ReviewRepository:
             count_q = count_q.where(ReviewTask.reason.in_(reasons))
 
         if owner_user_id is not None:
-            owner_filter = or_(
-                invoice_visible_to_user_clause(owner_user_id),
-                BankStatement.uploaded_by == owner_user_id,
-            )
+            owner_filter = _owner_visibility_filter(owner_user_id)
             query = (
                 query.outerjoin(Invoice, ReviewTask.invoice_id == Invoice.id)
                 .outerjoin(
@@ -120,6 +125,28 @@ class ReviewRepository:
 
     async def get(self, task_id: int) -> ReviewTask | None:
         return await self._session.get(ReviewTask, task_id)
+
+    async def is_visible_to_user(
+        self, task_id: int, owner_user_id: int
+    ) -> bool:
+        """True when the task is in scope for a finance user (not admin)."""
+        q = (
+            select(ReviewTask.id)
+            .where(ReviewTask.id == task_id)
+            .outerjoin(Invoice, ReviewTask.invoice_id == Invoice.id)
+            .outerjoin(
+                BankTransaction,
+                ReviewTask.bank_transaction_id == BankTransaction.id,
+            )
+            .outerjoin(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            )
+            .where(_owner_visibility_filter(owner_user_id))
+            .limit(1)
+        )
+        row = (await self._session.execute(q)).scalar_one_or_none()
+        return row is not None
 
     async def resolve(
         self, task_id: int, status: str, resolved_at: datetime

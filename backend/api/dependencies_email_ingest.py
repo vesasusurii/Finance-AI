@@ -1,18 +1,21 @@
 """API-key auth for Outlook / n8n invoice email ingestion."""
 
+import secrets
+
 from fastapi import Depends, Header, HTTPException
 
-from api.dependencies import get_user_repo
+from api.dependencies import get_audit_repo, get_user_repo
 from config import settings
 from core.roles import ROLE_FINANCE
+from repositories.audit_repository import AuditRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
 
 
 async def verify_email_ingest_user(
     x_email_ingest_key: str | None = Header(default=None, alias="X-Email-Ingest-Key"),
-    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     user_repo: UserRepository = Depends(get_user_repo),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> UserContext:
     if not settings.email_ingest_api_key:
         raise HTTPException(
@@ -23,8 +26,17 @@ async def verify_email_ingest_user(
             },
         )
 
-    provided = x_email_ingest_key or x_api_key
-    if not provided or provided != settings.email_ingest_api_key:
+    provided = x_email_ingest_key or ""
+    expected = settings.email_ingest_api_key
+    if not provided or not secrets.compare_digest(provided, expected):
+        await audit_repo.log(
+            None,
+            "invalid_api_key",
+            "email_ingest",
+            0,
+            None,
+            {"header": "X-Email-Ingest-Key"},
+        )
         raise HTTPException(
             status_code=401,
             detail={

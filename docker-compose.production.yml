@@ -1,0 +1,69 @@
+# Production overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml --profile production up -d --build
+#
+# Generate self-signed TLS certs first (local prod testing):
+#   sh infra/nginx/generate-dev-certs.sh
+
+services:
+  db:
+    ports: []
+
+  redis:
+    ports: []
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    environment:
+      ENVIRONMENT: production
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: strict
+      DEBUG: "false"
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      - upload_data:/data/uploads
+      - ./logs:/var/log/borek
+
+  worker:
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      - upload_data:/data/uploads
+      - ./logs:/var/log/borek
+    command: >
+      rq worker --url redis://:${REDIS_PASSWORD}@redis:6379/0
+      finance-ai ocr_high_priority ocr_normal review transaction
+
+  frontend-prod:
+    profiles: ["production"]
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: finance-ai-frontend-prod
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  nginx:
+    profiles: ["production"]
+    image: nginx:1.27-alpine
+    container_name: finance-ai-nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend-prod
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro

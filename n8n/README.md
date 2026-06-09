@@ -1,5 +1,7 @@
 # Outlook → Borek Finance invoice ingestion (n8n)
 
+> **Security:** The ngrok tunnel profile is for **local development only**. Never expose the API publicly without a strong `EMAIL_INGEST_API_KEY`, HTTPS, and network restrictions. Prefer VPN or private networking in production.
+
 Production workflow: **`workflows/outlook-invoice-ingest.json`** (n8n Cloud free tier)
 
 | Workflow file | Use when |

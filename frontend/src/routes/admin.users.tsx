@@ -11,7 +11,7 @@ import { roleLabel } from "@/types/auth";
 import type { AdminUser } from "@/types/user";
 
 export function UsersPage() {
-  const { items, total, loading, error, create, remove } = useAdminUsers();
+  const { items, total, loading, error, create, remove, resetPassword } = useAdminUsers();
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,6 +21,10 @@ export function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const columns: Column<AdminUser>[] = [
     {
@@ -58,17 +62,31 @@ export function UsersPage() {
       header: "",
       align: "right",
       cell: (row) => (
-        <Button
-          type="button"
-          variant="danger"
-          size="sm"
-          onClick={() => {
-            setDeleteError(null);
-            setDeleteTarget(row);
-          }}
-        >
-          Delete
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setResetError(null);
+              setResetPasswordValue("");
+              setResetTarget(row);
+            }}
+          >
+            Reset password
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteTarget(row);
+            }}
+          >
+            Delete
+          </Button>
+        </div>
       ),
     },
   ];
@@ -105,6 +123,26 @@ export function UsersPage() {
       setFormError(err instanceof Error ? err.message : "Failed to create user");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleResetConfirmed(e: FormEvent) {
+    e.preventDefault();
+    if (!resetTarget) return;
+
+    setResetError(null);
+    setResetting(true);
+    try {
+      const user = await resetPassword(resetTarget.id, resetPasswordValue);
+      setSuccessMessage(
+        `Password reset for ${user.email}. Share the temporary password securely. They must change it on next sign-in.`,
+      );
+      setResetTarget(null);
+      setResetPasswordValue("");
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "Failed to reset password");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -198,12 +236,12 @@ export function UsersPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={8}
+                minLength={12}
                 autoComplete="new-password"
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:border-ring focus:outline-none"
               />
               <span className="mt-1 block text-[11px] text-muted-foreground">
-                Minimum 8 characters
+                Minimum 12 characters
               </span>
             </label>
           </div>
@@ -234,6 +272,73 @@ export function UsersPage() {
           </p>
           <DataTable columns={columns} rows={items} />
         </>
+      )}
+
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4">
+          <form
+            onSubmit={handleResetConfirmed}
+            className="w-full max-w-md rounded-lg border border-border bg-card p-5"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[15px] font-semibold text-foreground">
+                  Reset password
+                </h2>
+                <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+                  Set a temporary password for {resetTarget.email}. Their current session
+                  will end and they must choose a new password on next sign-in.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetTarget(null)}
+                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                aria-label="Close reset password dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {resetError && (
+              <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+                {resetError}
+              </p>
+            )}
+
+            <label className="mb-6 block">
+              <span className="mb-1.5 block text-[13px] font-medium text-foreground">
+                Temporary password
+              </span>
+              <input
+                type="password"
+                value={resetPasswordValue}
+                onChange={(e) => setResetPasswordValue(e.target.value)}
+                required
+                minLength={12}
+                autoComplete="new-password"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:border-ring focus:outline-none"
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Minimum 12 characters
+              </span>
+            </label>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setResetTarget(null)}
+                disabled={resetting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={resetting}>
+                {resetting ? "Resetting…" : "Reset password"}
+              </Button>
+            </div>
+          </form>
+        </div>
       )}
 
       {deleteTarget && (

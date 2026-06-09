@@ -3,7 +3,12 @@ from fastapi import APIRouter, Depends, status
 from api.controllers.user_controller import UserController
 from api.dependencies import get_user_controller, require_admin
 from schemas.auth import UserContext
-from schemas.user import CreateUserRequest, UserListResponse, UserSummary
+from schemas.user import (
+    CreateUserRequest,
+    ResetUserPasswordRequest,
+    UserListResponse,
+    UserSummary,
+)
 from schemas.admin import UpdateUserRoleRequest
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
@@ -34,6 +39,16 @@ async def update_user_role(
     ctrl: UserController = Depends(get_user_controller),
 ):
     return await ctrl.update_user_role(user_id, body, admin)
+
+
+@router.post("/{user_id}/reset-password", response_model=UserSummary)
+async def reset_user_password(
+    user_id: int,
+    body: ResetUserPasswordRequest,
+    admin: UserContext = Depends(require_admin),
+    ctrl: UserController = Depends(get_user_controller),
+):
+    return await ctrl.reset_user_password(user_id, body, admin)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_200_OK)

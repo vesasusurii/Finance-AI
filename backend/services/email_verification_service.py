@@ -80,7 +80,7 @@ def verify_code(user: User, code: str) -> bool:
 
 
 def log_verification_code_for_local(email: str, code: str) -> None:
-    if settings.environment == "local":
+    if settings.environment == "local" and settings.log_verification_codes:
         print(
             f"[auth] Email verification code for {email}: {code} "
             f"(expires in {VERIFICATION_CODE_TTL_MINUTES} minutes)"

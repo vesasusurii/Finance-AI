@@ -25,13 +25,14 @@ from api.routers import (
     reconciliation_router,
     review_router,
 )
-from config import settings
+from config import settings, validate_settings_on_startup
 from core.debug_logger import get_logger, setup_debug_logging
 from core.exceptions import AppError, ExcelParseError, ExtractionError, ExportError
 from db.pool import engine
 from middleware.auth import AuthMiddleware
 from middleware.cors import setup_cors
 from middleware.request_handler import RequestHandlerMiddleware
+from middleware.security_headers import SecurityHeadersMiddleware
 from utils.file_storage import bind_http_client
 from services.upload_recovery import recover_stuck_invoice_uploads
 
@@ -39,11 +40,22 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 setup_debug_logging()
 logger = get_logger(__name__)
 
+_IS_LOCAL = settings.environment == "local"
+
+
+def _client_error_message(exc: Exception, *, fallback: str) -> str:
+    if _IS_LOCAL:
+        return str(exc)
+    return fallback
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    for warning in validate_settings_on_startup():
+        logger.warning("Startup config warning: %s", warning)
     logger.info(
-        "Starting Borek Finance backend (debug=%s, log_dir=%s)",
+        "Starting Borek Finance backend (env=%s, debug=%s, log_dir=%s)",
+        settings.environment,
         settings.debug,
         settings.debug_log_dir,
     )
@@ -69,7 +81,6 @@ async def lifespan(app: FastAPI):
         settings.openai_model,
         settings.openai_model_strong,
     )
-    # Startup recovery enqueues RQ jobs — must not prevent the API from serving auth/UI.
     try:
         await recover_stuck_invoice_uploads(app.state.openai_client)
     except Exception as exc:
@@ -91,6 +102,9 @@ app = FastAPI(
     description="Internal invoice extraction and bank matching",
     version="0.2.0",
     lifespan=lifespan,
+    docs_url="/docs" if _IS_LOCAL else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if _IS_LOCAL else None,
 )
 
 
@@ -117,7 +131,10 @@ async def excel_parse_error_handler(_request: Request, exc: ExcelParseError):
         code = "parse_error"
     return JSONResponse(
         status_code=400,
-        content={"error": code, "message": str(exc)},
+        content={
+            "error": code,
+            "message": _client_error_message(exc, fallback="Could not parse Excel file."),
+        },
     )
 
 
@@ -125,7 +142,10 @@ async def excel_parse_error_handler(_request: Request, exc: ExcelParseError):
 async def extraction_error_handler(_request: Request, exc: ExtractionError):
     return JSONResponse(
         status_code=422,
-        content={"error": "extraction_failed", "message": str(exc)},
+        content={
+            "error": "extraction_failed",
+            "message": _client_error_message(exc, fallback="Extraction failed."),
+        },
     )
 
 
@@ -133,7 +153,10 @@ async def extraction_error_handler(_request: Request, exc: ExtractionError):
 async def export_error_handler(_request: Request, exc: ExportError):
     return JSONResponse(
         status_code=500,
-        content={"error": "export_failed", "message": str(exc)},
+        content={
+            "error": "export_failed",
+            "message": _client_error_message(exc, fallback="Export failed."),
+        },
     )
 
 
@@ -141,10 +164,16 @@ async def export_error_handler(_request: Request, exc: ExportError):
 async def app_error_handler(_request: Request, exc: AppError):
     return JSONResponse(
         status_code=500,
-        content={"error": "internal_error", "message": str(exc)},
+        content={
+            "error": "internal_error",
+            "message": _client_error_message(
+                exc, fallback="An unexpected error occurred."
+            ),
+        },
     )
 
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestHandlerMiddleware)
 setup_cors(app)

@@ -1,0 +1,16 @@
+-- Least-privilege application role for production Postgres.
+-- Run as superuser after migrations. Replace placeholders before use.
+
+-- CREATE ROLE finance_app LOGIN PASSWORD 'change_me_strong_password';
+-- GRANT CONNECT ON DATABASE finance_ai TO finance_app;
+-- GRANT USAGE ON SCHEMA public TO finance_app;
+--
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO finance_app;
+-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO finance_app;
+--
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA public
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO finance_app;
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA public
+--   GRANT USAGE, SELECT ON SEQUENCES TO finance_app;
+--
+-- REVOKE CREATE ON SCHEMA public FROM finance_app;

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, false, func, true
+from sqlalchemy import Boolean, DateTime, Integer, String, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -30,6 +30,9 @@ class User(Base):
     email_verification_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

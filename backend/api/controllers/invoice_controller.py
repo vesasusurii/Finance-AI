@@ -30,6 +30,7 @@ from schemas.invoice import (
 from services.invoice_extraction_service import InvoiceExtractionService
 from utils.invoice_currency import CurrencyConversionError
 from utils.file_storage import resolve_upload_bytes, resolve_upload_path
+from utils.safe_filename import content_disposition_inline
 from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
@@ -528,13 +529,11 @@ class InvoiceController:
                 path=str(file_path),
                 media_type=mime,
                 filename=upload.original_filename,
-                headers={"Content-Disposition": "inline"},
+                headers=content_disposition_inline(upload.original_filename),
             )
 
         return Response(
             content=data,
             media_type=mime,
-            headers={
-                "Content-Disposition": f'inline; filename="{upload.original_filename}"'
-            },
+            headers=content_disposition_inline(upload.original_filename),
         )

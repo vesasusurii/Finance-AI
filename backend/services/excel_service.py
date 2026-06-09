@@ -94,6 +94,14 @@ def _apply_cell_format(cell, *, is_header: bool, row_fill: PatternFill) -> None:
     cell.alignment = _ALIGN_HEADER if is_header else _ALIGN_CENTER
 
 
+def _excel_safe(value: object | None) -> object | None:
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def _decimal_to_float(value: Decimal | float | int | None) -> float | None:
     if value is None:
         return None
@@ -111,18 +119,20 @@ def _invoice_to_export_row(inv: InvoiceResponse) -> list[object | None]:
         paid_at = datetime(paid_at.year, paid_at.month, paid_at.day)
     return [
         invoice_date,
-        inv.name_of_company,
-        inv.address_of_company,
-        str(inv.invoice_number) if inv.invoice_number is not None else None,
+        _excel_safe(inv.name_of_company),
+        _excel_safe(inv.address_of_company),
+        _excel_safe(
+            str(inv.invoice_number) if inv.invoice_number is not None else None
+        ),
         _decimal_to_float(inv.amount),
         _decimal_to_float(inv.debt),
-        inv.account_details,
-        inv.internal_note_description,
-        inv.client_employee_related,
+        _excel_safe(inv.account_details),
+        _excel_safe(inv.internal_note_description),
+        _excel_safe(inv.client_employee_related),
         paid_at,
-        inv.paid_by,
-        inv.fixed_status,
-        inv.category,
+        _excel_safe(inv.paid_by),
+        _excel_safe(inv.fixed_status),
+        _excel_safe(inv.category),
     ]
 
 

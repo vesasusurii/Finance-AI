@@ -6,8 +6,14 @@ from fastapi import HTTPException, status
 from core.roles import ROLE_FINANCE, is_valid_role
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
-from schemas.user import CreateUserRequest, UserListResponse, UserSummary
+from schemas.user import (
+    CreateUserRequest,
+    ResetUserPasswordRequest,
+    UserListResponse,
+    UserSummary,
+)
 from schemas.admin import UpdateUserRoleRequest
+from services.refresh_token_store import revoke_all_refresh_tokens
 
 
 class UserController:
@@ -60,6 +66,14 @@ class UserController:
         )
 
     async def delete_user(self, user_id: int, admin: UserContext) -> dict:
+        if admin.user_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "cannot_delete_self",
+                    "message": "You cannot delete your own account.",
+                },
+            )
         user = await self._user_repo.get(user_id)
         if user is None:
             raise HTTPException(
@@ -121,6 +135,51 @@ class UserController:
                 )
 
         updated = await self._user_repo.update_role(user, body.role)
+        await self._user_repo.bump_token_version(user_id)
+        updated = await self._user_repo.get(user_id)
+        assert updated is not None
+        return UserSummary(
+            id=updated.id,
+            email=updated.email,
+            role=updated.role,
+            is_active=updated.is_active,
+            created_at=updated.created_at,
+        )
+
+    async def reset_user_password(
+        self,
+        user_id: int,
+        body: ResetUserPasswordRequest,
+        admin: UserContext,
+    ) -> UserSummary:
+        if admin.user_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "cannot_reset_own_password",
+                    "message": "You cannot reset your own password here.",
+                },
+            )
+
+        user = await self._user_repo.get(user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "user_not_found",
+                    "message": "User not found.",
+                },
+            )
+
+        password_hash = bcrypt.hashpw(
+            body.password.encode("utf-8"),
+            bcrypt.gensalt(),
+        ).decode("utf-8")
+        updated = await self._user_repo.reset_password(user, password_hash)
+        await self._user_repo.bump_token_version(user_id)
+        revoke_all_refresh_tokens(user_id)
+        updated = await self._user_repo.get(user_id)
+        assert updated is not None
         return UserSummary(
             id=updated.id,
             email=updated.email,

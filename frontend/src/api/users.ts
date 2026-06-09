@@ -19,3 +19,13 @@ export async function createUser(body: CreateUserRequest): Promise<AdminUser> {
 export async function deleteUser(userId: number): Promise<void> {
   await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE" });
 }
+
+export async function resetUserPassword(
+  userId: number,
+  password: string,
+): Promise<AdminUser> {
+  return apiFetch<AdminUser>(`/api/admin/users/${userId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}

@@ -68,6 +68,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  // dangerouslySetInnerHTML is safe here: only static theme colors from ChartConfig.
   return (
     <style
       dangerouslySetInnerHTML={{

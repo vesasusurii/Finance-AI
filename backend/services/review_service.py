@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from core.debug_logger import debug_trace, get_logger
+from core.invoice_access import invoice_owner_user_id, upload_owner_user_id
+from models.review_task import ReviewTask
 from repositories.audit_repository import AuditRepository
 from repositories.bank_transaction_repository import BankTransactionRepository
 from repositories.invoice_repository import InvoiceRepository
@@ -34,12 +36,45 @@ class ReviewService:
         self._bank_txn_repo = bank_txn_repo
         self._audit_repo = audit_repo
 
+    async def _require_owned_task(
+        self, task_id: int, user: UserContext
+    ) -> ReviewTask:
+        owner = upload_owner_user_id(user)
+        task = await self._review_repo.get(task_id)
+        if not task:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "review_task_not_found",
+                    "message": "Review task not found.",
+                },
+            )
+        if owner is not None and not await self._review_repo.is_visible_to_user(
+            task_id, owner
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "review_task_not_found",
+                    "message": "Review task not found.",
+                },
+            )
+        return task
+
     @debug_trace
-    async def _enrich_task(self, item: ReviewTaskResponse) -> ReviewTaskResponse:
+    async def _enrich_task(
+        self,
+        item: ReviewTaskResponse,
+        *,
+        owner_user_id: int | None = None,
+    ) -> ReviewTaskResponse:
         invoice: InvoiceResponse | None = None
         bank_transaction: BankTransactionResponse | None = None
+        invoice_scope = owner_user_id
         if item.invoice_id is not None:
-            invoice = await self._invoice_repo.get(item.invoice_id)
+            invoice = await self._invoice_repo.get(
+                item.invoice_id, owner_user_id=invoice_scope
+            )
         elif item.task_type == "bank_match":
             payload_num = (item.payload or {}).get("invoice_number")
             if isinstance(payload_num, str) and payload_num.strip():
@@ -82,7 +117,7 @@ class ReviewService:
             )
             enriched_all: list[ReviewTaskResponse] = []
             for item in items:
-                row = await self._enrich_task(item)
+                row = await self._enrich_task(item, owner_user_id=owner_user_id)
                 if has_invoice and row.invoice is not None:
                     enriched_all.append(row)
                 elif not has_invoice and row.invoice is None:
@@ -98,7 +133,10 @@ class ReviewService:
             task_type, page, limit, owner_user_id=owner_user_id, reasons=reasons
         )
         if enrich:
-            enriched = [await self._enrich_task(item) for item in items]
+            enriched = [
+                await self._enrich_task(item, owner_user_id=owner_user_id)
+                for item in items
+            ]
         else:
             enriched = items
         return ReviewTaskListResponse(
@@ -109,15 +147,7 @@ class ReviewService:
     async def approve(
         self, task_id: int, user: UserContext
     ) -> ReviewTaskDecisionResponse:
-        task = await self._review_repo.get(task_id)
-        if not task:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "review_task_not_found",
-                    "message": "Review task not found.",
-                },
-            )
+        task = await self._require_owned_task(task_id, user)
         if task.status != "open":
             raise HTTPException(
                 status_code=409,
@@ -144,6 +174,7 @@ class ReviewService:
                 )
             approved = await self._invoice_repo.approve(
                 task.invoice_id,
+                owner_user_id=invoice_owner_user_id(user),
                 paid_by=approver_paid_by(user),
             )
             if not approved:
@@ -198,15 +229,7 @@ class ReviewService:
     async def reject(
         self, task_id: int, reason: str | None, user: UserContext
     ) -> ReviewTaskDecisionResponse:
-        task = await self._review_repo.get(task_id)
-        if not task:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "review_task_not_found",
-                    "message": "Review task not found.",
-                },
-            )
+        task = await self._require_owned_task(task_id, user)
         if task.status != "open":
             raise HTTPException(
                 status_code=409,
