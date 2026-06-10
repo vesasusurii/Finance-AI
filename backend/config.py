@@ -233,6 +233,17 @@ class Settings(BaseSettings):
         return self.environment in ("staging", "production")
 
     @model_validator(mode="after")
+    def apply_legacy_jwt_expire_minutes(self) -> "Settings":
+        import os
+
+        if (
+            self.jwt_expire_minutes is not None
+            and "JWT_ACCESS_EXPIRE_MINUTES" not in os.environ
+        ):
+            self.jwt_access_expire_minutes = self.jwt_expire_minutes
+        return self
+
+    @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         if not self.is_production_like:
             return self

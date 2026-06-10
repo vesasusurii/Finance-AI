@@ -14,7 +14,7 @@ import {
   logout as apiLogout,
   refreshSession,
 } from "../api/auth";
-import { ApiError, getAuthRefreshIntervalMs } from "../api/client";
+import { getAuthRefreshIntervalMs } from "../api/client";
 import type { AuthUser } from "../types/auth";
 import { isAdminRole } from "../types/auth";
 
@@ -30,20 +30,46 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+const REFRESH_RETRY_ATTEMPTS = 3;
+const REFRESH_RETRY_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function refreshSessionWithRetry(): Promise<AuthUser> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < REFRESH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await refreshSession();
+    } catch (e) {
+      lastError = e;
+      if (attempt < REFRESH_RETRY_ATTEMPTS - 1) {
+        await sleep(REFRESH_RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function loadSession(): Promise<AuthUser | null> {
   try {
-    return await getMe();
-  } catch (e) {
-    if (e instanceof ApiError && e.code === "token_expired") {
-      await refreshSession();
-      return getMe();
+    const user = await getMe();
+    if (user) {
+      return user;
     }
+  } catch (e) {
     if (import.meta.env.DEV) {
       console.warn(
         "[auth] session load failed:",
         e instanceof Error ? e.message : e,
       );
     }
+  }
+
+  try {
+    return await refreshSessionWithRetry();
+  } catch {
     return null;
   }
 }
@@ -55,9 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const me = await refreshSession();
+      const me = await refreshSessionWithRetry();
       if (mounted.current) setUser(me);
-    } catch (e) {
+    } catch {
       if (mounted.current) setUser(null);
     }
   }, []);

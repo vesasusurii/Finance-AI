@@ -15,14 +15,18 @@ export async function runReconciliation(
 export async function getReconciliationResults(filters: {
   status?: string;
   bank_statement_id?: number;
+  confirmed_only?: boolean;
   page?: number;
   limit?: number;
 } = {}): Promise<MatchListResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") {
-      params.set(key, String(value));
+    if (value === undefined || value === "") return;
+    if (typeof value === "boolean") {
+      if (value) params.set(key, "true");
+      return;
     }
+    params.set(key, String(value));
   });
   const qs = params.toString();
   return apiFetch<MatchListResponse>(

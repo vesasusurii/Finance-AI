@@ -109,6 +109,9 @@ export function MatchingPage() {
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<InvoicePaymentMatch[]>([]);
+  const [suggestedMatches, setSuggestedMatches] = useState<InvoicePaymentMatch[]>(
+    [],
+  );
   const [unmatchedInvoices, setUnmatchedInvoices] = useState<Invoice[]>([]);
   const [partialInvoices, setPartialInvoices] = useState<Invoice[]>([]);
   const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
@@ -119,9 +122,11 @@ export function MatchingPage() {
   const [partialPage, setPartialPage] = useState(1);
   const [txnPage, setTxnPage] = useState(1);
   const [matchPage, setMatchPage] = useState(1);
+  const [suggestedPage, setSuggestedPage] = useState(1);
   const [reviewPage, setReviewPage] = useState(1);
   const [multiTxnPage, setMultiTxnPage] = useState(1);
   const [matchTotal, setMatchTotal] = useState(0);
+  const [suggestedTotal, setSuggestedTotal] = useState(0);
   const [unmatchedInvoiceTotal, setUnmatchedInvoiceTotal] = useState(0);
   const [partialInvoiceTotal, setPartialInvoiceTotal] = useState(0);
   const [unmatchedTxnTotal, setUnmatchedTxnTotal] = useState(0);
@@ -135,9 +140,27 @@ export function MatchingPage() {
 
   const loadTotals = useCallback(async () => {
     const filters = statementFilters();
-    const [matchRes, invoiceRes, partialRes, txnRes, reviewRes, multiTxnRes] =
-      await Promise.all([
-        getReconciliationResults({ ...filters, page: 1, limit: 1 }),
+    const [
+      matchRes,
+      suggestedRes,
+      invoiceRes,
+      partialRes,
+      txnRes,
+      reviewRes,
+      multiTxnRes,
+    ] = await Promise.all([
+        getReconciliationResults({
+          ...filters,
+          confirmed_only: true,
+          page: 1,
+          limit: 1,
+        }),
+        getReconciliationResults({
+          ...filters,
+          status: "suggested",
+          page: 1,
+          limit: 1,
+        }),
         listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
         listInvoices({ match_status: "partially_matched", page: 1, limit: 1 }),
         listBankTransactions({
@@ -161,6 +184,7 @@ export function MatchingPage() {
         }),
       ]);
     setMatchTotal(matchRes.total);
+    setSuggestedTotal(suggestedRes.total);
     setUnmatchedInvoiceTotal(invoiceRes.total);
     setPartialInvoiceTotal(partialRes.total);
     setUnmatchedTxnTotal(txnRes.total);
@@ -176,6 +200,7 @@ export function MatchingPage() {
         case "matched": {
           const res = await getReconciliationResults({
             ...filters,
+            confirmed_only: true,
             page: matchPage,
             limit: PAGE_SIZE,
           });
@@ -215,15 +240,25 @@ export function MatchingPage() {
           break;
         }
         case "needs-review": {
-          const res = await listReviewTasks({
-            task_type: "bank_match",
-            page: reviewPage,
-            limit: PAGE_SIZE,
-            reasons: [...MATCHING_REVIEW_REASONS],
-            slim: true,
-          });
-          setReviewTasks(res.items);
-          setReviewTotal(res.total);
+          const [taskRes, suggestedRes] = await Promise.all([
+            listReviewTasks({
+              task_type: "bank_match",
+              page: reviewPage,
+              limit: PAGE_SIZE,
+              reasons: [...MATCHING_REVIEW_REASONS],
+              slim: true,
+            }),
+            getReconciliationResults({
+              ...filters,
+              status: "suggested",
+              page: suggestedPage,
+              limit: PAGE_SIZE,
+            }),
+          ]);
+          setReviewTasks(taskRes.items);
+          setReviewTotal(taskRes.total);
+          setSuggestedMatches(suggestedRes.items);
+          setSuggestedTotal(suggestedRes.total);
           break;
         }
         case "multi-invoice": {
@@ -245,6 +280,7 @@ export function MatchingPage() {
     activeTab,
     statementFilters,
     matchPage,
+    suggestedPage,
     partialPage,
     invoicePage,
     txnPage,
@@ -387,7 +423,7 @@ export function MatchingPage() {
     "partially-paid": partialInvoiceTotal,
     "unmatched-invoices": unmatchedInvoiceTotal,
     "unmatched-transactions": unmatchedTxnTotal,
-    "needs-review": reviewTotal,
+    "needs-review": reviewTotal + suggestedTotal,
     "multi-invoice": multiTxnTotal,
   };
 
@@ -631,7 +667,7 @@ export function MatchingPage() {
 
           <TabsContent value="needs-review" className="mt-4">
             <div className="mb-3 flex justify-end">
-              {reviewTotal > 0 ? (
+              {reviewTotal + suggestedTotal > 0 ? (
                 <Link
                   to="/manual-review"
                   className="text-[12px] font-medium text-primary hover:underline"
@@ -640,12 +676,42 @@ export function MatchingPage() {
                 </Link>
               ) : null}
             </div>
+            {suggestedTotal > 0 ? (
+              <div className="mb-6">
+                <h3 className="mb-2 text-[13px] font-semibold text-foreground">
+                  Suggested matches (approve or reject)
+                </h3>
+                <p className="mb-3 text-[12px] text-muted-foreground">
+                  Amount-based suggestions with no invoice number in the bank
+                  comment. They do not appear on the Matched tab until approved.
+                </p>
+                <MatchedTransactionsGrid
+                  matches={suggestedMatches}
+                  busyMatchId={busyMatchId}
+                  onApprove={(id) => void onApprove(id)}
+                  onReject={(id) => void onReject(id)}
+                />
+                <TablePagination
+                  page={suggestedPage}
+                  pageSize={PAGE_SIZE}
+                  total={suggestedTotal}
+                  onPageChange={setSuggestedPage}
+                />
+              </div>
+            ) : null}
             {reviewTotal === 0 ? (
-              <p className="text-[13px] text-muted-foreground">
-                No open review tasks.
-              </p>
+              suggestedTotal === 0 ? (
+                <p className="text-[13px] text-muted-foreground">
+                  No open review tasks.
+                </p>
+              ) : null
             ) : (
               <>
+                {suggestedTotal > 0 ? (
+                  <h3 className="mb-2 text-[13px] font-semibold text-foreground">
+                    Review tasks
+                  </h3>
+                ) : null}
                 <ul className="space-y-2 text-[13px]">
                   {reviewTasks.map((t) => (
                     <li
