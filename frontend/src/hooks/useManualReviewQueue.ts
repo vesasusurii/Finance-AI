@@ -37,7 +37,8 @@ function findTaskForInvoice(
   );
 }
 
-async function loadBankMatchInvoices(): Promise<Invoice[]> {
+/** Same invoice set as Manual Review → Bank match. */
+export async function loadBankMatchInvoices(): Promise<Invoice[]> {
   const [unmatched, needsReview] = await Promise.all([
     listInvoices({ match_status: "unmatched", limit: 200 }),
     listInvoices({ match_status: "needs_review", limit: 200 }),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Play } from "lucide-react";
 import { SectionLoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
@@ -18,12 +18,11 @@ import {
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { ApiError } from "@/api/client";
 import { refreshSession } from "@/api/auth";
-import { listReviewTasks } from "@/api/review";
 import { listBankStatements, listBankTransactions } from "@/api/bankStatements";
+import { loadBankMatchInvoices } from "@/hooks/useManualReviewQueue";
 import { listInvoices } from "@/api/invoices";
 import type { InvoicePaymentMatch, ReconciliationSummary } from "@/types/match";
 import type { BankStatement, BankTransaction } from "@/types/bank";
-import type { ReviewTask } from "@/types/review";
 import type { Invoice } from "@/types/invoice";
 import {
   formatDate,
@@ -35,17 +34,6 @@ import {
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
-
-const MATCHING_REVIEW_REASONS = [
-  "no_invoice_in_db",
-  "duplicate_invoice_in_db",
-  "internal_error",
-  "no_invoice_numbers_detected",
-  "invoice_numbers_not_visible",
-  "batch_payment_incomplete",
-  "batch_amount_suggested",
-  "missing_transaction_date",
-] as const;
 
 type MatchingTab =
   | "matched"
@@ -79,7 +67,29 @@ function DateCell({ value }: { value: string | null | undefined }) {
   return <span className="tabular-nums">{formatDate(value ?? null)}</span>;
 }
 
+function invoiceReviewReasonLabel(invoice: Invoice): string {
+  const reasons = invoice.review_reasons ?? [];
+  if (reasons.length > 0) {
+    return reasons.map(reviewReasonLabel).join(", ");
+  }
+  if (invoice.match_status === "needs_review") {
+    return matchStatusLabel("needs_review");
+  }
+  return matchStatusLabel(invoice.match_status);
+}
+
+async function loadNeedsReviewInvoices(page: number, limit: number) {
+  const all = await loadBankMatchInvoices();
+  const total = all.length;
+  const offset = (page - 1) * limit;
+  return {
+    items: all.slice(offset, offset + limit),
+    total,
+  };
+}
+
 export function MatchingPage() {
+  const navigate = useNavigate();
   const { prompt } = useAppDialog();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<MatchingTab>(() => {
@@ -109,12 +119,9 @@ export function MatchingPage() {
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<InvoicePaymentMatch[]>([]);
-  const [suggestedMatches, setSuggestedMatches] = useState<InvoicePaymentMatch[]>(
-    [],
-  );
   const [unmatchedInvoices, setUnmatchedInvoices] = useState<Invoice[]>([]);
   const [partialInvoices, setPartialInvoices] = useState<Invoice[]>([]);
-  const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
+  const [needsReviewInvoices, setNeedsReviewInvoices] = useState<Invoice[]>([]);
   const [unmatchedTxns, setUnmatchedTxns] = useState<BankTransaction[]>([]);
   const [multiTxns, setMultiTxns] = useState<BankTransaction[]>([]);
   const [busyMatchId, setBusyMatchId] = useState<number | null>(null);
@@ -122,11 +129,9 @@ export function MatchingPage() {
   const [partialPage, setPartialPage] = useState(1);
   const [txnPage, setTxnPage] = useState(1);
   const [matchPage, setMatchPage] = useState(1);
-  const [suggestedPage, setSuggestedPage] = useState(1);
   const [reviewPage, setReviewPage] = useState(1);
   const [multiTxnPage, setMultiTxnPage] = useState(1);
   const [matchTotal, setMatchTotal] = useState(0);
-  const [suggestedTotal, setSuggestedTotal] = useState(0);
   const [unmatchedInvoiceTotal, setUnmatchedInvoiceTotal] = useState(0);
   const [partialInvoiceTotal, setPartialInvoiceTotal] = useState(0);
   const [unmatchedTxnTotal, setUnmatchedTxnTotal] = useState(0);
@@ -142,7 +147,6 @@ export function MatchingPage() {
     const filters = statementFilters();
     const [
       matchRes,
-      suggestedRes,
       invoiceRes,
       partialRes,
       txnRes,
@@ -155,12 +159,6 @@ export function MatchingPage() {
           page: 1,
           limit: 1,
         }),
-        getReconciliationResults({
-          ...filters,
-          status: "suggested",
-          page: 1,
-          limit: 1,
-        }),
         listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
         listInvoices({ match_status: "partially_matched", page: 1, limit: 1 }),
         listBankTransactions({
@@ -169,13 +167,10 @@ export function MatchingPage() {
           page: 1,
           limit: 1,
         }),
-        listReviewTasks({
-          task_type: "bank_match",
-          page: 1,
-          limit: 1,
-          reasons: [...MATCHING_REVIEW_REASONS],
-          slim: true,
-        }),
+        loadBankMatchInvoices().then((items) => ({
+          items: [],
+          total: items.length,
+        })),
         listBankTransactions({
           ...filters,
           multi_invoice: true,
@@ -184,7 +179,6 @@ export function MatchingPage() {
         }),
       ]);
     setMatchTotal(matchRes.total);
-    setSuggestedTotal(suggestedRes.total);
     setUnmatchedInvoiceTotal(invoiceRes.total);
     setPartialInvoiceTotal(partialRes.total);
     setUnmatchedTxnTotal(txnRes.total);
@@ -240,25 +234,9 @@ export function MatchingPage() {
           break;
         }
         case "needs-review": {
-          const [taskRes, suggestedRes] = await Promise.all([
-            listReviewTasks({
-              task_type: "bank_match",
-              page: reviewPage,
-              limit: PAGE_SIZE,
-              reasons: [...MATCHING_REVIEW_REASONS],
-              slim: true,
-            }),
-            getReconciliationResults({
-              ...filters,
-              status: "suggested",
-              page: suggestedPage,
-              limit: PAGE_SIZE,
-            }),
-          ]);
-          setReviewTasks(taskRes.items);
-          setReviewTotal(taskRes.total);
-          setSuggestedMatches(suggestedRes.items);
-          setSuggestedTotal(suggestedRes.total);
+          const res = await loadNeedsReviewInvoices(reviewPage, PAGE_SIZE);
+          setNeedsReviewInvoices(res.items);
+          setReviewTotal(res.total);
           break;
         }
         case "multi-invoice": {
@@ -280,7 +258,6 @@ export function MatchingPage() {
     activeTab,
     statementFilters,
     matchPage,
-    suggestedPage,
     partialPage,
     invoicePage,
     txnPage,
@@ -423,7 +400,7 @@ export function MatchingPage() {
     "partially-paid": partialInvoiceTotal,
     "unmatched-invoices": unmatchedInvoiceTotal,
     "unmatched-transactions": unmatchedTxnTotal,
-    "needs-review": reviewTotal + suggestedTotal,
+    "needs-review": reviewTotal,
     "multi-invoice": multiTxnTotal,
   };
 
@@ -494,6 +471,40 @@ export function MatchingPage() {
     {
       key: "status",
       header: "Status",
+      cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
+    },
+  ];
+
+  const needsReviewInvoiceColumns: Column<Invoice>[] = [
+    {
+      key: "num",
+      header: "Invoice #",
+      cell: (r) => (
+        <span className="font-mono">{r.invoice_number ?? "—"}</span>
+      ),
+    },
+    {
+      key: "company",
+      header: "Company",
+      cell: (r) => r.name_of_company ?? "—",
+    },
+    {
+      key: "reason",
+      header: "Reason",
+      cell: (r) => (
+        <StatusBadge value={invoiceReviewReasonLabel(r)} tone="warning" />
+      ),
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      cell: (r) =>
+        formatCurrency(r.amount != null ? Number(r.amount) : null, r.currency),
+    },
+    {
+      key: "status",
+      header: "Match",
       cell: (r) => <StatusBadge value={matchStatusLabel(r.match_status)} />,
     },
   ];
@@ -666,99 +677,20 @@ export function MatchingPage() {
           </TabsContent>
 
           <TabsContent value="needs-review" className="mt-4">
-            <div className="mb-3 flex justify-end">
-              {reviewTotal + suggestedTotal > 0 ? (
-                <Link
-                  to="/manual-review"
-                  className="text-[12px] font-medium text-primary hover:underline"
-                >
-                  Open in Manual Review
-                </Link>
-              ) : null}
-            </div>
-            {suggestedTotal > 0 ? (
-              <div className="mb-6">
-                <h3 className="mb-2 text-[13px] font-semibold text-foreground">
-                  Suggested matches (approve or reject)
-                </h3>
-                <p className="mb-3 text-[12px] text-muted-foreground">
-                  Amount-based suggestions with no invoice number in the bank
-                  comment. They do not appear on the Matched tab until approved.
-                </p>
-                <MatchedTransactionsGrid
-                  matches={suggestedMatches}
-                  busyMatchId={busyMatchId}
-                  onApprove={(id) => void onApprove(id)}
-                  onReject={(id) => void onReject(id)}
-                />
-                <TablePagination
-                  page={suggestedPage}
-                  pageSize={PAGE_SIZE}
-                  total={suggestedTotal}
-                  onPageChange={setSuggestedPage}
-                />
-              </div>
-            ) : null}
-            {reviewTotal === 0 ? (
-              suggestedTotal === 0 ? (
-                <p className="text-[13px] text-muted-foreground">
-                  No open review tasks.
-                </p>
-              ) : null
-            ) : (
-              <>
-                {suggestedTotal > 0 ? (
-                  <h3 className="mb-2 text-[13px] font-semibold text-foreground">
-                    Review tasks
-                  </h3>
-                ) : null}
-                <ul className="space-y-2 text-[13px]">
-                  {reviewTasks.map((t) => (
-                    <li
-                      key={t.id}
-                      className="rounded-md border border-border px-3 py-2"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-foreground">
-                          Task #{t.id}
-                        </span>
-                        <span className="text-muted-foreground">
-                          · txn #{t.bank_transaction_id}
-                        </span>
-                        <StatusBadge value={reviewReasonLabel(t.reason)} />
-                        {t.payload?.invoice_number ? (
-                          <span className="font-mono text-foreground">
-                            {t.payload.invoice_number as string}
-                          </span>
-                        ) : null}
-                        {t.reason === "batch_amount_suggested" &&
-                        Array.isArray(t.payload?.invoices) ? (
-                          <span className="text-muted-foreground">
-                            ·{" "}
-                            {(t.payload.invoices as { invoice_number?: string }[])
-                              .map((i) => i.invoice_number)
-                              .filter(Boolean)
-                              .join(", ")}
-                          </span>
-                        ) : null}
-                        <Link
-                          to={`/manual-review?task=${t.id}`}
-                          className="ml-auto text-[12px] text-primary hover:underline"
-                        >
-                          Review
-                        </Link>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <TablePagination
-                  page={reviewPage}
-                  pageSize={PAGE_SIZE}
-                  total={reviewTotal}
-                  onPageChange={setReviewPage}
-                />
-              </>
-            )}
+            <DataTable
+              columns={needsReviewInvoiceColumns}
+              rows={needsReviewInvoices}
+              onRowClick={(inv) =>
+                navigate(`/manual-review?invoice=${inv.id}`)
+              }
+              empty="No invoice matches need review."
+            />
+            <TablePagination
+              page={reviewPage}
+              pageSize={PAGE_SIZE}
+              total={reviewTotal}
+              onPageChange={setReviewPage}
+            />
           </TabsContent>
 
           <TabsContent value="multi-invoice" className="mt-4">
