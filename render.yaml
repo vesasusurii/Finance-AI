@@ -1,0 +1,111 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# API/worker Docker build: repo root ./Dockerfile (copies backend/).
+
+databases:
+  - name: finance-ai-db
+    plan: free
+    databaseName: finance_ai
+    user: finance
+
+services:
+  - type: keyvalue
+    name: finance-ai-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+  - type: web
+    name: finance-ai-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/ready
+    preDeployCommand: alembic upgrade head
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: finance-ai-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: finance-ai-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: invoices
+      - key: STORAGE_PATH
+        value: /data/uploads
+
+  - type: worker
+    name: finance-ai-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: rq worker --url $REDIS_URL finance-ai ocr_high_priority ocr_normal review transaction
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: finance-ai-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: finance-ai-redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        fromService:
+          type: web
+          name: finance-ai-api
+          envVarKey: OPENAI_API_KEY
+      - key: ENVIRONMENT
+        value: production
+      - key: STORAGE_BACKEND
+        fromService:
+          type: web
+          name: finance-ai-api
+          envVarKey: STORAGE_BACKEND
+      - key: SUPABASE_URL
+        fromService:
+          type: web
+          name: finance-ai-api
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          type: web
+          name: finance-ai-api
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: SUPABASE_STORAGE_BUCKET
+        fromService:
+          type: web
+          name: finance-ai-api
+          envVarKey: SUPABASE_STORAGE_BUCKET
+      - key: STORAGE_PATH
+        value: /data/uploads
+
+  - type: web
+    name: finance-ai-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_JWT_ACCESS_EXPIRE_MINUTES
+        value: "15"

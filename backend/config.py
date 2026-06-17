@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     openai_hybrid_text_enabled: bool = Field(
         default=True, validation_alias="OPENAI_HYBRID_TEXT_ENABLED"
     )
+    # Digital PDFs: try text layer / text-only LLM before rasterising pages for Vision.
+    openai_text_first_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_TEXT_FIRST_ENABLED"
+    )
+    openai_text_first_max_pages: int = Field(
+        default=3, validation_alias="OPENAI_TEXT_FIRST_MAX_PAGES"
+    )
+    openai_text_first_min_chars: int = Field(
+        default=200, validation_alias="OPENAI_TEXT_FIRST_MIN_CHARS"
+    )
     openai_field_recovery_enabled: bool = Field(
         default=True, validation_alias="OPENAI_FIELD_RECOVERY_ENABLED"
     )
@@ -231,6 +241,16 @@ class Settings(BaseSettings):
     @property
     def is_production_like(self) -> bool:
         return self.environment in ("staging", "production")
+
+    @model_validator(mode="after")
+    def normalize_database_url(self) -> "Settings":
+        url = self.database_url
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        self.database_url = url
+        return self
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
