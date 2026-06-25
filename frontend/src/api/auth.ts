@@ -1,4 +1,4 @@
-import { ApiError, apiFetch } from "./client";
+import { ApiError, apiFetch, refreshAccessToken } from "./client";
 import type { AuthUser } from "../types/auth";
  
 export type { AuthUser as LoginResponse };
@@ -18,7 +18,15 @@ export async function logout(): Promise<void> {
 }
  
 export async function refreshSession(): Promise<AuthUser> {
-  return apiFetch<AuthUser>("/api/auth/refresh", { method: "POST" });
+  const user = await refreshAccessToken<AuthUser>();
+  if (!user?.user_id) {
+    throw new ApiError(
+      "Session expired. Please sign in again.",
+      401,
+      "session_expired",
+    );
+  }
+  return user;
 }
  
 export async function getMe(): Promise<AuthUser | null> {

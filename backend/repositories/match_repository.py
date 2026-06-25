@@ -127,6 +127,8 @@ class MatchRepository:
         await self._session.flush()
         return True
 
+    _CONFIRMED_MATCH_STATUSES = ("matched", "approved")
+
     async def list_matches(
         self,
         status: str | None,
@@ -135,6 +137,7 @@ class MatchRepository:
         limit: int,
         *,
         owner_user_id: int | None = None,
+        confirmed_only: bool = False,
     ) -> tuple[list[MatchResultResponse], int]:
         query = select(InvoicePaymentMatch)
         count_q = select(func.count()).select_from(InvoicePaymentMatch)
@@ -169,6 +172,13 @@ class MatchRepository:
         if status:
             query = query.where(InvoicePaymentMatch.status == status)
             count_q = count_q.where(InvoicePaymentMatch.status == status)
+        elif confirmed_only:
+            query = query.where(
+                InvoicePaymentMatch.status.in_(self._CONFIRMED_MATCH_STATUSES)
+            )
+            count_q = count_q.where(
+                InvoicePaymentMatch.status.in_(self._CONFIRMED_MATCH_STATUSES)
+            )
         else:
             query = query.where(InvoicePaymentMatch.status != "rejected")
             count_q = count_q.where(InvoicePaymentMatch.status != "rejected")

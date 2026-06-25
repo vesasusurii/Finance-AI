@@ -139,6 +139,8 @@ class ReconciliationController:
         bank_statement_id: int | None,
         page: int,
         limit: int,
+        *,
+        confirmed_only: bool = False,
     ) -> MatchListResponse:
         items, total = await self._match_repo.list_matches(
             status,
@@ -146,6 +148,7 @@ class ReconciliationController:
             page,
             limit,
             owner_user_id=invoice_owner_user_id(user),
+            confirmed_only=confirmed_only,
         )
         return MatchListResponse(
             items=items, total=total, page=page, limit=limit

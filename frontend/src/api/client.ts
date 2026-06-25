@@ -21,10 +21,10 @@ export class ApiError extends Error {
   }
 }
 
-let refreshInFlight: Promise<void> | null = null;
+let refreshInFlight: Promise<unknown> | null = null;
 
-/** Refresh access token using the httpOnly refresh cookie. */
-export async function refreshAccessToken(): Promise<void> {
+/** Refresh session using the httpOnly refresh cookie (deduped across callers). */
+export async function refreshAccessToken<T = unknown>(): Promise<T> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const res = await fetch(`${API_BASE}/api/auth/refresh`, {
@@ -42,12 +42,12 @@ export async function refreshAccessToken(): Promise<void> {
           body.error,
         );
       }
-      await res.json().catch(() => undefined);
+      return res.json().catch(() => undefined);
     })().finally(() => {
       refreshInFlight = null;
     });
   }
-  await refreshInFlight;
+  return refreshInFlight as Promise<T>;
 }
 
 const AUTH_NO_RETRY_PATHS = new Set([

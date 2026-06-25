@@ -31,12 +31,20 @@ async def run_reconciliation(
 async def reconciliation_results(
     status: str | None = None,
     bank_statement_id: int | None = None,
+    confirmed_only: bool = False,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     user: UserContext = Depends(get_current_user),
     ctrl: ReconciliationController = Depends(get_reconciliation_controller),
 ):
-    return await ctrl.results(user, status, bank_statement_id, page, limit)
+    return await ctrl.results(
+        user,
+        status,
+        bank_statement_id,
+        page,
+        limit,
+        confirmed_only=confirmed_only,
+    )
 
 
 @router.post("/manual-match", response_model=ManualMatchResponse)
