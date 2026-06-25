@@ -108,6 +108,16 @@ app = FastAPI(
 )
 
 
+@app.get("/", include_in_schema=False)
+async def root():
+    return {
+        "service": "finance-ai-api",
+        "status": "ok",
+        "message": "This is the API service. Open the Render static frontend service for the app UI.",
+        "health": "/api/health",
+    }
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_request: Request, exc: HTTPException):
     if isinstance(exc.detail, dict) and "error" in exc.detail:
