@@ -97,19 +97,3 @@ services:
           envVarKey: SUPABASE_STORAGE_BUCKET
       - key: STORAGE_PATH
         value: /data/uploads
-
-  - type: web
-    name: finance-ai-frontend
-    runtime: static
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_BASE_URL
-        sync: false
-      - key: VITE_JWT_ACCESS_EXPIRE_MINUTES
-        value: "15"

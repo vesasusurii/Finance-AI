@@ -34,7 +34,7 @@ export async function listManualReviewQueue(filters: {
 } = {}): Promise<ManualReviewQueueResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value === undefined || value === "") return;
+    if (value === undefined) return;
     params.set(key, String(value));
   });
   const qs = params.toString();
@@ -73,7 +73,7 @@ export async function listReviewTasks(filters: {
       if (value === true) params.set("enrich", "false");
       return;
     }
-    if (value === undefined || value === "") return;
+    if (value === undefined || (typeof value === "string" && value === "")) return;
     if (key === "reasons" && Array.isArray(value)) {
       value.forEach((reason) => params.append("reasons", reason));
       return;

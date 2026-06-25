@@ -4,11 +4,13 @@ Borek Finance — FastAPI application.
 
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
 from api.routers import (
@@ -41,6 +43,8 @@ setup_debug_logging()
 logger = get_logger(__name__)
 
 _IS_LOCAL = settings.environment == "local"
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_INDEX_HTML = _STATIC_DIR / "index.html"
 
 
 def _client_error_message(exc: Exception, *, fallback: str) -> str:
@@ -110,10 +114,12 @@ app = FastAPI(
 
 @app.get("/", include_in_schema=False)
 async def root():
+    if _INDEX_HTML.is_file():
+        return FileResponse(_INDEX_HTML)
     return {
         "service": "finance-ai-api",
         "status": "ok",
-        "message": "This is the API service. Open the Render static frontend service for the app UI.",
+        "message": "This is the API service. Frontend assets were not found in this build.",
         "health": "/api/health",
     }
 
@@ -200,3 +206,20 @@ app.include_router(export_router.router, prefix="/api")
 app.include_router(bank_statement_router.router, prefix="/api")
 app.include_router(reconciliation_router.router, prefix="/api")
 app.include_router(review_router.router, prefix="/api")
+
+if (_STATIC_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    requested_file = _STATIC_DIR / full_path
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+    if _INDEX_HTML.is_file():
+        return FileResponse(_INDEX_HTML)
+
+    raise HTTPException(status_code=404, detail="Not Found")

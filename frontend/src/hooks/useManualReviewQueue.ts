@@ -15,6 +15,14 @@ export type ManualReviewEntry = {
 
 const QUEUE_LIMIT = 200;
 
+export async function loadBankMatchInvoices(): Promise<Invoice[]> {
+  const res = await listManualReviewQueue({
+    filter: "bank_match",
+    limit: QUEUE_LIMIT,
+  });
+  return res.items.map((item) => item.invoice);
+}
+
 export function useManualReviewQueue(taskTypeFilter: ReviewQueueFilter) {
   const [items, setItems] = useState<ManualReviewEntry[]>([]);
   const [total, setTotal] = useState(0);

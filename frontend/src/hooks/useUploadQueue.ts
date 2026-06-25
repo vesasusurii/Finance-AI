@@ -269,10 +269,12 @@ export function useUploadQueue() {
           result.upload_status === "processed"
         ) {
           let invoice = null;
-          try {
-            invoice = await getInvoice(result.invoice_id);
-          } catch {
-            /* drawer can load later */
+          if (result.invoice_id != null) {
+            try {
+              invoice = await getInvoice(result.invoice_id);
+            } catch {
+              /* drawer can load later */
+            }
           }
           const applied = applyInvoiceToItem(invoice, result);
           patchItem(item.id, {
