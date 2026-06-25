@@ -41,19 +41,6 @@ export async function getMe(): Promise<AuthUser | null> {
   }
 }
  
-export async function verifyEmail(code: string): Promise<AuthUser> {
-  return apiFetch<AuthUser>("/api/auth/verify-email", {
-    method: "POST",
-    body: JSON.stringify({ code }),
-  });
-}
-
-export async function resendVerificationCode(): Promise<AuthUser> {
-  return apiFetch<AuthUser>("/api/auth/resend-verification-code", {
-    method: "POST",
-  });
-}
- 
 export async function changePassword(
   currentPassword: string,
   newPassword: string,

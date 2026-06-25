@@ -134,7 +134,7 @@ export function UsersPage() {
     try {
       const user = await create({ email, password });
       setSuccessMessage(
-        `Finance user ${user.email} created. Share the temporary password with them. They will change it before email verification.`,
+        `Finance user ${user.email} created. Share the temporary password with them. They will change it on first sign-in.`,
       );
       closeForm();
     } catch (err) {
@@ -212,7 +212,7 @@ export function UsersPage() {
                 New finance user
               </h2>
               <p className="mt-1 text-[13px] text-muted-foreground">
-                The user must change this temporary password, then verify their email on first sign-in.
+                The user must change this temporary password on first sign-in.
               </p>
             </div>
             <button

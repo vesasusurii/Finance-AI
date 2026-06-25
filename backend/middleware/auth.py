@@ -25,9 +25,7 @@ ONBOARDING_PATHS = frozenset(
         "/api/auth/me",
         "/api/auth/logout",
         "/api/auth/refresh",
-        "/api/auth/verify-email",
         "/api/auth/change-password",
-        "/api/auth/resend-verification-code",
     }
 )
 
@@ -114,11 +112,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             and path.startswith("/api")
             and path not in PUBLIC_PATHS
             and path not in ONBOARDING_PATHS
-            and (not user.email_verified or user.must_change_password)
+            and user.must_change_password
         ):
             return _forbidden(
                 error="onboarding_required",
-                message="Complete email verification and password change before continuing.",
+                message="Change your temporary password before continuing.",
             )
 
         return await call_next(request)

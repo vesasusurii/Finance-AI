@@ -3,12 +3,6 @@ from __future__ import annotations
 from fastapi import HTTPException, Request, Response, status
 
 from config import settings
-from core.auth_rate_limiter import (
-    check_verification_attempts,
-    check_verify_rate_limit,
-    clear_verification_attempts,
-    record_verification_failure,
-)
 from core.debug_logger import debug_trace, get_logger
 from core.roles import is_valid_role
 from core.token_version_cache import cache_token_version
@@ -20,16 +14,6 @@ from schemas.auth import (
     LoginRequest,
     LoginResponse,
     UserContext,
-    VerifyEmailRequest,
-)
-from services.email_verification_service import (
-    generate_verification_code,
-    hash_verification_code,
-    resend_cooldown_message,
-    resend_cooldown_remaining_seconds,
-    send_verification_code,
-    verification_expires_at,
-    verify_code,
 )
 from services.jwt_service import (
     create_access_token,
@@ -57,23 +41,18 @@ def _cookie_params() -> dict:
 
 
 def _user_auth_flags(user: User) -> tuple[bool, bool]:
-    return user.email_verified_at is not None, user.must_change_password
+    return True, user.must_change_password
 
 
 def _login_response(user: User) -> LoginResponse:
     email_verified, must_change_password = _user_auth_flags(user)
-    resend_in = (
-        0
-        if email_verified
-        else resend_cooldown_remaining_seconds(user)
-    )
     return LoginResponse(
         user_id=user.id,
         email=user.email,
         role=user.role,
         email_verified=email_verified,
         must_change_password=must_change_password,
-        verification_resend_in_seconds=resend_in,
+        verification_resend_in_seconds=0,
     )
 
 
@@ -191,14 +170,6 @@ class AuthController:
 
     async def login(self, request: LoginRequest, response: Response) -> LoginResponse:
         user = await self._authenticate(request.email, request.password)
-        if not user.must_change_password:
-            verification_code = generate_verification_code()
-            user = await self._user_repo.set_email_verification_code(
-                user,
-                code_hash=hash_verification_code(verification_code),
-                expires_at=verification_expires_at(),
-            )
-            send_verification_code(user.email, verification_code)
         revoke_all_refresh_tokens(user.id)
         set_auth_cookies(response, user=user)
         await self._audit_security(
@@ -288,100 +259,6 @@ class AuthController:
             )
         return _login_response(db_user)
 
-    async def verify_email(
-        self,
-        user_ctx: UserContext,
-        body: VerifyEmailRequest,
-        response: Response,
-    ) -> LoginResponse:
-        check_verify_rate_limit(user_ctx.user_id)
-        check_verification_attempts(user_ctx.user_id)
-
-        user = await self._user_repo.get(user_ctx.user_id)
-        if user is None or not user.is_active:
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": "invalid_session",
-                    "message": "Session expired. Please sign in again.",
-                },
-            )
-        if user.email_verified_at is not None:
-            return _login_response(user)
-        if user.must_change_password:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "password_change_required",
-                    "message": "Change your password before verifying your email.",
-                },
-            )
-
-        if not verify_code(user, body.code):
-            record_verification_failure(user_ctx.user_id)
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "invalid_verification_code",
-                    "message": (
-                        "Invalid or expired verification code. "
-                        "Codes expire after 10 minutes."
-                    ),
-                },
-            )
-
-        clear_verification_attempts(user_ctx.user_id)
-        user = await self._user_repo.mark_email_verified(user)
-        set_auth_cookies(response, user=user)
-        return _login_response(user)
-
-    async def resend_verification_code(
-        self,
-        user_ctx: UserContext,
-        response: Response,
-    ) -> LoginResponse:
-        user = await self._user_repo.get(user_ctx.user_id)
-        if user is None or not user.is_active:
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": "invalid_session",
-                    "message": "Session expired. Please sign in again.",
-                },
-            )
-        if user.email_verified_at is not None:
-            return _login_response(user)
-        if user.must_change_password:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "password_change_required",
-                    "message": "Change your password before requesting a verification code.",
-                },
-            )
-
-        wait = resend_cooldown_remaining_seconds(user)
-        if wait > 0:
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "resend_too_soon",
-                    "message": resend_cooldown_message(wait),
-                    "retry_after_seconds": wait,
-                },
-            )
-
-        verification_code = generate_verification_code()
-        user = await self._user_repo.set_email_verification_code(
-            user,
-            code_hash=hash_verification_code(verification_code),
-            expires_at=verification_expires_at(),
-        )
-        clear_verification_attempts(user.id)
-        send_verification_code(user.email, verification_code)
-        set_auth_cookies(response, user=user)
-        return _login_response(user)
-
     async def change_password(
         self,
         user_ctx: UserContext,
@@ -428,12 +305,5 @@ class AuthController:
         user = await self._user_repo.get(user.id)
         assert user is not None
         revoke_all_refresh_tokens(user.id)
-        verification_code = generate_verification_code()
-        user = await self._user_repo.set_email_verification_code(
-            user,
-            code_hash=hash_verification_code(verification_code),
-            expires_at=verification_expires_at(),
-        )
-        send_verification_code(user.email, verification_code)
         set_auth_cookies(response, user=user)
         return _login_response(user)

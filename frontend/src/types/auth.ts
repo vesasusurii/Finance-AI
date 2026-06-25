@@ -11,7 +11,7 @@ export interface AuthUser {
 
 export function needsOnboarding(user: AuthUser | null | undefined): boolean {
   if (!user) return false;
-  return !user.email_verified || user.must_change_password;
+  return user.must_change_password;
 }
 
 export function isAdminRole(role: string | undefined): role is "admin" {
