@@ -122,7 +122,8 @@ Your task: produce ONE final, complete, and accurate JSON by merging all partial
 ### amount, debt, currency
 - If `document_type` is `electricity_kesco` or `water_regional`: apply utility merge rules — `amount` from Bill amount row only, `debt` from Borxhi/Total debt lines only (never combine).
 - If `document_type` is `waste_pastrimi`: `amount` from **Total Due** / **Gjithsej borxhi**; `debt` from **Previous due** line if present.
-- Generic: take `amount` from the partial that shows "Për pagesë" / "For payment" / "Grand total" — typically the LAST partial.
+- Generic: take `amount` from the partial that shows "Për pagesë" / "For payment" / **"Amount Due"** / "Grand total" — typically the LAST partial.
+- SaaS usage bills: prefer **Amount Due (USD)** over Subtotal, Total, or **Pending amount**.
 - `debt`: take the maximum non-null debt from any partial (utility bills usually one page). Never add debt to amount.
 - Never sum partial amounts together.
 - If no partial has amount: null.

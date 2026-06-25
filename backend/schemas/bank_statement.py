@@ -39,6 +39,7 @@ class BankStatementListItem(BaseModel):
     original_filename: str
     uploaded_at: datetime
     uploaded_by: int
+    uploaded_by_email: str
     row_count: int
     processing_status: str
 

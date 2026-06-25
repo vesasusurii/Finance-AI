@@ -89,6 +89,30 @@ class BankTransactionRepository:
         result = await self._session.execute(q)
         return {row.id: _to_response(row) for row in result.scalars().all()}
 
+    _RECONCILABLE_STATUSES = ("pending", "needs_review", "partial", "unmatched")
+
+    async def list_reconciliation_candidates(
+        self,
+        *,
+        bank_statement_id: int | None,
+        owner_user_id: int | None,
+        limit: int = 100,
+    ) -> list[BankTransactionResponse]:
+        """Unresolved bank lines eligible for manual matching (scoped, capped)."""
+        q = select(BankTransaction).where(
+            BankTransaction.reconciliation_status.in_(self._RECONCILABLE_STATUSES)
+        )
+        joined = False
+        if bank_statement_id is not None:
+            q = q.where(BankTransaction.bank_statement_id == bank_statement_id)
+        q, joined = self._apply_statement_owner(
+            q, owner_user_id=owner_user_id, joined=joined
+        )
+        q = q.order_by(BankTransaction.transaction_date.desc(), BankTransaction.id.desc())
+        q = q.limit(max(1, min(limit, 200)))
+        result = await self._session.execute(q)
+        return [_to_response(r) for r in result.scalars().all()]
+
     async def list_transactions(
         self,
         bank_statement_id: int | None,
@@ -98,6 +122,7 @@ class BankTransactionRepository:
         *,
         owner_user_id: int | None = None,
         multi_invoice: bool = False,
+        reconciliation_statuses: list[str] | None = None,
     ) -> tuple[list[BankTransactionResponse], int]:
         base = select(BankTransaction)
         count_q = select(func.count()).select_from(BankTransaction)
@@ -114,7 +139,14 @@ class BankTransactionRepository:
             count_q = count_q.where(
                 BankTransaction.bank_statement_id == bank_statement_id
             )
-        if reconciliation_status:
+        if reconciliation_statuses:
+            base = base.where(
+                BankTransaction.reconciliation_status.in_(reconciliation_statuses)
+            )
+            count_q = count_q.where(
+                BankTransaction.reconciliation_status.in_(reconciliation_statuses)
+            )
+        elif reconciliation_status:
             base = base.where(
                 BankTransaction.reconciliation_status == reconciliation_status
             )

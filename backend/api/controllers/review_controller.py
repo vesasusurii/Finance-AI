@@ -1,7 +1,9 @@
 from core.debug_logger import debug_trace, get_logger
-from core.invoice_access import upload_owner_user_id
+from core.invoice_access import invoice_owner_user_id, upload_owner_user_id
 from schemas.auth import UserContext
 from schemas.review import (
+    BankMatchCandidatesResponse,
+    ManualReviewQueueResponse,
     ReviewDecisionRequest,
     ReviewTaskDecisionResponse,
     ReviewTaskListResponse,
@@ -51,3 +53,35 @@ class ReviewController:
         user: UserContext,
     ) -> ReviewTaskDecisionResponse:
         return await self._service.reject(task_id, request.reason, user)
+
+    @debug_trace
+    async def manual_queue(
+        self,
+        user: UserContext,
+        queue_filter: str,
+        page: int,
+        limit: int,
+    ) -> ManualReviewQueueResponse:
+        return await self._service.manual_queue(
+            queue_filter,
+            page,
+            limit,
+            invoice_owner_user_id=invoice_owner_user_id(user),
+            upload_owner_user_id=upload_owner_user_id(user),
+        )
+
+    @debug_trace
+    async def bank_match_candidates(
+        self,
+        user: UserContext,
+        invoice_id: int,
+        bank_statement_id: int | None,
+        limit: int,
+    ) -> BankMatchCandidatesResponse:
+        return await self._service.bank_match_candidates(
+            invoice_id,
+            bank_statement_id=bank_statement_id,
+            invoice_owner_user_id=invoice_owner_user_id(user),
+            upload_owner_user_id=upload_owner_user_id(user),
+            limit=limit,
+        )

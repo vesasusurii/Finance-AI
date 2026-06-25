@@ -69,6 +69,61 @@ def _apply_owner_scope(query, owner_user_id: int | None):
     return apply_invoice_visibility(query, owner_user_id)
 
 
+def _normalize_invoice_sort(sort: str | None) -> str:
+    if sort == "created_at":
+        return "created_at_desc"
+    if sort in {
+        "invoice_date_desc",
+        "invoice_date_asc",
+        "paid_at_date_desc",
+        "paid_at_date_asc",
+        "created_at_desc",
+        "created_at_asc",
+        "updated_at_desc",
+        "updated_at_asc",
+        "id_desc",
+        "id_asc",
+    }:
+        return sort
+    return "invoice_date_desc"
+
+
+def _normalize_export_sort(sort: str | None) -> str:
+    if sort in {
+        "invoice_date_desc",
+        "invoice_date_asc",
+        "paid_at_date_desc",
+        "paid_at_date_asc",
+    }:
+        return sort
+    return "paid_at_date_desc"
+
+
+def _invoice_order_by_clauses(sort: str | None, *, for_export: bool = False):
+    sort = _normalize_export_sort(sort) if for_export else _normalize_invoice_sort(sort)
+    primary = {
+        "invoice_date_desc": Invoice.invoice_date.desc().nullslast(),
+        "invoice_date_asc": Invoice.invoice_date.asc().nullsfirst(),
+        "paid_at_date_desc": Invoice.paid_at_date.desc().nullslast(),
+        "paid_at_date_asc": Invoice.paid_at_date.asc().nullsfirst(),
+        "created_at_desc": Invoice.created_at.desc(),
+        "created_at_asc": Invoice.created_at.asc(),
+        "updated_at_desc": Invoice.updated_at.desc(),
+        "updated_at_asc": Invoice.updated_at.asc(),
+        "id_desc": Invoice.id.desc(),
+        "id_asc": Invoice.id.asc(),
+    }[sort]
+    if sort == "invoice_date_desc":
+        return primary, Invoice.id.desc()
+    if sort == "invoice_date_asc":
+        return primary, Invoice.id.asc()
+    if sort == "paid_at_date_desc":
+        return primary, Invoice.id.desc()
+    if sort == "paid_at_date_asc":
+        return primary, Invoice.id.asc()
+    return (primary,)
+
+
 class InvoiceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -178,7 +233,11 @@ class InvoiceRepository:
             count_query = count_query.where(
                 Invoice.review_status == filters["review_status"]
             )
-        if filters.get("match_status"):
+        if filters.get("match_statuses"):
+            statuses = tuple(filters["match_statuses"])
+            query = query.where(Invoice.match_status.in_(statuses))
+            count_query = count_query.where(Invoice.match_status.in_(statuses))
+        elif filters.get("match_status"):
             query = query.where(Invoice.match_status == filters["match_status"])
             count_query = count_query.where(
                 Invoice.match_status == filters["match_status"]
@@ -225,18 +284,7 @@ class InvoiceRepository:
                 UploadedFile, Invoice.source_file_id == UploadedFile.id
             ).where(UploadedFile.upload_source == source)
 
-        sort = filters.get("sort") or "invoice_date_desc"
-        if sort == "created_at":
-            sort = "created_at_desc"
-        order_by = {
-            "invoice_date_desc": Invoice.invoice_date.desc().nullslast(),
-            "invoice_date_asc": Invoice.invoice_date.asc().nullsfirst(),
-            "created_at_desc": Invoice.created_at.desc(),
-            "created_at_asc": Invoice.created_at.asc(),
-            "id_desc": Invoice.id.desc(),
-            "id_asc": Invoice.id.asc(),
-        }.get(sort, Invoice.invoice_date.desc().nullslast())
-        query = query.order_by(order_by)
+        query = query.order_by(*_invoice_order_by_clauses(filters.get("sort")))
 
         offset = (page - 1) * limit
         query = query.offset(offset).limit(limit)
@@ -270,10 +318,12 @@ class InvoiceRepository:
             query = query.where(Invoice.review_status == filters["review_status"])
         if filters.get("match_status"):
             query = query.where(Invoice.match_status == filters["match_status"])
-        if filters.get("invoice_date_from"):
-            query = query.where(Invoice.invoice_date >= filters["invoice_date_from"])
-        if filters.get("invoice_date_to"):
-            query = query.where(Invoice.invoice_date <= filters["invoice_date_to"])
+        if filters.get("paid_date_from"):
+            query = query.where(Invoice.paid_at_date >= filters["paid_date_from"])
+        if filters.get("paid_date_to"):
+            query = query.where(Invoice.paid_at_date <= filters["paid_date_to"])
+        if filters.get("paid_date_from") or filters.get("paid_date_to"):
+            query = query.where(Invoice.paid_at_date.is_not(None))
         if filters.get("company"):
             pattern = f"%{filters['company']}%"
             query = query.where(Invoice.name_of_company.ilike(pattern))
@@ -282,8 +332,7 @@ class InvoiceRepository:
             query = query.where(Invoice.category.ilike(pattern))
 
         query = query.order_by(
-            Invoice.invoice_date.desc().nulls_last(),
-            Invoice.id.desc(),
+            *_invoice_order_by_clauses(filters.get("sort"), for_export=True)
         ).limit(max_rows)
 
         rows = (await self._session.execute(query)).scalars().all()

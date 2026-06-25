@@ -45,21 +45,27 @@ async def monthly_report(
 
 @router.get("/purchase-invoices-excel")
 async def purchase_invoices_excel(
-    invoice_date_from: date | None = None,
-    invoice_date_to: date | None = None,
+    paid_date_from: date | None = None,
+    paid_date_to: date | None = None,
     match_status: str | None = None,
     review_status: str | None = None,
     category: str | None = None,
     company: str | None = None,
+    sort: str | None = Query(
+        None,
+        pattern="^(paid_at_date_desc|paid_at_date_asc|invoice_date_desc|invoice_date_asc)$",
+        description="Row order for the export (defaults to paid date, newest first).",
+    ),
     user: UserContext = Depends(get_current_user),
     ctrl: ExportController = Depends(get_export_controller),
 ) -> StreamingResponse:
     return await ctrl.purchase_invoices_excel(
         user,
-        invoice_date_from,
-        invoice_date_to,
+        paid_date_from,
+        paid_date_to,
         match_status,
         review_status,
         category,
         company,
+        sort,
     )

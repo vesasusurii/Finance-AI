@@ -20,6 +20,7 @@ class UserSummary(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    bank_statement_count: int = 0
 
 
 class UserListResponse(BaseModel):

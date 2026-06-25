@@ -45,6 +45,19 @@ _FREELANCER_MARKERS = (
     "rate (eur)",
 )
 
+_SAAS_MARKERS = (
+    "billed to",
+    "date of issue",
+    "amount due",
+    "invoice period",
+    "pending amount",
+    "promptcloud",
+    "stripe",
+    "crawl cost",
+    "credit card via stripe",
+    "monthly maintenance",
+)
+
 
 class DocumentClassifierService:
     """Classify invoices before Vision extraction to select prompt blocks."""
@@ -61,6 +74,8 @@ class DocumentClassifierService:
 
         if self._matches(blob, _UTILITY_MARKERS):
             category = DocumentCategory.UTILITY
+        elif self._matches(blob, _SAAS_MARKERS):
+            category = DocumentCategory.SAAS
         elif self._matches(blob, _ALBANIAN_RETAIL_MARKERS):
             category = DocumentCategory.ALBANIAN_RETAIL
         elif self._matches(blob, _FREELANCER_MARKERS):

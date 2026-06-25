@@ -17,6 +17,7 @@ GOLDEN_EXAMPLES = """
 | Freelancer / timesheet     | Title `INVOICE ###` on page 1 (e.g. `007`) | Total Amount Due row | IBAN / account ≠ invoice #; hours × rate ≠ total |
 | Trilingual utility bill    | E-payment / platform ref (not header Nr.) | Për pagesë row | Total Due with old debt is NOT amount |
 | SaaS / retail / German     | Belegnummer / invoice ref in header block | Grand total on last page | Line items ≠ amount |
+| SaaS usage billing         | **Invoice Number** in header (e.g. `0012233`) | **Amount Due (USD)** row | Pending amount ≠ amount; Billed To ≠ issuer |
 
 ### German Rechnung detailed example
 Document: SCHMIEDER it-solutions GmbH, Rechnung, Seite 1/2
@@ -83,6 +84,19 @@ Document: SCHMIEDER it-solutions GmbH, Rechnung, Seite 1/2
 - `amount`: **Gjithsej borxhi / Total Due** (final payable, includes prior debt)
 - `debt`: **Borgji paraprak / Previous due** (informational)
 - `account_details`: all banks from Xhirollogaria block
+
+### SaaS usage invoice (PromptCloud-style) — field map (sample layout)
+- **Top-left issuer:** PromptCloud Inc + US address (Coastal Highway, Lewes, DE) → `name_of_company` + `address_of_company`
+- **Billed To block:** Borek Solutions Kosovo LLC — this is the **client**, NOT `name_of_company`
+- `invoice_number`: **Invoice Number** `0012233` (header field — copy exactly)
+- `invoice_date`: **Date of Issue** `08/21/2025` → `2025-08-21` (NOT Due Date)
+- `amount`: **Amount Due (USD)** `$482.87` → `482.87`
+- `currency`: **USD** (from label and `$` symbol)
+- `category`: **Software** (crawl / data SaaS)
+- **Pending amount** `1881.88` → account-level outstanding — **IGNORE** (not `amount`, not `debt`)
+- `internal_note_description`: crawl cost for repeat sites; Invoice period `20250720 - 20250819`; August-2025 billing
+- `client_employee_related`: Borek Solutions (from Billed To — no named person on sample)
+- `account_details`: Stripe payment URL if no IBAN on document
 """.strip()
 
 __all__ = ['GOLDEN_EXAMPLES']

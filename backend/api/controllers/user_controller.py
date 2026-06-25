@@ -4,6 +4,7 @@ import bcrypt
 from fastapi import HTTPException, status
 
 from core.roles import ROLE_FINANCE, is_valid_role
+from repositories.bank_statement_repository import BankStatementRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import UserContext
 from schemas.user import (
@@ -17,11 +18,19 @@ from services.refresh_token_store import revoke_all_refresh_tokens
 
 
 class UserController:
-    def __init__(self, user_repo: UserRepository) -> None:
+    def __init__(
+        self,
+        user_repo: UserRepository,
+        statement_repo: BankStatementRepository | None = None,
+    ) -> None:
         self._user_repo = user_repo
+        self._statement_repo = statement_repo
 
     async def list_users(self) -> UserListResponse:
         users = await self._user_repo.list_all()
+        statement_counts: dict[int, int] = {}
+        if self._statement_repo is not None:
+            statement_counts = await self._statement_repo.count_by_uploader()
         items = [
             UserSummary(
                 id=user.id,
@@ -29,6 +38,7 @@ class UserController:
                 role=user.role,
                 is_active=user.is_active,
                 created_at=user.created_at,
+                bank_statement_count=statement_counts.get(user.id, 0),
             )
             for user in users
         ]

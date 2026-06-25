@@ -21,8 +21,12 @@ export async function uploadBankStatement(
 export async function listBankStatements(
   page = 1,
   limit = 50,
+  uploadedBy?: number,
 ): Promise<BankStatementListResponse> {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (uploadedBy !== undefined) {
+    params.set("uploaded_by", String(uploadedBy));
+  }
   return apiFetch<BankStatementListResponse>(
     `/api/bank-statements?${params}`,
   );

@@ -238,8 +238,33 @@ export function MatchedTransactionCard({
           ? "border-border hover:shadow-md"
           : "border-border/60 opacity-90",
       )}
+      onClick={() => {
+        if (!expanded) setExpanded(true);
+      }}
     >
-      <header className="flex items-center gap-3 border-b border-border/60 px-4 py-3">
+      <header
+        className={cn(
+          "flex cursor-pointer items-center gap-3 border-b border-border/60 px-4 py-3 select-none",
+          "transition-colors hover:bg-secondary/30",
+        )}
+        onClick={(e) => {
+          if (expanded) {
+            e.stopPropagation();
+            toggleExpanded();
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (expanded) toggleExpanded();
+            else setExpanded(true);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={expanded ? "Collapse match details" : "Expand match details"}
+      >
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[14px] font-semibold leading-tight text-foreground">
             {item.companyName}
@@ -278,10 +303,12 @@ export function MatchedTransactionCard({
           ) : (
             <StatusBadge value={approvalBadgeLabel(item.approvalStatus)} />
           )}
-          <IconActionButton
-            label={expanded ? "Collapse details" : "Expand details"}
-            onClick={toggleExpanded}
-            className={neutralActionClass}
+          <span
+            className={cn(
+              "pointer-events-none inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+              neutralActionClass,
+            )}
+            aria-hidden
           >
             <ChevronDown
               className={cn(
@@ -289,7 +316,7 @@ export function MatchedTransactionCard({
                 expanded && "rotate-180",
               )}
             />
-          </IconActionButton>
+          </span>
         </div>
       </header>
 
@@ -299,7 +326,10 @@ export function MatchedTransactionCard({
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
-        <div className="overflow-hidden">
+        <div
+          className="overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="border-t border-border/40 bg-surface-muted/30 px-4 py-4">
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <StatusBadge

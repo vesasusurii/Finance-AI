@@ -39,11 +39,7 @@ docker compose up -d db redis backend worker frontend
 docker compose exec backend alembic upgrade head
 ```
 
-3. Confirm ingest user exists (same email as `EMAIL_INGEST_USER_EMAIL`):
-
-```powershell
-docker compose exec backend python scripts/seed_users.py
-```
+3. Confirm the ingest user exists in the database (same email as `EMAIL_INGEST_USER_EMAIL`). Create it via **Admin → Users** if needed.
 
 4. Restart after `.env` changes:
 

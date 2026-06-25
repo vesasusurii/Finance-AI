@@ -123,6 +123,38 @@ class ReviewRepository:
         rows = (await self._session.execute(query)).scalars().all()
         return [_to_response(r) for r in rows], int(total)
 
+    async def list_open_for_invoice_ids(
+        self,
+        invoice_ids: list[int],
+        task_type: str = "bank_match",
+        *,
+        owner_user_id: int | None = None,
+    ) -> list[ReviewTaskResponse]:
+        ids = sorted(set(invoice_ids))
+        if not ids:
+            return []
+        query = select(ReviewTask).where(
+            ReviewTask.status == "open",
+            ReviewTask.task_type == task_type,
+            ReviewTask.invoice_id.in_(ids),
+        )
+        if owner_user_id is not None:
+            query = (
+                query.outerjoin(Invoice, ReviewTask.invoice_id == Invoice.id)
+                .outerjoin(
+                    BankTransaction,
+                    ReviewTask.bank_transaction_id == BankTransaction.id,
+                )
+                .outerjoin(
+                    BankStatement,
+                    BankTransaction.bank_statement_id == BankStatement.id,
+                )
+                .where(_owner_visibility_filter(owner_user_id))
+                .distinct()
+            )
+        rows = (await self._session.execute(query)).scalars().all()
+        return [_to_response(r) for r in rows]
+
     async def get(self, task_id: int) -> ReviewTask | None:
         return await self._session.get(ReviewTask, task_id)
 

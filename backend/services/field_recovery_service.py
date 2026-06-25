@@ -37,8 +37,8 @@ _FIELD_PROMPTS: dict[str, str] = {
     ),
     "amount": (
         "Extract ONLY the final payable `amount` (with VAT / grand total). "
-        "Use Vlera me TVSH, Total Amount Due, Bruttobetrag, Gjithësejt vlerat — "
-        "NOT sub-totals or line items. "
+        "Use **Amount Due** / Amount Due (USD), Vlera me TVSH, Total Amount Due, "
+        "Bruttobetrag, Gjithësejt vlerat — NOT Subtotal, NOT Pending amount, NOT line items. "
         'Return JSON: {"amount": 123.45} or null.'
     ),
     "name_of_company": (

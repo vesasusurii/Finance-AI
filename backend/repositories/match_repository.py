@@ -119,6 +119,14 @@ class MatchRepository:
         await self._session.refresh(row)
         return row
 
+    async def delete(self, match_id: int) -> bool:
+        row = await self.get(match_id)
+        if not row:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
     async def list_matches(
         self,
         status: str | None,
@@ -161,6 +169,9 @@ class MatchRepository:
         if status:
             query = query.where(InvoicePaymentMatch.status == status)
             count_q = count_q.where(InvoicePaymentMatch.status == status)
+        else:
+            query = query.where(InvoicePaymentMatch.status != "rejected")
+            count_q = count_q.where(InvoicePaymentMatch.status != "rejected")
 
         if bank_statement_id is not None:
             if not txn_joined:
@@ -226,7 +237,8 @@ class MatchRepository:
             InvoicePaymentMatch.invoice_id,
             InvoicePaymentMatch.bank_transaction_id,
         ).where(
-            InvoicePaymentMatch.bank_transaction_id.in_(bank_transaction_ids)
+            InvoicePaymentMatch.bank_transaction_id.in_(bank_transaction_ids),
+            InvoicePaymentMatch.status != "rejected",
         )
         rows = (await self._session.execute(q)).all()
         return {(int(inv_id), int(txn_id)) for inv_id, txn_id in rows}
@@ -237,6 +249,7 @@ class MatchRepository:
         q = select(InvoicePaymentMatch.id).where(
             InvoicePaymentMatch.invoice_id == invoice_id,
             InvoicePaymentMatch.bank_transaction_id == bank_transaction_id,
+            InvoicePaymentMatch.status != "rejected",
         )
         row_id = (await self._session.execute(q)).scalar_one_or_none()
         return row_id is not None

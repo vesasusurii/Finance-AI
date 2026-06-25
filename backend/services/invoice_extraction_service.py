@@ -38,6 +38,7 @@ from services.ai_validation_service import AIValidationService
 from services.document_classifier_service import DocumentClassifierService
 from services.field_recovery_service import FieldRecoveryService
 from services.hybrid_extraction_service import HybridExtractionService
+from services.text_first_extraction_service import TextFirstExtractionService
 from services.ocr.pdf_text_extractor import (
     TextLayerHints,
     extract_pdf_text,
@@ -109,6 +110,7 @@ class InvoiceExtractionService:
         self._classifier = DocumentClassifierService()
         self._hybrid = HybridExtractionService(ai_validation)
         self._field_recovery = FieldRecoveryService(openai_client, ai_validation)
+        self._text_first = TextFirstExtractionService(openai_client, ai_validation)
 
     # ─────────────────────────────────────────────────────────────────────
     # Public entry point
@@ -426,6 +428,12 @@ class InvoiceExtractionService:
             )
 
         if status in ("failed", "processed"):
+            if upload_row.uploaded_by != user.user_id:
+                owner_email = owner_user.email if owner_user else "another user"
+                raise ExtractionError(
+                    f"This file was already uploaded by {owner_email}. "
+                    "Check your documents list or ask them to share the invoice."
+                )
             await self._upload_repo.update_status(upload_row.id, "queued")
             return self._prepared_from_row(upload_row, mime)
 
@@ -509,6 +517,54 @@ class InvoiceExtractionService:
         return result
 
     @debug_trace
+    async def _try_text_first_pdf(
+        self,
+        filename: str,
+        *,
+        total_pages: int,
+        ctx: _ExtractionContext,
+    ) -> tuple[ExtractionResult, str, str] | None:
+        """Fast path for digital PDFs — regex hints or text-only LLM, no Vision."""
+        if not self._text_first.can_attempt(
+            total_pages=total_pages,
+            hints=ctx.text_hints,
+        ):
+            return None
+
+        hints_result = self._text_first.result_from_hints(ctx.text_hints)
+        if hints_result is not None:
+            logger.info(
+                "Text-first hints path for %r (pages=%d, chars=%d)",
+                filename,
+                total_pages,
+                len(ctx.text_hints.raw_text),
+            )
+            return hints_result, settings.openai_model, "text_hints"
+
+        text_result = await self._text_first.extract_from_text(
+            raw_text=ctx.text_hints.raw_text,
+            filename=filename,
+            system_prompt=ctx.vision_system_prompt,
+            model=settings.openai_model,
+            chat_completion=self._chat_completion,
+            parse_response=self._parse_response,
+        )
+        if text_result is not None:
+            logger.info(
+                "Text-first LLM path for %r (pages=%d, chars=%d)",
+                filename,
+                total_pages,
+                len(ctx.text_hints.raw_text),
+            )
+            return text_result, settings.openai_model, "text_llm"
+
+        logger.info(
+            "Text-first insufficient for %r — falling back to Vision",
+            filename,
+        )
+        return None
+
+    @debug_trace
     async def _extract(
         self, filename: str, mime: str, content: bytes
     ) -> tuple[ExtractionResult, str, dict]:
@@ -528,6 +584,26 @@ class InvoiceExtractionService:
                     f"PDF has {total_pages} pages; maximum is {settings.openai_max_pdf_pages}"
                 )
 
+            ctx = self._build_extraction_context(
+                filename=filename, content=content, mime=mime
+            )
+            text_first = await self._try_text_first_pdf(
+                filename,
+                total_pages=total_pages,
+                ctx=ctx,
+            )
+            if text_first is not None:
+                result, model_used, mode = text_first
+                meta = {
+                    "pages_processed": total_pages,
+                    "total_pdf_pages": total_pages,
+                    "document_category": ctx.document_category.value,
+                    "text_layer_chars": len(ctx.text_hints.raw_text),
+                    "extraction_mode": mode,
+                    "model": model_used,
+                }
+                return result, model_used, meta
+
             images = render_pdf_pages_as_images(
                 content,
                 max_pages=settings.openai_max_pdf_pages,
@@ -540,9 +616,6 @@ class InvoiceExtractionService:
             if not images:
                 raise ExtractionError("PDF has no readable pages")
 
-            ctx = self._build_extraction_context(
-                filename=filename, content=content, mime=mime
-            )
             meta: dict = {
                 "pages_processed": len(images),
                 "total_pdf_pages": total_pages,
@@ -834,6 +907,7 @@ class InvoiceExtractionService:
             settings.openai_strong_retry_enabled
             and bool(retry_reasons)
             and settings.openai_model_strong != settings.openai_model
+            and not str(meta.get("extraction_mode", "")).startswith("text_")
         )
 
         if should_retry:

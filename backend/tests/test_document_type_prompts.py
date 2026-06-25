@@ -17,5 +17,12 @@ def test_freelancer_rules_mention_hours():
     assert "INVOICE" in rules
 
 
+def test_saas_rules_mention_amount_due():
+    rules = build_document_type_rules(DocumentCategory.SAAS)
+    assert "Amount Due" in rules
+    assert "Pending amount" in rules
+    assert "Billed To" in rules
+
+
 def test_generic_rules_empty():
     assert build_document_type_rules(DocumentCategory.GENERIC) == ""

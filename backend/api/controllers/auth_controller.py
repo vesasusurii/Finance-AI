@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import bcrypt
 from fastapi import HTTPException, Request, Response, status
 
 from config import settings
@@ -44,6 +43,7 @@ from services.refresh_token_store import (
     revoke_all_refresh_tokens,
     store_refresh_jti,
 )
+from utils.password_hashing import hash_password, verify_password
 
 logger = get_logger(__name__)
 
@@ -151,10 +151,7 @@ class AuthController:
 
     async def _authenticate(self, email: str, password: str) -> User:
         user = await self._user_repo.find_by_email(email)
-        if not user or not bcrypt.checkpw(
-            password.encode("utf-8"),
-            user.password_hash.encode("utf-8"),
-        ):
+        if not user or not verify_password(password, user.password_hash):
             await self._audit_security(
                 user.id if user else None,
                 "login_failed",
@@ -408,10 +405,7 @@ class AuthController:
                     "message": "Password change is not required for this account.",
                 },
             )
-        if not bcrypt.checkpw(
-            body.current_password.encode("utf-8"),
-            user.password_hash.encode("utf-8"),
-        ):
+        if not verify_password(body.current_password, user.password_hash):
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -428,10 +422,7 @@ class AuthController:
                 },
             )
 
-        password_hash = bcrypt.hashpw(
-            body.new_password.encode("utf-8"),
-            bcrypt.gensalt(),
-        ).decode("utf-8")
+        password_hash = hash_password(body.new_password)
         user = await self._user_repo.update_password(user, password_hash)
         await self._user_repo.bump_token_version(user.id)
         user = await self._user_repo.get(user.id)

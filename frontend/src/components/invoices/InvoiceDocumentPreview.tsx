@@ -6,20 +6,37 @@ import { InvoiceAmountDisplay } from "@/components/invoices/InvoiceAmountDisplay
 import { formatDate } from "@/lib/labels";
 import type { Invoice } from "@/types/invoice";
 
+function seedIsComplete(invoice: Invoice | undefined): boolean {
+  if (!invoice) return false;
+  return Boolean(
+    invoice.name_of_company != null &&
+      invoice.invoice_date != null &&
+      invoice.source_file_id,
+  );
+}
+
 export function InvoiceDocumentPreview({
   invoiceId,
   invoice: initialInvoice,
 }: {
   invoiceId: number;
-  /** Optional seed from list/review API; refreshed via GET /api/invoices/{id}. */
+  /** Optional seed from list/review API; refreshed in the background when present. */
   invoice?: Invoice;
 }) {
   const [invoice, setInvoice] = useState<Invoice | null>(initialInvoice ?? null);
-  const [loading, setLoading] = useState(!initialInvoice);
+  const [loading, setLoading] = useState(!seedIsComplete(initialInvoice));
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const hasSeed = seedIsComplete(initialInvoice);
+
+    if (initialInvoice) {
+      setInvoice(initialInvoice);
+    }
+    if (!hasSeed) {
+      setLoading(true);
+    }
+
     void getInvoice(invoiceId)
       .then((full) => {
         if (!cancelled) setInvoice(full);
@@ -30,6 +47,7 @@ export function InvoiceDocumentPreview({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
@@ -105,7 +123,7 @@ export function InvoiceDocumentPreview({
         </dl>
       </div>
 
-      <div className="min-h-[960px] flex-1">
+      <div className="relative min-h-[960px] flex-1">
         {canPreview ? (
           <InvoiceFilePreview
             invoiceId={invoice.id}
@@ -119,6 +137,11 @@ export function InvoiceDocumentPreview({
             <p className="text-[13px] text-muted-foreground">
               No source file attached to this invoice.
             </p>
+          </div>
+        )}
+        {loading && (
+          <div className="pointer-events-none absolute right-3 top-3 rounded-md border border-border bg-card/90 px-2 py-1 text-[11px] text-muted-foreground">
+            Refreshing…
           </div>
         )}
       </div>

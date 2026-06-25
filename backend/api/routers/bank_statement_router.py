@@ -30,10 +30,14 @@ async def upload_bank_statement(
 async def list_bank_statements(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
+    uploaded_by: int | None = Query(
+        None,
+        description="Admin only: filter statements by uploader user id.",
+    ),
     user: UserContext = Depends(get_current_user),
     ctrl: BankStatementController = Depends(get_bank_statement_controller),
 ):
-    return await ctrl.list_statements(user, page, limit)
+    return await ctrl.list_statements(user, page, limit, uploaded_by)
 
 
 @router.delete("/bank-statements/{statement_id}", status_code=status.HTTP_204_NO_CONTENT)

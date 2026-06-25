@@ -72,6 +72,47 @@ _DATE_DMY_RE = re.compile(
 )
 
 
+_COMMISSION_FEE_DEBIT_AMOUNTS = frozenset({Decimal("20.00"), Decimal("0.80")})
+
+
+def _normalize_transfer_type(value: str | None) -> str:
+    if not value:
+        return ""
+    text = value.casefold()
+    for src, dst in (("ë", "e"), ("ç", "c")):
+        text = text.replace(src, dst)
+    return " ".join(text.split())
+
+
+def _is_commission_fee_debit(row: dict[str, Any]) -> bool:
+    debited = row.get("debited_amount")
+    if debited is None:
+        return False
+    if debited.quantize(Decimal("0.01")) not in _COMMISSION_FEE_DEBIT_AMOUNTS:
+        return False
+    credited = row.get("credited_amount")
+    if credited is not None and credited.quantize(Decimal("0.01")) != Decimal("0.00"):
+        return False
+    return True
+
+
+def _is_ignored_bank_commission_fee(row: dict[str, Any]) -> bool:
+    """Skip ProCredit commission fee rows during import."""
+    if not _is_commission_fee_debit(row):
+        return False
+    txn_type = _normalize_transfer_type(row.get("transaction_type"))
+    if "pagese e komisionit" not in txn_type:
+        return False
+    if txn_type.startswith("e-transfert") and "dales" in txn_type:
+        return True
+    if (
+        "e-pagese kolektuese" in txn_type
+        and "kontribute pensionale" in txn_type
+    ):
+        return True
+    return False
+
+
 @dataclass
 class ParsedBankRow:
     transaction_date: date | None
@@ -429,6 +470,13 @@ def parse_bank_statement_excel(
             break
         row_dict = _parse_row(row, col_map)
         if _is_empty_transaction(row_dict):
+            continue
+        if _is_ignored_bank_commission_fee(row_dict):
+            logger.debug(
+                "  bank row skipped: bank commission fee type=%r debited=%r",
+                row_dict["transaction_type"],
+                row_dict["debited_amount"],
+            )
             continue
         logger.debug(
             "  bank row parsed: date=%r (%s) debited=%r (%s) credited=%r (%s) "

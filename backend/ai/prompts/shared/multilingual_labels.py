@@ -13,7 +13,10 @@ MULTILINGUAL_LABELS = """
 | Due date               | Data e maturimit      | Due date / Payment due         | Datum dospeća        | **Fälligkeitsdatum** |
 | Client / Bill-to       | Klienti / Blerësi     | Client / Customer / Bill to    | Klijent / Kupac      | Kunde / Rechnungsempfänger |
 | Supplier / Issuer      | Furnitori / Lëshuesi  | Supplier / Vendor / From       | Dobavljač / Prodavac | Lieferant / Anbieter |
-| Amount due (pay this)  | Për pagesë            | For payment / Amount due / Total payable | Za naplatu | **Zahlbetrag** / Zu zahlen / Gesamtbetrag brutto |
+| Amount due (pay this)  | Për pagesë            | For payment / Amount due / **Amount Due (USD)** / Total payable | Za naplatu | **Zahlbetrag** / Zu zahlen / Gesamtbetrag brutto |
+| Account balance (ignore for amount) | — | **Pending amount** (SaaS account balance) | — | — ← NOT `amount` |
+| Issue date (US SaaS)   | —                     | **Date of Issue**              | —                    | — (MM/DD/YYYY → YYYY-MM-DD) |
+| Billed to (client)     | —                     | **Billed To** / Bill to        | —                    | Rechnungsempfänger    |
 | Sub-total              | Nëntotal              | Sub-total / Net                | Iznos bez PDV-a      | **Nettobetrag** / Summe netto |
 | VAT                    | TVSH                  | VAT / Tax                      | PDV                  | **MwSt** / USt / Umsatzsteuer |
 | Total (may incl. old debt) | Gjithsej borgji / Total Due | Total due / Balance due  | Ukupno duguje    | Gesamtbetrag        |

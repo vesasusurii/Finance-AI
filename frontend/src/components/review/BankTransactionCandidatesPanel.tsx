@@ -17,7 +17,7 @@ import {
   transactionDisplayValue,
 } from "@/components/review/BankTransactionMatchCard";
 import { ApiError } from "@/api/client";
-import { listBankTransactions } from "@/api/bankStatements";
+import { listBankMatchCandidates } from "@/api/review";
 import { manualMatch } from "@/api/reconciliation";
 import { rejectReviewTask } from "@/api/review";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
@@ -111,10 +111,10 @@ export function BankTransactionCandidatesPanel({
     const statementId = task?.bank_transaction?.bank_statement_id;
     const load = async () => {
       try {
-        const res = await listBankTransactions({
-          ...(statementId != null ? { bank_statement_id: statementId } : {}),
-          limit: 200,
-        });
+        const res = await listBankMatchCandidates(
+          invoice.id,
+          statementId ?? undefined,
+        );
         if (cancelled) return;
         const merged = mergeTransactionCandidates(
           res.items,

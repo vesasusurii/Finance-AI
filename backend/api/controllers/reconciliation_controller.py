@@ -99,6 +99,15 @@ class ReconciliationController:
         await self._invoice_repo.update_match_status(invoice_id, new_status)
         return new_status
 
+    async def _reset_bank_transaction_if_unmatched(
+        self, bank_transaction_id: int
+    ) -> None:
+        if await self._match_repo.active_for_transaction(bank_transaction_id):
+            return
+        await self._bank_txn_repo.update_reconciliation_status(
+            bank_transaction_id, "needs_review"
+        )
+
     @debug_trace
     async def run(
         self, request: ReconciliationRunRequest, user: UserContext
@@ -225,26 +234,38 @@ class ReconciliationController:
                 },
             )
         owner = invoice_owner_user_id(user)
+        invoice_id = row.invoice_id
+        bank_transaction_id = row.bank_transaction_id
+        status_before = row.status
         before_invoice = await self._invoice_repo.get(
-            row.invoice_id,
+            invoice_id,
             owner_user_id=owner,
         )
-        await self._match_repo.reject(body.match_id)
-        if row.status == "suggested":
+        deleted = await self._match_repo.delete(body.match_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "reject_failed",
+                    "message": "Could not reject match.",
+                },
+            )
+        if status_before == "suggested":
             await self._audit_repo.log(
                 user.user_id,
                 "match_rejected",
                 "invoice_payment_match",
                 body.match_id,
                 {"status": "suggested"},
-                {"status": "rejected", "reason": body.reason},
+                {"status": "deleted", "reason": body.reason},
             )
+            await self._reset_bank_transaction_if_unmatched(bank_transaction_id)
             cache.delete_pattern("review:*")
             cache.delete_pattern("bank_tx:*")
             return MatchActionResponse(match_id=body.match_id, status="rejected")
 
         remaining_matches = await self._match_repo.list_active_for_invoice(
-            row.invoice_id
+            invoice_id
         )
         new_match_status = "needs_review"
         if remaining_matches:
@@ -255,29 +276,31 @@ class ReconciliationController:
             inv_amount = before_invoice.amount if before_invoice else None
             if inv_amount is not None:
                 remaining = max(Decimal(str(inv_amount)) - total_paid, Decimal("0"))
-                await self._invoice_repo.update_debt(row.invoice_id, remaining)
+                await self._invoice_repo.update_debt(invoice_id, remaining)
                 new_match_status = (
                     "matched" if remaining <= 0 else "partially_matched"
                 )
             else:
                 new_match_status = "partially_matched"
             await self._invoice_repo.update_match_status(
-                row.invoice_id, new_match_status
+                invoice_id, new_match_status
             )
         else:
-            await self._invoice_repo.clear_paid_at_date(row.invoice_id)
-            await self._invoice_repo.update_match_status(row.invoice_id, "needs_review")
+            await self._invoice_repo.clear_paid_at_date(invoice_id)
+            await self._invoice_repo.update_match_status(invoice_id, "needs_review")
             await self._invoice_repo.flag_for_review(
-                row.invoice_id,
+                invoice_id,
                 "bank_match_failed",
                 match_status="needs_review",
             )
+
+        await self._reset_bank_transaction_if_unmatched(bank_transaction_id)
 
         await self._audit_repo.log(
             user.user_id,
             "match_rejected",
             "invoice",
-            row.invoice_id,
+            invoice_id,
             {
                 "paid_at_date": str(before_invoice.paid_at_date)
                 if before_invoice and before_invoice.paid_at_date

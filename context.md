@@ -16,12 +16,11 @@ docker compose build backend
 docker compose up -d db backend
 
 docker compose exec backend alembic upgrade head
-docker compose exec backend python scripts/seed_admin.py
 
 cd frontend && npm install && npm run dev
 ```
 
-- **Login:** `finance@borek.com` / `changeme` (after seed)
+- **Login:** use an existing account — create users at **Admin → Users** when signed in as admin
 - **Frontend:** http://localhost:5173 — use **empty** `VITE_API_BASE_URL` in `frontend/.env` so cookies work via Vite proxy
 - **API:** http://localhost:8000 — health: `/api/health`
 - **Auth:** JWT in `access_token` HttpOnly cookie; `GET /api/auth/me` returns **204** when signed out (not 401)
@@ -31,9 +30,10 @@ cd frontend && npm install && npm run dev
 Per [DOCS/8. OCR-Technology.md](DOCS/8. OCR-Technology.md), **all invoice scanning is OpenAI Vision** — PDF, JPEG, JPG, PNG only. No pdfplumber text OCR, Google Document AI, or Tesseract.
 
 1. `POST /api/invoices/upload` (multipart `files`) — PDF, JPEG, JPG, PNG
-2. PDFs: pages rasterised with `pypdfium2` → JPEG → OpenAI Vision (`gpt-4o-mini`, retry `gpt-4o`)
-3. Images: sent directly to OpenAI Vision
-4. Audit provider: `openai_vision` — requires `OPENAI_API_KEY` in `.env`
+2. **Digital PDFs:** text-layer hints or text-only LLM first (`OPENAI_TEXT_FIRST_*`); falls back to Vision when incomplete
+3. PDFs (Vision path): pages rasterised with `pypdfium2` → JPEG → OpenAI Vision (`gpt-4o-mini`, optional retry `gpt-4o`)
+4. Images: sent directly to OpenAI Vision
+5. Audit provider: `openai_vision` or `text_hints` / `text_llm` — requires `OPENAI_API_KEY` in `.env` for LLM paths
 
 ## Bank statement pipeline (Phase 2)
 
@@ -82,13 +82,17 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 | `/bank-transactions` | Parsed transaction rows |
 | `/matching` | Run matching + tabbed results (approve / reject) |
 | `/exports` | Excel export |
-| `/admin/*` | Placeholder |
+| `/admin/users` | User management + bank statement counts |
+| `/admin/permissions` | Role capabilities |
+| `/admin/audit-logs` | Audit log viewer |
+| `/admin/settings` | System settings |
 
 ## Key paths
 
 | Area | Path |
 |------|------|
 | OCR service | `backend/services/invoice_extraction_service.py` |
+| Text-first OCR | `backend/services/text_first_extraction_service.py` |
 | Bank service | `backend/services/bank_statement_service.py` |
 | Excel parser | `backend/utils/bank_excel_parser.py` |
 | Invoice # parser (regex tier 1) | `backend/utils/invoice_number_parser.py` |

@@ -50,6 +50,7 @@ def service() -> ReviewService:
         invoice_repo=AsyncMock(),
         bank_txn_repo=AsyncMock(),
         audit_repo=AsyncMock(),
+        statement_repo=AsyncMock(),
     )
 
 
@@ -67,15 +68,15 @@ async def test_list_open_enriches_invoice_and_bank(service: ReviewService):
         resolved_at=None,
     )
     service._review_repo.list_open.return_value = ([base], 1)
-    service._invoice_repo.get.return_value = MagicMock(spec=InvoiceResponse)
-    service._bank_txn_repo.get.return_value = MagicMock()
+    service._invoice_repo.get_many.return_value = {5: MagicMock(spec=InvoiceResponse)}
+    service._bank_txn_repo.get_many.return_value = {6: MagicMock()}
 
     result = await service.list_open(None, 1, 50)
 
     assert result.total == 1
     assert len(result.items) == 1
-    service._invoice_repo.get.assert_awaited_once_with(5, owner_user_id=None)
-    service._bank_txn_repo.get.assert_awaited_once_with(6)
+    service._invoice_repo.get_many.assert_awaited_once()
+    service._bank_txn_repo.get_many.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -97,8 +98,8 @@ async def test_list_open_skips_enrich_when_disabled(service: ReviewService):
 
     assert result.total == 1
     assert result.items[0].invoice is None
-    service._invoice_repo.get.assert_not_called()
-    service._bank_txn_repo.get.assert_not_called()
+    service._invoice_repo.get_many.assert_not_called()
+    service._bank_txn_repo.get_many.assert_not_called()
 
 
 @pytest.mark.asyncio

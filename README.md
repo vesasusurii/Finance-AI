@@ -29,7 +29,6 @@ cp .env.example .env
 
 docker compose --profile full up -d --build
 docker compose exec backend alembic upgrade head
-docker compose exec backend python scripts/seed_users.py
 ```
 
 | Service | URL |
@@ -37,12 +36,7 @@ docker compose exec backend python scripts/seed_users.py
 | Frontend | http://localhost:5173 |
 | API health | http://localhost:8000/api/health |
 
-**Login (after seed):** run `python scripts/seed_users.py` in the backend container.
-
-| Role | Email | Password |
-|------|-------|----------|
-| Finance | `finance@borek.com` | `changeme` |
-| Admin | `admin@borek.com` | `changeme` |
+**Login:** use an existing account in the database. New users are created by an admin at **Admin → Users** (`/admin/users`).
 
 Access tokens refresh every minute (configurable via `JWT_ACCESS_EXPIRE_MINUTES`).
 
@@ -79,4 +73,4 @@ docker-compose.yml
 .env.example
 ```
 
-**Seed login (local):** after `python scripts/seed_users.py` → see table above (`changeme` for both)
+Users are managed in the app (**Admin → Users**) or persist in the database across restarts.

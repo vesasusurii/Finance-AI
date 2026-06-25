@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Trash2, Upload, FileSpreadsheet, RefreshCw } from "lucide-react";
 import {
   LoadingSpinner,
@@ -21,6 +21,8 @@ import type {
   BankTransactionPreview,
 } from "@/types/bank";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
+import { useAuth } from "@/auth/AuthContext";
+import { useAdminUsers } from "@/hooks/useAdminUsers";
 import {
   formatCurrency,
   formatDate,
@@ -33,6 +35,14 @@ type PreviewRow = BankTransactionPreview & { id: string };
 export function BankPage() {
   const { confirm } = useAppDialog();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { isAdmin } = useAuth();
+  const { items: adminUsers } = useAdminUsers(isAdmin);
+  const uploadedByParam = searchParams.get("uploaded_by");
+  const uploadedByFilter = uploadedByParam
+    ? parseInt(uploadedByParam, 10)
+    : undefined;
+  const filterUserId = Number.isFinite(uploadedByFilter) ? uploadedByFilter : undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -49,14 +59,34 @@ export function BankPage() {
   const loadStatements = useCallback(async () => {
     setLoadingList(true);
     try {
-      const res = await listBankStatements(1, 20);
+      const res = await listBankStatements(
+        1,
+        50,
+        isAdmin ? filterUserId : undefined,
+      );
       setStatements(res.items);
     } catch {
       setStatements([]);
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [filterUserId, isAdmin]);
+
+  const filterLabel = useMemo(() => {
+    if (!isAdmin || filterUserId === undefined) return null;
+    const match = adminUsers.find((user) => user.id === filterUserId);
+    return match?.email ?? `User #${filterUserId}`;
+  }, [adminUsers, filterUserId, isAdmin]);
+
+  function handleUploaderFilterChange(userId: string) {
+    const next = new URLSearchParams(searchParams);
+    if (!userId) {
+      next.delete("uploaded_by");
+    } else {
+      next.set("uploaded_by", userId);
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   useEffect(() => {
     void loadStatements();
@@ -219,6 +249,23 @@ export function BankPage() {
         </div>
       ),
     },
+    ...(isAdmin
+      ? [
+          {
+            key: "uploader",
+            header: "Uploaded by",
+            cell: (r: BankStatement) => (
+              <button
+                type="button"
+                className="text-left text-[13px] text-primary hover:underline"
+                onClick={() => handleUploaderFilterChange(String(r.uploaded_by))}
+              >
+                {r.uploaded_by_email}
+              </button>
+            ),
+          } satisfies Column<BankStatement>,
+        ]
+      : []),
     {
       key: "rows",
       header: "Rows",
@@ -279,16 +326,61 @@ export function BankPage() {
       <PageHeader
         eyebrow="Workflow · Step 2"
         title="Bank statements"
+        description={
+          isAdmin
+            ? "Review bank statement uploads across finance users."
+            : undefined
+        }
         actions={
-          <Link
-            to="/matching"
-            className="inline-flex h-9 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:bg-soft-navy"
-          >
-            Run Matching
-          </Link>
+          !isAdmin ? (
+            <Link
+              to="/matching"
+              className="inline-flex h-9 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:bg-soft-navy"
+            >
+              Run Matching
+            </Link>
+          ) : null
         }
       />
 
+      {isAdmin ? (
+        <section className="rounded-lg border border-border bg-card p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-foreground">Filter by uploader</p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {filterLabel
+                  ? `Showing statements uploaded by ${filterLabel}.`
+                  : "Showing statements from all finance users."}
+              </p>
+            </div>
+            <label className="block min-w-[280px]">
+              <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
+                Finance user
+              </span>
+              <select
+                value={filterUserId ?? ""}
+                onChange={(e) => handleUploaderFilterChange(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:border-ring focus:outline-none"
+              >
+                <option value="">All users</option>
+                {adminUsers
+                  .filter((user) => user.role === "finance")
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.email}
+                      {user.bank_statement_count > 0
+                        ? ` (${user.bank_statement_count})`
+                        : ""}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+        </section>
+      ) : null}
+
+      {!isAdmin ? (
       <section
         className={`rounded-lg border border-dashed p-8 transition-colors ${
           dragging
@@ -335,6 +427,7 @@ export function BankPage() {
           </Button>
         </div>
       </section>
+      ) : null}
 
       {error && (
         <p className="text-[13px] text-destructive" role="alert">
@@ -347,7 +440,7 @@ export function BankPage() {
         </p>
       )}
 
-      {uploadResult && (
+      {uploadResult && !isAdmin ? (
         <section className="space-y-3">
           <p className="text-[13px] text-foreground">
             Imported{" "}
@@ -402,7 +495,7 @@ export function BankPage() {
             />
           )}
         </section>
-      )}
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="text-[14px] font-semibold text-foreground">

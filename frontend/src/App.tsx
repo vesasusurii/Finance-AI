@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LoginPage } from "./auth/LoginPage";
 import { AdminRoute } from "./auth/AdminRoute";
 import { FinanceRoute } from "./auth/FinanceRoute";
+import { FinanceOrAdminRoute } from "./auth/FinanceOrAdminRoute";
 import { OnboardedRoute } from "./auth/OnboardedRoute";
 import { OnboardingPage } from "./auth/OnboardingPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
@@ -30,11 +31,13 @@ export default function App() {
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route element={<OnboardedRoute />}>
               <Route element={<AppLayout />}>
+                <Route element={<FinanceOrAdminRoute />}>
+                  <Route path="bank-statements" element={<BankPage />} />
+                  <Route path="bank-transactions" element={<BankTransactionsPage />} />
+                </Route>
                 <Route element={<FinanceRoute />}>
                   <Route index element={<UploadPage />} />
                   <Route path="documents" element={<DocumentsPage />} />
-                  <Route path="bank-statements" element={<BankPage />} />
-                  <Route path="bank-transactions" element={<BankTransactionsPage />} />
                   <Route path="matching" element={<MatchingPage />} />
                   <Route path="manual-review" element={<ManualReviewPage />} />
                   <Route path="review" element={<Navigate to="/manual-review" replace />} />

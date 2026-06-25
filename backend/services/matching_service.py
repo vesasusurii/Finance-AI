@@ -475,15 +475,10 @@ class MatchingService:
             effective_paid_amount = Decimal(str(txn_amount))
 
         existing = await self._match_repo.get_pair(invoice_id, bank_transaction_id)
+        if existing and existing.status == "rejected":
+            await self._match_repo.delete(existing.id)
+            existing = None
         if existing:
-            if existing.status == "rejected":
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "error": "match_rejected",
-                        "message": "A rejected match exists for this pair; resolve on the matching screen.",
-                    },
-                )
             match_id = existing.id
             if existing.status == "matched":
                 approved = await self._match_repo.approve(existing.id)

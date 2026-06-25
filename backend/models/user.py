@@ -31,6 +31,18 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    password_reset_token_hash: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    password_reset_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1"
     )

@@ -41,8 +41,9 @@ export function validateClientFile(file: File): string | null {
   return null;
 }
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 750;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const POLL_MISSING_LIMIT = 8;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -72,6 +73,7 @@ export async function waitForDocumentExtraction(
   } = {},
 ): Promise<DocumentUploadItem> {
   const startedAt = Date.now();
+  let missingCount = 0;
   while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
     if (options.signal?.aborted) {
       throw new Error("Extraction watch cancelled");
@@ -79,6 +81,7 @@ export async function waitForDocumentExtraction(
     const status = await getDocumentStatus(documentId);
     const elapsedMs = Date.now() - startedAt;
     if (status) {
+      missingCount = 0;
       options.onPoll?.(status, elapsedMs);
       if (status.upload_status === "processed" || status.upload_status === "failed") {
         return {
@@ -90,6 +93,13 @@ export async function waitForDocumentExtraction(
           invoice_id: status.invoice_id,
           error: status.error,
         };
+      }
+    } else {
+      missingCount += 1;
+      if (missingCount >= POLL_MISSING_LIMIT) {
+        throw new Error(
+          "Could not load upload status — the file may belong to another account or no longer exists",
+        );
       }
     }
     await sleep(POLL_INTERVAL_MS);

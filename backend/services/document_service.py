@@ -4,6 +4,7 @@ from openai import AsyncOpenAI
 from core.debug_logger import get_logger
 from core.document_types import is_ocr_ready, validate_document_file
 from core.exceptions import ExtractionError
+from core.roles import is_admin
 from core.upload_enqueue import safe_enqueue_invoice_ocr
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
@@ -148,13 +149,25 @@ class DocumentService:
 
         return DocumentUploadResponse(uploaded=len(items), items=items)
 
+    async def _user_can_view_upload(self, row, user: UserContext) -> bool:
+        if row.uploaded_by == user.user_id or is_admin(user.role):
+            return True
+        invoice_id = await self._invoice_repo.get_id_by_source_file(row.id)
+        if invoice_id is None:
+            return False
+        invoice = await self._invoice_repo.get(
+            invoice_id,
+            owner_user_id=user.user_id,
+        )
+        return invoice is not None
+
     async def get_status(
         self,
         document_id: int,
         user: UserContext,
     ) -> DocumentStatusResponse:
         row = await self._upload_repo.get(document_id)
-        if row is None or row.uploaded_by != user.user_id:
+        if row is None or not await self._user_can_view_upload(row, user):
             raise HTTPException(
                 status_code=404,
                 detail={"error": "not_found", "message": "Document not found."},

@@ -251,6 +251,11 @@ export function ManualReviewPage() {
   const [filter, setFilter] = useState<ReviewQueueFilter>("bank_match");
   const { items, total, loading, error, reload } = useManualReviewQueue(filter);
   const [idx, setIdx] = useState(0);
+  const [initialLoad, setInitialLoad] = useState(true);
+
+  useEffect(() => {
+    if (!loading) setInitialLoad(false);
+  }, [loading]);
 
   const taskIdParam = searchParams.get("task");
   const invoiceIdParam = searchParams.get("invoice");
@@ -308,7 +313,7 @@ export function ManualReviewPage() {
     }
   }, [reload, idx, setSearchParams, syncUrl]);
 
-  if (!loading && items.length === 0) {
+  if (!loading && !initialLoad && items.length === 0) {
     return (
       <div>
         <PageHeader
@@ -367,9 +372,9 @@ export function ManualReviewPage() {
 
       {error && <p className="mb-4 text-[13px] text-destructive">{error}</p>}
 
-      {loading || !entry ? (
+      {initialLoad && loading && !entry ? (
         <SectionLoadingSpinner label="Loading review queue…" />
-      ) : (
+      ) : entry ? (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
             <StatusBadge
@@ -415,7 +420,9 @@ export function ManualReviewPage() {
             />
           )}
         </>
-      )}
+      ) : loading ? (
+        <SectionLoadingSpinner label="Loading review queue…" />
+      ) : null}
     </div>
   );
 }

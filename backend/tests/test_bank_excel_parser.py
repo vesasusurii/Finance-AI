@@ -13,6 +13,7 @@ import pytest
 from core.exceptions import ExcelParseError
 from utils.bank_excel_parser import (
     ParsedBankRow,
+    _is_ignored_bank_commission_fee,
     _parse_date,
     _excel_serial_to_date,
     dedupe_parsed_rows,
@@ -138,3 +139,57 @@ def test_extract_statement_date_raises_when_unknown():
 
 def test_statement_id_from_date():
     assert statement_id_from_date(date(2026, 2, 28)) == 20260228
+
+
+@pytest.mark.parametrize(
+    "debited,transaction_type,expected",
+    [
+        (
+            "0.80",
+            "E-Transfertë kombëtare dalëse Pagesë e komisionit",
+            True,
+        ),
+        (
+            "20.00",
+            "E-Transfertë ndërkombëtare dalëse Pagesë e komisionit",
+            True,
+        ),
+        (
+            "20.00",
+            "E-Transfertë kombëtare dalëse Transfertë kombëtare dalëse",
+            False,
+        ),
+        (
+            "0.80",
+            "E-Pagesë kolektuese për kontribute pensionale me transfertë Pagesë e komisionit",
+            True,
+        ),
+        (
+            "11269.58",
+            "E-Pagesë kolektuese për kontribute pensionale me transfertë Transfertë brenda bankës",
+            False,
+        ),
+        (
+            "0.80",
+            "E-Pagesë kolektuese me transfertë për administratën tatimore  Pagesë e komisionit",
+            False,
+        ),
+        (
+            "20.00",
+            "Komisioni mujor për shërbimet bankare Pagesë e komisionit",
+            False,
+        ),
+        (
+            "540.00",
+            "E-Transfertë kombëtare dalëse Pagesë e komisionit",
+            False,
+        ),
+    ],
+)
+def test_ignored_bank_commission_fee_rows(debited, transaction_type, expected):
+    row = {
+        "debited_amount": Decimal(debited),
+        "credited_amount": None,
+        "transaction_type": transaction_type,
+    }
+    assert _is_ignored_bank_commission_fee(row) is expected

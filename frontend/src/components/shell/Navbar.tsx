@@ -19,6 +19,7 @@ const financeNav = [
 
 const adminNav = [
   { to: "/admin/users", label: "Users" },
+  { to: "/bank-statements", label: "Bank statements" },
   { to: "/admin/permissions", label: "Permissions" },
   { to: "/admin/audit-logs", label: "Audit Logs" },
   { to: "/admin/settings", label: "Settings" },

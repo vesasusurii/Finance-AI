@@ -2,6 +2,7 @@
 
 from core.document_categories import DocumentCategory
 
+from ai.prompts.document_types.saas_rules import SAAS_RULES
 from ai.prompts.utilities.utility_rules import build_utility_document_rules
 
 ALBANIAN_RETAIL_RULES = """
@@ -32,4 +33,6 @@ def build_document_type_rules(category: DocumentCategory) -> str:
         return ALBANIAN_RETAIL_RULES
     if category == DocumentCategory.FREELANCER:
         return FREELANCER_RULES
+    if category == DocumentCategory.SAAS:
+        return SAAS_RULES
     return ""

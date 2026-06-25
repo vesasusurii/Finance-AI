@@ -23,6 +23,7 @@ export interface BankStatement {
   original_filename: string;
   uploaded_at: string;
   uploaded_by: number;
+  uploaded_by_email: string;
   row_count: number;
   processing_status: string;
 }

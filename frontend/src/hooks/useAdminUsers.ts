@@ -2,13 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { createUser, deleteUser, listUsers, resetUserPassword } from "../api/users";
 import type { AdminUser, CreateUserRequest } from "../types/user";
 
-export function useAdminUsers() {
+export function useAdminUsers(enabled = true) {
   const [items, setItems] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
+    if (!enabled) {
+      setItems([]);
+      setTotal(0);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -22,7 +29,7 @@ export function useAdminUsers() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     void reload();

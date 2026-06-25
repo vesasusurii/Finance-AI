@@ -136,6 +136,48 @@ def _invoice_to_export_row(inv: InvoiceResponse) -> list[object | None]:
     ]
 
 
+def _sort_purchase_invoices_for_export(
+    invoices: list[InvoiceResponse],
+    *,
+    sort: str = "paid_at_date_desc",
+) -> list[InvoiceResponse]:
+    if sort == "invoice_date_asc":
+        return sorted(
+            invoices,
+            key=lambda inv: (
+                inv.invoice_date is None,
+                inv.invoice_date.toordinal() if inv.invoice_date else 0,
+                inv.id or 0,
+            ),
+        )
+    if sort == "invoice_date_desc":
+        return sorted(
+            invoices,
+            key=lambda inv: (
+                inv.invoice_date is None,
+                -(inv.invoice_date.toordinal()) if inv.invoice_date else 0,
+                -(inv.id or 0),
+            ),
+        )
+    if sort == "paid_at_date_asc":
+        return sorted(
+            invoices,
+            key=lambda inv: (
+                inv.paid_at_date is None,
+                inv.paid_at_date.toordinal() if inv.paid_at_date else 0,
+                inv.id or 0,
+            ),
+        )
+    return sorted(
+        invoices,
+        key=lambda inv: (
+            inv.paid_at_date is None,
+            -(inv.paid_at_date.toordinal()) if inv.paid_at_date else 0,
+            -(inv.id or 0),
+        ),
+    )
+
+
 def _apply_purchase_invoice_body_cell(cell, *, col_idx: int, row_fill: PatternFill) -> None:
     cell.border = _THIN_BORDER
     cell.fill = row_fill
@@ -158,8 +200,12 @@ def _apply_purchase_invoice_body_cell(cell, *, col_idx: int, row_fill: PatternFi
 class ExcelService:
     @debug_trace
     def write_purchase_invoices_workbook(
-        self, invoices: list[InvoiceResponse]
+        self,
+        invoices: list[InvoiceResponse],
+        *,
+        sort: str = "paid_at_date_desc",
     ) -> bytes:
+        invoices = _sort_purchase_invoices_for_export(invoices, sort=sort)
         wb = Workbook()
         ws = wb.active
         ws.title = "Purchase Invoices"

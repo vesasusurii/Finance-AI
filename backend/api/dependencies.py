@@ -167,10 +167,17 @@ async def get_auth_controller(
     return AuthController(user_repo, audit_repo)
 
 
+async def get_bank_statement_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> BankStatementRepository:
+    return BankStatementRepository(session)
+
+
 async def get_user_controller(
     user_repo: UserRepository = Depends(get_user_repo),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
 ) -> UserController:
-    return UserController(user_repo)
+    return UserController(user_repo, statement_repo)
 
 
 async def get_invoice_controller(
@@ -209,12 +216,6 @@ async def get_export_controller(
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
 ) -> ExportController:
     return ExportController(excel, export_service, invoice_repo)
-
-
-async def get_bank_statement_repo(
-    session: AsyncSession = Depends(get_db_session),
-) -> BankStatementRepository:
-    return BankStatementRepository(session)
 
 
 async def get_bank_transaction_repo(
@@ -328,8 +329,11 @@ async def get_review_service(
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
     bank_txn_repo: BankTransactionRepository = Depends(get_bank_transaction_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
 ) -> ReviewService:
-    return ReviewService(review_repo, invoice_repo, bank_txn_repo, audit_repo)
+    return ReviewService(
+        review_repo, invoice_repo, bank_txn_repo, audit_repo, statement_repo
+    )
 
 
 async def get_review_controller(

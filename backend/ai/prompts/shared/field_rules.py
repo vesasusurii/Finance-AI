@@ -26,7 +26,7 @@ FIELD_RULES = """
 ### invoice_number  ← EXACT reference from document, never a tax/registration ID
 - **Output format:** copy **exactly as printed** on the document — keep `/`, `-`, spaces, and letter case if shown (e.g. `1/2026/0048`, `3807F638-0011`, `INV-2024-001`, `INVOICE 007`). Do not strip or reformat separators; matching normalization happens in software later.
 - Read the value printed on **this** document — never reuse numbers from examples or prior extractions.
-- **Generic invoices:** Invoice Ref, Fatura Nr., Belegnummer, Bill No., etc.
+- **Generic invoices:** Invoice Ref, Fatura Nr., Belegnummer, Bill No., **Invoice Number** (SaaS header field).
 - **Freelancer / timesheet invoices:** Top title line `INVOICE ###` or `Invoice ###` with date beside it — the number **immediately after** INVOICE is the reference (may be short, e.g. `007`). Also check `Invoice No.` / `Nr.` in the header block. Short numeric refs are valid — do not skip them.
 - **Albanian bilingual retail (`FATURA - INVOICE ####`):** invoice number is the numeric value on the title line after INVOICE (e.g. `14465`). Also check **Numri i faturës / Invoice number** in the header. NEVER use **Numri Fiskal / Fiscal Number**, **Numri i Biznesit / Business No**, or bank account numbers from the Banks block.
 - **KESCO (`electricity_kesco`):** use utility rules — **Nr. Ref.** near bill end (alphanumeric pattern shape `1900……B`, value varies).
@@ -38,7 +38,8 @@ FIELD_RULES = """
 ### invoice_date  ← date the invoice was issued
 - Output format: YYYY-MM-DD only.
 - Accept: DD.MM.YYYY, DD/MM/YYYY, YYYY-MM-DD, DD-MMM-YY (04-Feb-26 → 2026-02-04), DD MMM YYYY, long month names in any language.
-- Use "Invoice date" / "Data" / "Date of issue" — NOT "Due date" / "Data e maturimit" / "Payment date".
+- Use "Invoice date" / "Data" / "Date of issue" / **Date of Issue** — NOT "Due date" / "Data e maturimit" / "Payment date".
+- **US SaaS invoices:** **Date of Issue** uses `MM/DD/YYYY` (e.g. `08/21/2025` → `2025-08-21`). Do not swap day and month.
 - If multiple dates shown: invoice issue date takes priority over due date and supply date.
 - If ambiguous or unreadable → null + needs_review true.
 
@@ -55,8 +56,8 @@ FIELD_RULES = """
 **If `document_type` is `electricity_kesco`, `water_regional`, or `waste_pastrimi`:** follow utility rules above for amount/debt — do not use this generic tree.
 
 **Decision tree (generic documents only) — follow in order:**
-1. Is there a line labelled "Për pagesë" / "For payment" / "Za naplatu" / "Zahlbetrag" / "Zu zahlen"?  
-   → Use that value. STOP. (This excludes prior-period debt on utility bills.)
+1. Is there a line labelled **"Amount Due"** / **"Amount Due (USD)"** / "Për pagesë" / "For payment" / "Za naplatu" / "Zahlbetrag" / "Zu zahlen"?  
+   → Use that value. STOP. (**Never** use **Pending amount** / account balance / total outstanding on SaaS bills.)
 2. Is there a line labelled "Bruttobetrag" / "Gesamtbetrag inkl. MwSt" / "Total Amount Due" / "Amount due" / "Grand total" / "Total invoice" / "Gjithsej me TVSH" / **"Vlera me TVSH" / "Amount with VAT"** / **"Gjithësejt vlerat" / "Total's"** (use the **with-VAT** column)?  
    → Use that value. STOP.
 3. Is there a single "Total" / "Gesamtbetrag" line at the bottom of the totals block?  
@@ -75,6 +76,7 @@ Wait until you can read the totals page.
 - **Vlera e TVSH'së / Amount of VAT** (the VAT component alone).
 - "Total Due" / "Gjithsej borgji" when a separate "Për pagesë" line exists — **except** `waste_pastrimi` bills where Total Due **is** the payment amount.
 - Individual line item prices (Gesamt € per row — these are per-item totals, NOT the invoice total).
+- **Pending amount** / account balance on SaaS usage invoices (NOT the same as **Amount Due** for this invoice).
 - Any number that appears in the line-items table rows.
 
 **Format:** Return as plain decimal number, no currency symbol. European thousands dots removed, comma decimal → dot: `1.931,78` → `1931.78`.

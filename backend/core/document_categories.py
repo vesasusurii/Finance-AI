@@ -8,3 +8,4 @@ class DocumentCategory(str, Enum):
     UTILITY = "utility"
     ALBANIAN_RETAIL = "albanian_retail"
     FREELANCER = "freelancer"
+    SAAS = "saas"

@@ -7,7 +7,11 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from schemas.invoice import InvoiceResponse
-from services.excel_service import ExcelService, _PURCHASE_INVOICE_HEADERS
+from services.excel_service import (
+    ExcelService,
+    _PURCHASE_INVOICE_HEADERS,
+    _sort_purchase_invoices_for_export,
+)
 
 EXPECTED_HEADERS = (
     "Invoice Date",
@@ -57,6 +61,59 @@ def _sample_invoice() -> InvoiceResponse:
         created_at=datetime(2026, 2, 23, tzinfo=timezone.utc),
         updated_at=datetime(2026, 2, 23, tzinfo=timezone.utc),
     )
+
+
+def _sample_invoice_with(
+    *,
+    invoice_id: int,
+    invoice_date: date | None,
+) -> InvoiceResponse:
+    base = _sample_invoice()
+    return base.model_copy(update={"id": invoice_id, "invoice_date": invoice_date})
+
+
+def test_purchase_invoices_export_sorts_by_paid_date_not_upload_id():
+    paid_dates = {
+        40: date(2026, 6, 3),
+        39: date(2026, 6, 10),
+        1: date(2026, 6, 25),
+        16: date(2026, 6, 15),
+    }
+    invoices = [
+        _sample_invoice_with(invoice_id=40, invoice_date=date(2026, 2, 1)).model_copy(
+            update={"paid_at_date": paid_dates[40]}
+        ),
+        _sample_invoice_with(invoice_id=39, invoice_date=date(2026, 2, 4)).model_copy(
+            update={"paid_at_date": paid_dates[39]}
+        ),
+        _sample_invoice_with(invoice_id=1, invoice_date=date(2026, 2, 20)).model_copy(
+            update={"paid_at_date": paid_dates[1]}
+        ),
+        _sample_invoice_with(invoice_id=16, invoice_date=date(2026, 2, 9)).model_copy(
+            update={"paid_at_date": paid_dates[16]}
+        ),
+    ]
+    ordered = _sort_purchase_invoices_for_export(invoices)
+    assert [inv.id for inv in ordered] == [1, 16, 39, 40]
+
+
+def test_purchase_invoices_export_sorts_by_invoice_date_not_upload_id():
+    invoices = [
+        _sample_invoice_with(invoice_id=40, invoice_date=date(2026, 2, 1)),
+        _sample_invoice_with(invoice_id=39, invoice_date=date(2026, 2, 4)),
+        _sample_invoice_with(invoice_id=1, invoice_date=date(2026, 2, 20)),
+        _sample_invoice_with(invoice_id=16, invoice_date=date(2026, 2, 9)),
+    ]
+    ordered = _sort_purchase_invoices_for_export(
+        invoices, sort="invoice_date_desc"
+    )
+    assert [inv.id for inv in ordered] == [1, 16, 39, 40]
+    assert [inv.invoice_date for inv in ordered] == [
+        date(2026, 2, 20),
+        date(2026, 2, 9),
+        date(2026, 2, 4),
+        date(2026, 2, 1),
+    ]
 
 
 def test_purchase_invoices_workbook_matches_official_columns():

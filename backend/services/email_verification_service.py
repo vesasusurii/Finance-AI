@@ -10,8 +10,11 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 
 from config import settings
+from core.debug_logger import get_logger
 from models.user import User
 from services.verification_email_template import build_verification_email_message
+
+logger = get_logger(__name__)
 
 VERIFICATION_CODE_TTL_MINUTES = 10
 VERIFICATION_RESEND_COOLDOWN_MINUTES = 2
@@ -80,11 +83,17 @@ def verify_code(user: User, code: str) -> bool:
 
 
 def log_verification_code_for_local(email: str, code: str) -> None:
-    if settings.environment == "local" and settings.log_verification_codes:
-        print(
-            f"[auth] Email verification code for {email}: {code} "
-            f"(expires in {VERIFICATION_CODE_TTL_MINUTES} minutes)"
-        )
+    """Local dev without SMTP: codes go to backend logs, not email."""
+    if settings.environment != "local":
+        return
+    if settings.smtp_host and not settings.log_verification_codes:
+        return
+    logger.info(
+        "Email verification code for %s: %s (expires in %s minutes)",
+        email,
+        code,
+        VERIFICATION_CODE_TTL_MINUTES,
+    )
 
 
 def send_verification_code(email: str, code: str) -> None:

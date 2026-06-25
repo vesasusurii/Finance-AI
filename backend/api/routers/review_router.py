@@ -4,6 +4,8 @@ from api.controllers.review_controller import ReviewController
 from api.dependencies import get_current_user, get_review_controller
 from schemas.auth import UserContext
 from schemas.review import (
+    BankMatchCandidatesResponse,
+    ManualReviewQueueResponse,
     ReviewDecisionRequest,
     ReviewTaskDecisionResponse,
     ReviewTaskListResponse,
@@ -34,6 +36,34 @@ async def list_review_tasks(
 ):
     return await ctrl.list_open(
         user, task_type, page, limit, has_invoice, reasons, enrich=enrich
+    )
+
+
+@router.get("/manual-queue", response_model=ManualReviewQueueResponse)
+async def manual_review_queue(
+    queue_filter: str = Query(
+        "bank_match",
+        alias="filter",
+        pattern="^(all|bank_match|extraction)$",
+    ),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    user: UserContext = Depends(get_current_user),
+    ctrl: ReviewController = Depends(get_review_controller),
+):
+    return await ctrl.manual_queue(user, queue_filter, page, limit)
+
+
+@router.get("/bank-candidates", response_model=BankMatchCandidatesResponse)
+async def bank_match_candidates(
+    invoice_id: int = Query(..., ge=1),
+    bank_statement_id: int | None = None,
+    limit: int = Query(100, ge=1, le=200),
+    user: UserContext = Depends(get_current_user),
+    ctrl: ReviewController = Depends(get_review_controller),
+):
+    return await ctrl.bank_match_candidates(
+        user, invoice_id, bank_statement_id, limit
     )
 
 

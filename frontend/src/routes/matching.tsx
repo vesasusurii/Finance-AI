@@ -341,18 +341,12 @@ export function MatchingPage() {
     setError(null);
     try {
       await rejectMatch(matchId, reason || undefined);
-      setMatches((prev) =>
-        prev.map((m) =>
-          m.id === matchId ? { ...m, status: "rejected" as const } : m,
-        ),
-      );
+      setMatches((prev) => prev.filter((m) => m.id !== matchId));
+      setMatchTotal((t) => Math.max(0, t - 1));
     } catch (e) {
       if (e instanceof ApiError && e.code === "match_already_resolved") {
-        setMatches((prev) =>
-          prev.map((m) =>
-            m.id === matchId ? { ...m, status: "rejected" as const } : m,
-          ),
-        );
+        setMatches((prev) => prev.filter((m) => m.id !== matchId));
+        setMatchTotal((t) => Math.max(0, t - 1));
       } else {
         setError(e instanceof Error ? e.message : "Could not reject match");
         return;

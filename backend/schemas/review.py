@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,3 +38,22 @@ class ReviewTaskDecisionResponse(BaseModel):
     review_task_id: int
     status: str
     resolved_at: datetime
+
+
+class ManualReviewEntryResponse(BaseModel):
+    key: str
+    mode: Literal["bank_match", "extraction"]
+    invoice: InvoiceResponse
+    task: ReviewTaskResponse | None = None
+
+
+class ManualReviewQueueResponse(BaseModel):
+    items: list[ManualReviewEntryResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class BankMatchCandidatesResponse(BaseModel):
+    items: list[BankTransactionResponse]
+    bank_statement_id: int | None = None

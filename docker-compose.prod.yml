@@ -1,0 +1,80 @@
+# Production stack — no --reload, built frontend behind nginx.
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Dev stack remains docker-compose.yml (profile full + uvicorn --reload).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: finance-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-finance_ai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finance} -d ${POSTGRES_DB:-finance_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: finance-ai-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-ai-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-2}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: ${QUEUE_MODE:-adaptive}
+      STORAGE_PATH: /data/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-invoices}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_MODEL_STRONG: ${OPENAI_MODEL_STRONG:-gpt-4o}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    volumes:
+      - upload_data:/data/uploads
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    container_name: finance-ai-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+
+volumes:
+  postgres_data:
+  upload_data:

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Plus, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
@@ -49,6 +50,15 @@ export function UsersPage() {
       ),
     },
     {
+      key: "statements",
+      header: "Bank statements",
+      cell: (row) => (
+        <span className="tabular-nums text-muted-foreground">
+          {row.bank_statement_count}
+        </span>
+      ),
+    },
+    {
       key: "created",
       header: "Created",
       cell: (row) => (
@@ -63,6 +73,14 @@ export function UsersPage() {
       align: "right",
       cell: (row) => (
         <div className="flex justify-end gap-2">
+          {row.bank_statement_count > 0 ? (
+            <Link
+              to={`/bank-statements?uploaded_by=${row.id}`}
+              className="inline-flex h-8 items-center rounded-md px-3 text-[12px] font-medium text-primary hover:underline"
+            >
+              View statements
+            </Link>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

@@ -8,13 +8,21 @@ from models.invoice_payment_match import InvoicePaymentMatch
 from models.review_task import ReviewTask
 from models.bank_transaction import BankTransaction
 from models.uploaded_file import UploadedFile
+from models.user import User
 from schemas.bank_statement import BankStatementListItem
 from utils.bank_excel_parser import statement_id_from_date
 
 
-def _apply_owner_scope(query, owner_user_id: int | None):
+def _apply_owner_scope(
+    query,
+    owner_user_id: int | None,
+    *,
+    uploaded_by: int | None = None,
+):
     if owner_user_id is not None:
         return query.where(BankStatement.uploaded_by == owner_user_id)
+    if uploaded_by is not None:
+        return query.where(BankStatement.uploaded_by == uploaded_by)
     return query
 
 
@@ -107,15 +115,19 @@ class BankStatementRepository:
         limit: int,
         *,
         owner_user_id: int | None = None,
+        uploaded_by: int | None = None,
     ) -> tuple[list[BankStatementListItem], int]:
         count_q = select(func.count()).select_from(BankStatement)
-        count_q = _apply_owner_scope(count_q, owner_user_id)
+        count_q = _apply_owner_scope(
+            count_q, owner_user_id, uploaded_by=uploaded_by
+        )
         total = (await self._session.execute(count_q)).scalar_one()
 
         offset = (page - 1) * limit
         q = (
-            select(BankStatement, UploadedFile.original_filename)
+            select(BankStatement, UploadedFile.original_filename, User.email)
             .join(UploadedFile, BankStatement.source_file_id == UploadedFile.id)
+            .join(User, BankStatement.uploaded_by == User.id)
             .order_by(
                 BankStatement.statement_date.desc().nullslast(),
                 BankStatement.uploaded_at.desc(),
@@ -123,7 +135,7 @@ class BankStatementRepository:
             .offset(offset)
             .limit(limit)
         )
-        q = _apply_owner_scope(q, owner_user_id)
+        q = _apply_owner_scope(q, owner_user_id, uploaded_by=uploaded_by)
         result = await self._session.execute(q)
         items = [
             BankStatementListItem(
@@ -132,12 +144,20 @@ class BankStatementRepository:
                 original_filename=filename,
                 uploaded_at=stmt.uploaded_at,
                 uploaded_by=stmt.uploaded_by,
+                uploaded_by_email=uploader_email,
                 row_count=stmt.row_count,
                 processing_status=stmt.processing_status,
             )
-            for stmt, filename in result.all()
+            for stmt, filename, uploader_email in result.all()
         ]
         return items, total
+
+    async def count_by_uploader(self) -> dict[int, int]:
+        result = await self._session.execute(
+            select(BankStatement.uploaded_by, func.count())
+            .group_by(BankStatement.uploaded_by)
+        )
+        return {user_id: int(count) for user_id, count in result.all()}
 
     async def delete_statement(
         self,

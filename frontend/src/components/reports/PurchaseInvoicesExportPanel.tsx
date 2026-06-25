@@ -37,8 +37,8 @@ const CATEGORIES = [
 ];
 
 export function PurchaseInvoicesExportPanel() {
-  const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
-  const [invoiceDateTo, setInvoiceDateTo] = useState("");
+  const [paidDateFrom, setPaidDateFrom] = useState("");
+  const [paidDateTo, setPaidDateTo] = useState("");
   const [matchStatus, setMatchStatus] = useState("");
   const [reviewStatus, setReviewStatus] = useState("");
   const [category, setCategory] = useState("");
@@ -49,25 +49,25 @@ export function PurchaseInvoicesExportPanel() {
   async function handleDownload() {
     setDownloading(true);
     setError(null);
-    const dateFromIso = invoiceDateFrom.trim()
-      ? isoDateFromInput(invoiceDateFrom)
+    const dateFromIso = paidDateFrom.trim()
+      ? isoDateFromInput(paidDateFrom)
       : null;
-    const dateToIso = invoiceDateTo.trim()
-      ? isoDateFromInput(invoiceDateTo)
+    const dateToIso = paidDateTo.trim()
+      ? isoDateFromInput(paidDateTo)
       : null;
-    if (invoiceDateFrom.trim() && !dateFromIso) {
-      setError("Invoice date from must be dd/mm/yyyy");
+    if (paidDateFrom.trim() && !dateFromIso) {
+      setError("Paid date from must be dd/mm/yyyy");
       setDownloading(false);
       return;
     }
-    if (invoiceDateTo.trim() && !dateToIso) {
-      setError("Invoice date to must be dd/mm/yyyy");
+    if (paidDateTo.trim() && !dateToIso) {
+      setError("Paid date to must be dd/mm/yyyy");
       setDownloading(false);
       return;
     }
     const params: PurchaseInvoicesExportParams = {};
-    if (dateFromIso) params.invoice_date_from = dateFromIso;
-    if (dateToIso) params.invoice_date_to = dateToIso;
+    if (dateFromIso) params.paid_date_from = dateFromIso;
+    if (dateToIso) params.paid_date_to = dateToIso;
     if (matchStatus) params.match_status = matchStatus;
     if (reviewStatus) params.review_status = reviewStatus;
     if (category) params.category = category;
@@ -89,27 +89,28 @@ export function PurchaseInvoicesExportPanel() {
           Purchase invoices export
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          Filter the 12-column Finance Excel export before download.
+          Filter the 12-column Finance Excel export by bank payment date before
+          download.
         </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-1">
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Invoice date from
+            Paid date from
           </span>
           <DateTextInput
-            value={invoiceDateFrom}
-            onChange={setInvoiceDateFrom}
+            value={paidDateFrom}
+            onChange={setPaidDateFrom}
           />
         </label>
         <label className="space-y-1">
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Invoice date to
+            Paid date to
           </span>
           <DateTextInput
-            value={invoiceDateTo}
-            onChange={setInvoiceDateTo}
+            value={paidDateTo}
+            onChange={setPaidDateTo}
           />
         </label>
         <label className="space-y-1">

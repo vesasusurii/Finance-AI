@@ -263,7 +263,11 @@ export function useUploadQueue() {
         });
         appendLog(item.id, "uploading", "File saved — starting extraction");
 
-        if (result.invoice_id) {
+        if (
+          result.invoice_id ||
+          result.upload_status === "linked" ||
+          result.upload_status === "processed"
+        ) {
           let invoice = null;
           try {
             invoice = await getInvoice(result.invoice_id);

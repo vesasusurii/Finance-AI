@@ -59,12 +59,19 @@ class BankStatementController:
 
     @debug_trace
     async def list_statements(
-        self, user: UserContext, page: int, limit: int
+        self,
+        user: UserContext,
+        page: int,
+        limit: int,
+        uploaded_by: int | None = None,
     ) -> BankStatementListResponse:
+        owner = upload_owner_user_id(user)
+        filter_user_id = uploaded_by if owner is None else None
         items, total = await self._statement_repo.list_statements(
             page,
             limit,
-            owner_user_id=upload_owner_user_id(user),
+            owner_user_id=owner,
+            uploaded_by=filter_user_id,
         )
         return BankStatementListResponse(
             items=items, total=total, page=page, limit=limit

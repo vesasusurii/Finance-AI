@@ -84,22 +84,24 @@ class ExportController:
     async def purchase_invoices_excel(
         self,
         user: UserContext,
-        invoice_date_from: date | None,
-        invoice_date_to: date | None,
+        paid_date_from: date | None,
+        paid_date_to: date | None,
         match_status: str | None,
         review_status: str | None,
         category: str | None,
         company: str | None,
+        sort: str | None,
     ) -> StreamingResponse:
         filters = {
             k: v
             for k, v in {
-                "invoice_date_from": invoice_date_from,
-                "invoice_date_to": invoice_date_to,
+                "paid_date_from": paid_date_from,
+                "paid_date_to": paid_date_to,
                 "match_status": match_status,
                 "review_status": review_status,
                 "category": category,
                 "company": company,
+                "sort": sort,
             }.items()
             if v is not None
         }
@@ -108,7 +110,10 @@ class ExportController:
             owner_user_id=invoice_owner_user_id(user),
         )
         try:
-            data = self._excel.write_purchase_invoices_workbook(invoices)
+            data = self._excel.write_purchase_invoices_workbook(
+                invoices,
+                sort=filters.get("sort", "paid_at_date_desc"),
+            )
         except Exception as exc:
             raise ExportError(str(exc)) from exc
 

@@ -362,6 +362,7 @@ export function DocumentsPage() {
               void downloadPurchaseInvoicesExcel({
                 ...(debouncedSearch ? { company: debouncedSearch } : {}),
                 ...tabFilters(activeTab),
+                sort: sortOrder,
               })
                 .catch((e) => {
                   setExportError(
