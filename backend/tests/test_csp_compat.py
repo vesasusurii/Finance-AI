@@ -11,3 +11,4 @@ def test_theme_init_includes_react_oninput_csp_polyfill() -> None:
     theme_init = theme_init_path.read_text(encoding="utf-8")
     assert 'defineProperty(document, "oninput"' in theme_init
     assert 'setAttribute("oninput", "return;")' in theme_init
+    assert "Element.prototype.setAttribute" in theme_init
