@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { PdfCanvasPreview } from "@/components/invoices/PdfCanvasPreview";
 import { fetchInvoiceFile, invoiceFileUrl } from "@/api/invoices";
+import { sniffInvoiceBlob } from "@/lib/fileSniff";
 import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
@@ -14,12 +14,11 @@ function mimeFromName(name: string, fallback: string | null): string | null {
   return null;
 }
 
-function isPdfMime(mime: string, displayName: string): boolean {
-  return (
-    mime === "application/pdf" ||
-    mime.includes("pdf") ||
-    displayName.toLowerCase().endsWith(".pdf")
-  );
+function pdfPreviewBlob(blob: Blob): Blob {
+  if (blob.type === "application/pdf") {
+    return blob;
+  }
+  return new Blob([blob], { type: "application/pdf" });
 }
 
 export function InvoiceFilePreview({
@@ -36,45 +35,61 @@ export function InvoiceFilePreview({
   className?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewIsImage, setPreviewIsImage] = useState(false);
   const [previewIsPdf, setPreviewIsPdf] = useState(false);
+  const [previewInvalidPdf, setPreviewInvalidPdf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [pdfFrameError, setPdfFrameError] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    let objectUrl: string | null = null;
     let cancelled = false;
+
+    const revokeObjectUrl = () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
 
     setLoading(true);
     setError(null);
     setImgError(false);
+    setPdfFrameError(false);
     setPreviewUrl(null);
-    setPreviewBlob(null);
     setPreviewIsImage(false);
     setPreviewIsPdf(false);
+    setPreviewInvalidPdf(false);
+    revokeObjectUrl();
 
     void fetchInvoiceFile(invoiceId)
-      .then((blob) => {
+      .then(async (blob) => {
         if (cancelled) return;
-        const resolvedMime =
-          blob.type || mimeFromName(displayName, mimeType) || "";
-        const image = resolvedMime.startsWith("image/");
-        const pdf = isPdfMime(resolvedMime, displayName);
+        const kind = await sniffInvoiceBlob(blob, displayName, mimeType);
 
-        setPreviewIsImage(image);
-        setPreviewIsPdf(pdf);
+        setPreviewIsImage(kind === "image");
+        setPreviewIsPdf(kind === "pdf");
+        setPreviewInvalidPdf(kind === "invalid-pdf");
 
-        if (image) {
-          objectUrl = URL.createObjectURL(blob);
+        if (kind === "image") {
+          const imageBlob = blob.type.startsWith("image/")
+            ? blob
+            : new Blob([blob], {
+                type: mimeFromName(displayName, mimeType) ?? "image/png",
+              });
+          const objectUrl = URL.createObjectURL(imageBlob);
+          objectUrlRef.current = objectUrl;
           setPreviewUrl(objectUrl);
           return;
         }
 
-        if (pdf) {
-          setPreviewBlob(blob);
+        if (kind === "pdf") {
+          const objectUrl = URL.createObjectURL(pdfPreviewBlob(blob));
+          objectUrlRef.current = objectUrl;
+          setPreviewUrl(objectUrl);
         }
       })
       .catch((e: unknown) => {
@@ -89,7 +104,7 @@ export function InvoiceFilePreview({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      revokeObjectUrl();
     };
   }, [displayName, invoiceId, mimeType]);
 
@@ -113,16 +128,23 @@ export function InvoiceFilePreview({
           : null;
   const canOpen = !loading && !error;
   const showImage = !loading && !error && previewUrl !== null && isImage;
-  const showPdf = !loading && !error && previewBlob !== null && previewIsPdf;
+  const showPdf =
+    !loading &&
+    !error &&
+    previewUrl !== null &&
+    previewIsPdf &&
+    !pdfFrameError;
+  const showInvalidPdf = !loading && !error && previewInvalidPdf;
   const showImgError =
     !loading && !error && previewIsImage && imgError && previewUrl !== null;
+  const showPdfFrameError =
+    !loading && !error && previewIsPdf && pdfFrameError && previewUrl !== null;
   const showUnsupported =
     !loading &&
     !error &&
     !previewIsImage &&
     !previewIsPdf &&
-    previewUrl === null &&
-    previewBlob === null;
+    previewUrl === null;
 
   return (
     <div
@@ -194,19 +216,24 @@ export function InvoiceFilePreview({
         )}
 
         {showPdf && (
-          <PdfCanvasPreview
-            blob={previewBlob}
-            minHeightClass={minHeightClass}
-            className="h-full"
+          <iframe
+            src={previewUrl}
+            title={displayName}
+            className={cn("h-full w-full border-0 bg-background", minHeightClass)}
+            onError={() => setPdfFrameError(true)}
           />
         )}
 
-        {(showUnsupported || showImgError) && (
+        {(showUnsupported || showImgError || showInvalidPdf || showPdfFrameError) && (
           <div
             className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
           >
             <p className="text-[13px] text-muted-foreground">
-              Preview unavailable for this file type.
+              {showInvalidPdf
+                ? "This file could not be read as a PDF. It may be corrupt or saved in an unsupported format."
+                : showPdfFrameError
+                  ? "The PDF could not be displayed inline in this browser."
+                  : "Preview unavailable for this file type."}
             </p>
             <a
               href={invoiceFileUrl(invoiceId)}

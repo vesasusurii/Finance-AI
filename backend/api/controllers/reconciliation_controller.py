@@ -1,5 +1,4 @@
 from decimal import Decimal
-import asyncio
 
 from fastapi import HTTPException
 
@@ -178,43 +177,35 @@ class ReconciliationController:
         cached = cache.get_model(cache_key, MatchingTabCountsResponse)
         if cached is not None:
             return cached
-        (
-            matched,
-            partially_matched,
-            unmatched_invoices,
-            unmatched_transactions,
-            needs_review,
-            multi_invoice,
-        ) = await asyncio.gather(
-            self._match_repo.count_matches(
-                None,
-                bank_statement_id,
-                owner_user_id=owner_invoice,
-                confirmed_only=True,
-            ),
-            self._invoice_repo.count_by_match_status(
-                "partially_matched",
-                owner_user_id=owner_invoice,
-            ),
-            self._invoice_repo.count_by_match_status(
-                "unmatched",
-                owner_user_id=owner_invoice,
-            ),
-            self._bank_txn_repo.count_transactions(
-                bank_statement_id,
-                "needs_review",
-                owner_user_id=owner_upload,
-            ),
-            self._invoice_repo.count_by_match_statuses(
-                ["unmatched", "needs_review"],
-                owner_user_id=owner_invoice,
-            ),
-            self._bank_txn_repo.count_transactions(
-                bank_statement_id,
-                None,
-                owner_user_id=owner_upload,
-                multi_invoice=True,
-            ),
+        # One AsyncSession cannot run concurrent executes; keep counts sequential.
+        matched = await self._match_repo.count_matches(
+            None,
+            bank_statement_id,
+            owner_user_id=owner_invoice,
+            confirmed_only=True,
+        )
+        partially_matched = await self._invoice_repo.count_by_match_status(
+            "partially_matched",
+            owner_user_id=owner_invoice,
+        )
+        unmatched_invoices = await self._invoice_repo.count_by_match_status(
+            "unmatched",
+            owner_user_id=owner_invoice,
+        )
+        unmatched_transactions = await self._bank_txn_repo.count_transactions(
+            bank_statement_id,
+            "needs_review",
+            owner_user_id=owner_upload,
+        )
+        needs_review = await self._invoice_repo.count_by_match_statuses(
+            ["unmatched", "needs_review"],
+            owner_user_id=owner_invoice,
+        )
+        multi_invoice = await self._bank_txn_repo.count_transactions(
+            bank_statement_id,
+            None,
+            owner_user_id=owner_upload,
+            multi_invoice=True,
         )
         response = MatchingTabCountsResponse(
             matched=matched,

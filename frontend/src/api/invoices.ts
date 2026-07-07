@@ -10,6 +10,41 @@ import type { MatchListResponse } from "../types/match";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
+export type InvoiceFileFetchMeta = {
+  invoiceId: number;
+  status: number;
+  contentType: string | null;
+  contentDisposition: string | null;
+  blobSize: number;
+  blobType: string;
+};
+
+function logInvoiceFileFetch(meta: InvoiceFileFetchMeta): void {
+  console.info("[invoice-file] loaded", meta);
+}
+
+function logInvoiceFileError(
+  invoiceId: number,
+  message: string,
+  meta?: Partial<InvoiceFileFetchMeta>,
+): void {
+  console.error("[invoice-file] failed", { invoiceId, message, ...meta });
+}
+
+function blobFromResponse(res: Response): Promise<Blob> {
+  const contentType = res.headers.get("content-type");
+  return res.blob().then((blob) => {
+    if (blob.type || !contentType) {
+      return blob;
+    }
+    const baseType = contentType.split(";")[0]?.trim();
+    if (!baseType) {
+      return blob;
+    }
+    return new Blob([blob], { type: baseType });
+  });
+}
+
 export async function uploadInvoices(files: File[]): Promise<UploadResponse> {
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
@@ -93,7 +128,9 @@ export async function deleteInvoice(id: number): Promise<void> {
 /**
  * Fetch invoice source file with session cookies (for preview blob URLs).
  */
-export async function fetchInvoiceFile(invoiceId: number): Promise<Blob> {
+export async function fetchInvoiceFile(
+  invoiceId: number,
+): Promise<Blob> {
   const path = `/api/invoices/${invoiceId}/file`;
   const doFetch = () =>
     fetch(`${API_BASE}${path}`, { credentials: "include" });
@@ -115,14 +152,39 @@ export async function fetchInvoiceFile(invoiceId: number): Promise<Blob> {
     }
   }
 
+  const headerMeta = {
+    invoiceId,
+    status: res.status,
+    contentType: res.headers.get("content-type"),
+    contentDisposition: res.headers.get("content-disposition"),
+  };
+
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as {
       message?: string;
     };
+    logInvoiceFileError(invoiceId, body.message ?? "Could not load invoice file", {
+      ...headerMeta,
+      blobSize: 0,
+      blobType: "",
+    });
     throw new Error(body.message ?? "Could not load invoice file");
   }
 
-  return res.blob();
+  const blob = await blobFromResponse(res);
+  const meta: InvoiceFileFetchMeta = {
+    ...headerMeta,
+    blobSize: blob.size,
+    blobType: blob.type,
+  };
+  logInvoiceFileFetch(meta);
+
+  if (blob.size === 0) {
+    logInvoiceFileError(invoiceId, "Invoice file response was empty", meta);
+    throw new Error("Invoice file is empty");
+  }
+
+  return blob;
 }
 
 /** Direct URL — only works when the browser sends session cookies (e.g. Open link). */

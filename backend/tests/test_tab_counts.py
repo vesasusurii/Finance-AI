@@ -59,7 +59,7 @@ async def test_invoice_tab_counts_returns_aggregated_counts(
     )
     invoice_controller._invoice_repo.count_by_tabs.assert_awaited_once_with(
         {"search": "acme"},
-        owner_user_id=7,
+        owner_user_id=None,
     )
     cache_mock.set_model.assert_called_once()
 
@@ -78,7 +78,7 @@ async def test_invoice_tab_counts_uses_cache_when_present(
 
 
 @pytest.mark.asyncio
-async def test_matching_tab_counts_gathers_parallel_counts(
+async def test_matching_tab_counts_returns_aggregated_counts(
     reconciliation_controller: ReconciliationController,
 ):
     reconciliation_controller._match_repo.count_matches.return_value = 3
@@ -107,12 +107,12 @@ async def test_matching_tab_counts_gathers_parallel_counts(
     reconciliation_controller._match_repo.count_matches.assert_awaited_once_with(
         None,
         15,
-        owner_user_id=7,
+        owner_user_id=None,
         confirmed_only=True,
     )
     reconciliation_controller._invoice_repo.count_by_match_statuses.assert_awaited_once_with(
         ["unmatched", "needs_review"],
-        owner_user_id=7,
+        owner_user_id=None,
     )
     cache_mock.set_model.assert_called_once()
 
@@ -135,3 +135,47 @@ async def test_matching_tab_counts_uses_cache_when_present(
 
     assert result is cached
     reconciliation_controller._match_repo.count_matches.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_matching_tab_counts_with_shared_db_session():
+    """Regression: parallel gather on one AsyncSession raises ISCE (500 in prod)."""
+    from db.pool import async_session
+    from api.controllers.reconciliation_controller import ReconciliationController
+    from repositories.audit_repository import AuditRepository
+    from repositories.bank_statement_repository import BankStatementRepository
+    from repositories.bank_transaction_repository import BankTransactionRepository
+    from repositories.invoice_repository import InvoiceRepository
+    from repositories.match_repository import MatchRepository
+    from repositories.review_repository import ReviewRepository
+    from services.matching_service import MatchingService
+
+    async with async_session() as session:
+        match_repo = MatchRepository(session)
+        invoice_repo = InvoiceRepository(session)
+        statement_repo = BankStatementRepository(session)
+        bank_txn_repo = BankTransactionRepository(session)
+        audit_repo = AuditRepository(session)
+        review_repo = ReviewRepository(session)
+        matching = MatchingService(
+            invoice_repo,
+            bank_txn_repo,
+            match_repo,
+            review_repo,
+            audit_repo,
+            comment_extractor=None,
+        )
+        ctrl = ReconciliationController(
+            matching,
+            match_repo,
+            invoice_repo,
+            statement_repo,
+            bank_txn_repo,
+            audit_repo,
+        )
+        with patch("api.controllers.reconciliation_controller.cache") as cache_mock:
+            cache_mock.get_model.return_value = None
+            result = await ctrl.tab_counts(_user(), bank_statement_id=None)
+
+    assert isinstance(result, MatchingTabCountsResponse)
+    assert result.matched >= 0

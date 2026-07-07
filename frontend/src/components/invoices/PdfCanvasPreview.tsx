@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AnnotationMode, getDocument } from "pdfjs-dist";
+import { AnnotationMode, getDocument, VerbosityLevel } from "pdfjs-dist";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import "@/lib/pdfjs";
@@ -29,10 +29,21 @@ export function PdfCanvasPreview({
     void (async () => {
       try {
         const data = await blob.arrayBuffer();
+        const header = new Uint8Array(data.slice(0, 4));
+        if (
+          header.length < 4 ||
+          header[0] !== 0x25 ||
+          header[1] !== 0x50 ||
+          header[2] !== 0x44 ||
+          header[3] !== 0x46
+        ) {
+          throw new Error("Invalid or corrupt PDF file");
+        }
         const pdf = await getDocument({
           data,
           // Avoid eval/new Function in the worker (CSP script-src 'self').
           isEvalSupported: false,
+          verbosity: VerbosityLevel.ERRORS,
         }).promise;
         const containerWidth = container.clientWidth || 600;
 

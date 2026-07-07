@@ -1,4 +1,3 @@
-import mimetypes
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
@@ -6,6 +5,7 @@ from fastapi.responses import Response
 
 from api.controllers.invoice_controller import InvoiceController
 from api.dependencies import get_current_user, get_invoice_controller
+from services.invoice_file_service import serve_invoice_file
 from schemas.auth import UserContext
 from schemas.invoice import (
     InvoiceApproveResponse,
@@ -120,7 +120,6 @@ async def list_invoice_matches(
 async def get_invoice_file(
     invoice_id: int,
     user: UserContext = Depends(get_current_user),
-    ctrl: InvoiceController = Depends(get_invoice_controller),
 ) -> Response:
     """Serve the original uploaded file for an invoice (PDF or image)."""
-    return await ctrl.serve_file(invoice_id, user)
+    return await serve_invoice_file(invoice_id, user)

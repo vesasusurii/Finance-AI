@@ -42,15 +42,13 @@ from services.review_service import ReviewService
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    session = async_session()
-    try:
-        yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
+    async with async_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 def get_current_user(request: Request) -> UserContext:

@@ -259,8 +259,16 @@ export function MatchingPage() {
   }, [loadActiveTab]);
 
   const refreshAll = useCallback(async () => {
-    await loadTotals();
-    await loadActiveTab();
+    try {
+      await loadTotals();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not refresh matching tab counts",
+      );
+    }
+    await loadActiveTab().catch((e) => {
+      setError(e instanceof Error ? e.message : "Could not load matching data");
+    });
   }, [loadTotals, loadActiveTab]);
 
   const onRun = async () => {
