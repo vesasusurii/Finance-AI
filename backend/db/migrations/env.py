@@ -8,6 +8,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from config import settings
+from db.database_url import prefer_supabase_transaction_pooler
 from models import Base  # noqa: F401 — registers all models on metadata
 
 config = context.config
@@ -19,7 +20,7 @@ target_metadata = Base.metadata
 
 
 def _sync_database_url() -> str:
-    url = settings.database_url.replace(
+    url = prefer_supabase_transaction_pooler(settings.database_url).replace(
         "postgresql+asyncpg://",
         "postgresql+psycopg2://",
         1,

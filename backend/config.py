@@ -226,12 +226,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def normalize_database_url(self) -> "Settings":
+        from db.database_url import prefer_supabase_transaction_pooler
+
         url = self.database_url
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        self.database_url = url
+        self.database_url = prefer_supabase_transaction_pooler(url)
         return self
 
     @model_validator(mode="after")
