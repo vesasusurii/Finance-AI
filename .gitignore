@@ -77,6 +77,3 @@ raw/
 *.key
 credentials.json
 
-.deploy/
-deploy/
-deploy 
