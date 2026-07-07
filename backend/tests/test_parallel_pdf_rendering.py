@@ -56,17 +56,18 @@ def test_parallel_fallback_to_sequential(monkeypatch: pytest.MonkeyPatch):
     def failing_parallel(*args, **kwargs):
         raise RuntimeError("parallel boom")
 
-    def sequential(content, page_count, **kwargs):
-        sequential_calls.append(page_count)
-        return [(b"seq", "image/jpeg")] * page_count
+    def sequential(content, page_indices, **kwargs):
+        sequential_calls.append(len(page_indices))
+        return [(index, (b"seq", "image/jpeg")) for index in page_indices]
 
-    monkeypatch.setattr(pdf_reader, "_render_parallel", failing_parallel)
-    monkeypatch.setattr(pdf_reader, "_render_sequential", sequential)
+    monkeypatch.setattr(pdf_reader, "_render_parallel_indices", failing_parallel)
+    monkeypatch.setattr(pdf_reader, "_render_sequential_indices", sequential)
 
     result = pdf_reader.render_pdf_pages(b"pdf-bytes", parallel=True)
     assert result.render_strategy == "sequential"
     assert sequential_calls == [2]
     assert len(result.images) == 2
+    assert result.page_numbers == [1, 2]
     assert result.render_parallel_ms is None
 
 
@@ -80,11 +81,13 @@ def test_config_flag_disables_parallel(monkeypatch: pytest.MonkeyPatch):
         parallel_called = True
         return [(b"p", "image/jpeg")] * 2, 1.0
 
-    monkeypatch.setattr(pdf_reader, "_render_parallel", parallel)
+    monkeypatch.setattr(pdf_reader, "_render_parallel_indices", parallel)
     monkeypatch.setattr(
         pdf_reader,
-        "_render_sequential",
-        lambda content, page_count, **kwargs: [(b"s", "image/jpeg")] * page_count,
+        "_render_sequential_indices",
+        lambda content, page_indices, **kwargs: [
+            (index, (b"s", "image/jpeg")) for index in page_indices
+        ],
     )
 
     result = pdf_reader.render_pdf_pages(b"pdf-bytes")
@@ -102,11 +105,13 @@ def test_single_page_uses_sequential(monkeypatch: pytest.MonkeyPatch):
         parallel_called = True
         return [(b"p", "image/jpeg")], 1.0
 
-    monkeypatch.setattr(pdf_reader, "_render_parallel", parallel)
+    monkeypatch.setattr(pdf_reader, "_render_parallel_indices", parallel)
     monkeypatch.setattr(
         pdf_reader,
-        "_render_sequential",
-        lambda content, page_count, **kwargs: [(b"one", "image/jpeg")],
+        "_render_sequential_indices",
+        lambda content, page_indices, **kwargs: [
+            (0, (b"one", "image/jpeg")),
+        ],
     )
 
     result = pdf_reader.render_pdf_pages(b"pdf-bytes", parallel=True)
@@ -115,12 +120,31 @@ def test_single_page_uses_sequential(monkeypatch: pytest.MonkeyPatch):
     assert result.rendered_page_count == 1
 
 
+def test_selective_page_indices_preserve_order(monkeypatch: pytest.MonkeyPatch):
+    _mock_pdf_document(4, monkeypatch)
+
+    def render_page(content, index, **kwargs):
+        return index, f"page-{index}".encode(), "image/jpeg"
+
+    monkeypatch.setattr(pdf_reader, "_render_page_at_index", render_page)
+    result = pdf_reader.render_pdf_pages(
+        b"pdf-bytes",
+        page_indices=[0, 2, 3],
+        page_scales={1: 1.5, 3: 1.0, 4: 1.5},
+        parallel=True,
+        max_workers=3,
+    )
+    assert result.page_numbers == [1, 3, 4]
+    assert [img[0].decode() for img in result.images] == ["page-0", "page-2", "page-3"]
+
+
 def test_render_pdf_pages_as_images_wrapper(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         pdf_reader,
         "render_pdf_pages",
         lambda *args, **kwargs: pdf_reader.PdfRenderResult(
             images=[(b"jpeg", "image/jpeg")],
+            page_numbers=[1],
             render_strategy="sequential",
             render_ms=5.0,
             render_parallel_ms=None,

@@ -67,6 +67,9 @@ class DocumentService:
                                 prepared.upload_id,
                                 user.user_id,
                                 priority="high" if len(files) == 1 else "normal",
+                                mime=mime,
+                                file_size=len(content),
+                                batch_upload=len(files) > 1,
                             )
                         items.append(
                             DocumentUploadItemResponse(
@@ -90,6 +93,10 @@ class DocumentService:
                         user.user_id,
                         priority=priority,
                         content=prepared.content,
+                        mime=prepared.mime,
+                        file_size=prepared.file_size,
+                        duplicate_reprocess=prepared.duplicate_reprocess,
+                        batch_upload=len(files) > 1,
                     )
                     logger.info(
                         "Upload stored upload_id=%d filename=%r",
@@ -272,6 +279,8 @@ class DocumentService:
                 row.uploaded_by,
                 processing_status=row.processing_status,
                 uploaded_at=row.uploaded_at,
+                mime=row.mime_type,
+                file_size=int(row.file_size or 0),
             )
 
         progress = get_ocr_progress(row.id)

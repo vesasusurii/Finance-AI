@@ -11,6 +11,7 @@ import { OnboardingPage } from "./auth/OnboardingPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AppLayout } from "./components/shell/AppLayout";
 import { AuditPage } from "./routes/admin.audit-logs";
+import { OcrMetricsPage } from "./routes/admin.ocr-metrics";
 import { PermissionsPage } from "./routes/admin.permissions";
 import { SettingsPage } from "./routes/admin.settings";
 import { UsersPage } from "./routes/admin.users";
@@ -51,6 +52,7 @@ export default function App() {
                   <Route path="admin/users" element={<UsersPage />} />
                   <Route path="admin/permissions" element={<PermissionsPage />} />
                   <Route path="admin/audit-logs" element={<AuditPage />} />
+                  <Route path="admin/ocr-metrics" element={<OcrMetricsPage />} />
                   <Route path="admin/settings" element={<SettingsPage />} />
                 </Route>
               </Route>

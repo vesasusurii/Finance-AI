@@ -93,10 +93,20 @@ class InvoiceController:
                         and prepared.upload_id
                         and prepared.processing_status in ("queued", "processing")
                     ):
+                        upload_row = await self._upload_repo.get(prepared.upload_id)
+                        mime = (
+                            upload_row.mime_type
+                            if upload_row and upload_row.mime_type
+                            else (file.content_type or "application/pdf")
+                        )
+                        file_size = int(upload_row.file_size or 0) if upload_row else 0
                         safe_enqueue_invoice_ocr(
                             prepared.upload_id,
                             user.user_id,
                             priority="high" if len(files) == 1 else "normal",
+                            mime=mime,
+                            file_size=file_size,
+                            batch_upload=len(files) > 1,
                         )
                     items.append(prepared)
                     continue
@@ -108,6 +118,10 @@ class InvoiceController:
                     user.user_id,
                     priority=priority,
                     content=prepared.content,
+                    mime=prepared.mime,
+                    file_size=prepared.file_size,
+                    duplicate_reprocess=prepared.duplicate_reprocess,
+                    batch_upload=len(files) > 1,
                 )
                 items.append(
                     UploadItemResponse(

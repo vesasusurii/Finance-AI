@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 from openai import AsyncOpenAI
 from sqlalchemy import select
 
 from config import settings
 from core.debug_logger import get_logger
-from core.queue import enqueue_process_invoice_upload
+from core.upload_enqueue import safe_enqueue_invoice_ocr
 from core.redis_client import get_redis_connection
 from db.pool import async_session
 from models.invoice import Invoice
@@ -61,7 +63,7 @@ async def recover_stuck_invoice_uploads(
         return 0
 
     storage = get_storage_backend(http_client)
-    recoverable: list[tuple[int, int]] = []
+    recoverable: list[tuple[int, int, str | None, int, float | None]] = []
 
     async with async_session() as session:
         q = (
@@ -70,6 +72,9 @@ async def recover_stuck_invoice_uploads(
                 UploadedFile.uploaded_by,
                 UploadedFile.storage_path,
                 UploadedFile.processing_status,
+                UploadedFile.mime_type,
+                UploadedFile.file_size,
+                UploadedFile.uploaded_at,
             )
             .outerjoin(Invoice, Invoice.source_file_id == UploadedFile.id)
             .where(
@@ -82,7 +87,7 @@ async def recover_stuck_invoice_uploads(
         )
         rows = (await session.execute(q)).all()
 
-        for upload_id, user_id, storage_path, status in rows:
+        for upload_id, user_id, storage_path, status, mime_type, file_size, uploaded_at in rows:
             if not await storage.exists(storage_path):
                 row = await session.get(UploadedFile, upload_id)
                 if row is not None:
@@ -114,7 +119,15 @@ async def recover_stuck_invoice_uploads(
             if row and row.processing_status == "processing":
                 row.processing_status = "queued"
                 get_redis_connection().delete(f"lock:ocr:{upload_id}")
-            recoverable.append((upload_id, user_id))
+            recoverable.append(
+                (
+                    upload_id,
+                    user_id,
+                    mime_type,
+                    int(file_size or 0),
+                    uploaded_at.timestamp() if uploaded_at else None,
+                )
+            )
 
         await session.commit()
 
@@ -124,13 +137,22 @@ async def recover_stuck_invoice_uploads(
     logger.info("Recovering %d stuck invoice upload(s) (cap=%d)", len(recoverable), cap)
 
     enqueued = 0
-    for upload_id, user_id in recoverable:
+    for upload_id, user_id, mime_type, file_size, uploaded_ts in recoverable:
         try:
             attempts = _record_recovery_attempt(upload_id)
+            uploaded_age_seconds = None
+            if uploaded_ts is not None:
+                uploaded_age_seconds = max(0.0, time.time() - uploaded_ts)
             if settings.queue_mode == "inline":
                 schedule_invoice_ocr(upload_id, user_id)
             else:
-                enqueue_process_invoice_upload(upload_id, user_id)
+                safe_enqueue_invoice_ocr(
+                    upload_id,
+                    user_id,
+                    mime=mime_type or "application/pdf",
+                    file_size=file_size,
+                    uploaded_age_seconds=uploaded_age_seconds,
+                )
             enqueued += 1
             logger.info(
                 "Recovery enqueued upload_id=%d user_id=%d (attempt %d/%d)",

@@ -34,6 +34,19 @@ def _ctx(*, page_texts: tuple[str, ...] = ()) -> _ExtractionContext:
     )
 
 
+def _mock_render_result(*_args, **kwargs) -> PdfRenderResult:
+    indices = kwargs.get("page_indices", [0, 1, 2, 3])
+    page_numbers = [index + 1 for index in indices]
+    return PdfRenderResult(
+        images=[(b"page", "image/jpeg")] * len(page_numbers),
+        page_numbers=page_numbers,
+        render_strategy="parallel",
+        render_ms=10.0,
+        render_parallel_ms=8.0,
+        rendered_page_count=len(page_numbers),
+    )
+
+
 def test_first_page_always_selected():
     selection = select_vision_pages(total_pages=6, page_texts=[""] * 6)
     assert selection.selected_pages[0] == 1
@@ -94,19 +107,17 @@ async def test_missing_required_fields_trigger_fallback(monkeypatch):
     )
     monkeypatch.setattr(
         "services.invoice_extraction_service.pdf_page_count",
-        lambda _content: 4,
+        lambda _content: 5,
     )
     monkeypatch.setattr(service, "_build_extraction_context", lambda **_kwargs: _ctx())
     monkeypatch.setattr(service, "_try_text_first_pdf", AsyncMock(return_value=None))
     monkeypatch.setattr(
+        "services.invoice_extraction_service.analyze_pdf_pages",
+        lambda _content: [],
+    )
+    monkeypatch.setattr(
         "services.invoice_extraction_service.render_pdf_pages",
-        lambda *_args, **_kwargs: PdfRenderResult(
-            images=[(b"page", "image/jpeg")] * 4,
-            render_strategy="parallel",
-            render_ms=10.0,
-            render_parallel_ms=8.0,
-            rendered_page_count=4,
-        ),
+        _mock_render_result,
     )
 
     incomplete = ExtractionResult(
@@ -148,6 +159,7 @@ async def test_flag_disabled_uses_existing_routing(monkeypatch):
     service = _service()
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(settings, "openai_dynamic_page_selection_enabled", False)
+    monkeypatch.setattr(settings, "openai_adaptive_render_scale", False)
     monkeypatch.setattr(settings, "openai_vision_full_document_max_bytes", 10)
     monkeypatch.setattr(
         "services.invoice_extraction_service.pdf_is_encrypted",
@@ -160,13 +172,19 @@ async def test_flag_disabled_uses_existing_routing(monkeypatch):
     monkeypatch.setattr(service, "_build_extraction_context", lambda **_kwargs: _ctx())
     monkeypatch.setattr(service, "_try_text_first_pdf", AsyncMock(return_value=None))
     monkeypatch.setattr(
+        "services.invoice_extraction_service.analyze_pdf_pages",
+        lambda _content: [],
+    )
+    monkeypatch.setattr(
         "services.invoice_extraction_service.render_pdf_pages",
-        lambda *_args, **_kwargs: PdfRenderResult(
-            images=[(b"large-page", "image/jpeg")] * 4,
+        lambda *_args, **kwargs: PdfRenderResult(
+            images=[(b"large-page", "image/jpeg")]
+            * len(kwargs.get("page_indices", [0, 1, 2, 3])),
+            page_numbers=[index + 1 for index in kwargs.get("page_indices", [0, 1, 2, 3])],
             render_strategy="parallel",
             render_ms=20.0,
             render_parallel_ms=15.0,
-            rendered_page_count=4,
+            rendered_page_count=len(kwargs.get("page_indices", [0, 1, 2, 3])),
         ),
     )
 

@@ -9,6 +9,7 @@ from rq import get_current_job
 from config import settings
 from core.dlq import record_dlq_entry
 from core.debug_logger import get_logger
+from core.ocr_progress import get_ocr_progress, update_ocr_progress
 from core.system_mode import current_system_mode
 from core.worker_exceptions import RateLimitExceeded
 from core.worker_locks import release_lock
@@ -50,9 +51,21 @@ async def _run(
     queue_name = getattr(rq_job, "origin", None) or settings.rq_default_queue
     attempt = int((getattr(rq_job, "meta", {}) or {}).get("attempt", 0))
     queue_wait_time_ms = 0.0
+    queue_class: str | None = None
     enqueued_at = getattr(rq_job, "enqueued_at", None)
     if enqueued_at is not None:
         queue_wait_time_ms = round((time.time() - enqueued_at.timestamp()) * 1000, 1)
+
+    upload_id = args.get("upload_id")
+    if task_name == "process_invoice_upload" and upload_id is not None:
+        progress = get_ocr_progress(int(upload_id))
+        queue_class = progress.get("queue_class")
+        if isinstance(queue_class, str):
+            queue_class = queue_class.strip() or None
+        queued_at = progress.get("queued_at")
+        if isinstance(queued_at, (int, float)):
+            queue_wait_time_ms = round((time.time() - float(queued_at)) * 1000, 1)
+            update_ocr_progress(int(upload_id), queue_wait_ms=queue_wait_time_ms)
     if rq_job is not None:
         rq_job.meta["attempt"] = attempt + 1
         rq_job.save_meta()
@@ -79,6 +92,8 @@ async def _run(
             queue_name=queue_name,
             duration_ms=duration_ms,
             status="completed",
+            queue_class=queue_class,
+            queue_wait_ms=queue_wait_time_ms,
         )
         return
 
@@ -96,6 +111,8 @@ async def _run(
             duration_ms=duration_ms,
             status="completed",
             openai_latency_ms=float(openai_latency_ms) if openai_latency_ms else None,
+            queue_class=queue_class,
+            queue_wait_ms=queue_wait_time_ms,
         )
         log_level = logger.info
         if task_name == "process_invoice_upload" and duration_ms > 45000:
@@ -125,6 +142,8 @@ async def _run(
             queue_name=queue_name,
             duration_ms=duration_ms,
             status="rate_limited",
+            queue_class=queue_class,
+            queue_wait_ms=queue_wait_time_ms,
         )
         logger.warning(
             {
@@ -152,6 +171,8 @@ async def _run(
             queue_name=queue_name,
             duration_ms=duration_ms,
             status="failed",
+            queue_class=queue_class,
+            queue_wait_ms=queue_wait_time_ms,
         )
         logger.exception(
             {

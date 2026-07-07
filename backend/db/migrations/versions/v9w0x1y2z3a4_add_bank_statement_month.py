@@ -1,7 +1,7 @@
 """add bank_statements.statement_month
 
 Revision ID: v9w0x1y2z3a4
-Revises: u8v9w0x1y2z3
+Revises: t8u9v0w1x2y3
 Create Date: 2026-07-07 15:00:00.000000
 """
 from typing import Sequence, Union
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "v9w0x1y2z3a4"
-down_revision: Union[str, Sequence[str], None] = "u8v9w0x1y2z3"
+down_revision: Union[str, Sequence[str], None] = "t8u9v0w1x2y3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

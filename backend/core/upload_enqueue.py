@@ -9,6 +9,7 @@ from config import settings
 from core.debug_logger import get_logger
 from core.ocr_progress import update_ocr_progress
 from core.queue import enqueue_process_invoice_upload
+from core.queue_job_classifier import classify_from_upload
 from core.redis_client import get_redis_connection
 from core.upload_handoff import store_upload_bytes
 from redis.exceptions import RedisError
@@ -26,7 +27,23 @@ def safe_enqueue_invoice_ocr(
     *,
     priority: str | None = None,
     content: bytes | None = None,
+    mime: str | None = None,
+    file_size: int | None = None,
+    duplicate_reprocess: bool = False,
+    uploaded_age_seconds: float | None = None,
+    batch_upload: bool = False,
 ) -> None:
+    classification = classify_from_upload(
+        mime=mime or "application/pdf",
+        file_size=file_size or (len(content) if content else 0),
+        content=content,
+        duplicate_reprocess=duplicate_reprocess,
+        uploaded_age_seconds=uploaded_age_seconds,
+        explicit_priority=priority,
+        batch_upload=batch_upload,
+    )
+    resolved_priority = classification.queue_priority
+
     update_ocr_progress(
         upload_id,
         stage="queued",
@@ -34,6 +51,14 @@ def safe_enqueue_invoice_ocr(
         upload_status="queued",
         queued_at=time.time(),
         model=settings.openai_model,
+        **classification.metadata(),
+    )
+    logger.info(
+        "OCR enqueue upload_id=%d class=%s priority=%s reason=%s",
+        upload_id,
+        classification.queue_class,
+        resolved_priority,
+        classification.queue_priority_reason,
     )
     if settings.queue_mode == "inline":
         schedule_invoice_ocr(upload_id, user_id, content=content)
@@ -44,7 +69,7 @@ def safe_enqueue_invoice_ocr(
         enqueue_process_invoice_upload(
             upload_id,
             user_id,
-            priority=priority,
+            priority=resolved_priority,
         )
     except Exception as exc:
         logger.warning(
@@ -60,6 +85,8 @@ def maybe_reenqueue_stale_invoice_ocr(
     *,
     processing_status: str,
     uploaded_at: datetime,
+    mime: str | None = None,
+    file_size: int | None = None,
 ) -> None:
     """Re-enqueue uploads left in queued when the initial enqueue or worker was down."""
     if settings.queue_mode == "inline":
@@ -88,4 +115,11 @@ def maybe_reenqueue_stale_invoice_ocr(
         upload_id,
         age_seconds,
     )
-    safe_enqueue_invoice_ocr(upload_id, user_id, priority="high")
+    safe_enqueue_invoice_ocr(
+        upload_id,
+        user_id,
+        priority="high",
+        mime=mime,
+        file_size=file_size,
+        uploaded_age_seconds=age_seconds,
+    )

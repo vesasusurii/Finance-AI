@@ -34,6 +34,7 @@ OCR_TIMING_SCALAR_FIELDS: tuple[str, ...] = (
     "persist_ms",
     "openai_total_ms",
     "total_ms",
+    "pipeline_overlap_saved_ms",
 )
 
 
@@ -113,6 +114,9 @@ def record_recent_ocr_timing(payload: dict[str, Any]) -> None:
         redis.zadd(_RECENT_KEY, {member: entry["recorded_at"]})
         redis.zremrangebyrank(_RECENT_KEY, 0, -(_RECENT_LIMIT + 1))
         redis.expire(_RECENT_KEY, _RECENT_TTL_SECONDS)
+        from core.ocr_metrics import log_slo_violations
+
+        log_slo_violations(entry)
     except RedisError as exc:
         logger.debug("Recent OCR timing update skipped: %s", exc)
 
@@ -140,6 +144,22 @@ def openai_avg_from_recent_timings(limit: int = 20) -> float | None:
     values: list[float] = []
     for row in recent_ocr_timings(limit=limit):
         raw = row.get("openai_total_ms")
+        if raw is None:
+            continue
+        try:
+            values.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)
+
+
+def pipeline_overlap_avg_from_recent_timings(limit: int = 20) -> float | None:
+    """Mean pipeline overlap savings from recent production extractions (ms)."""
+    values: list[float] = []
+    for row in recent_ocr_timings(limit=limit):
+        raw = row.get("pipeline_overlap_saved_ms")
         if raw is None:
             continue
         try:

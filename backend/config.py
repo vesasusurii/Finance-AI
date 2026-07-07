@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -39,7 +39,14 @@ class Settings(BaseSettings):
     # much higher max_completion_tokens budget (reasoning tokens burn first).
     openai_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_MODEL")
     openai_model_strong: str = Field(
-        default="gpt-4o", validation_alias="OPENAI_MODEL_STRONG"
+        default="gpt-4o",
+        validation_alias=AliasChoices("OPENAI_MODEL_STRONG", "OPENAI_STRONG_MODEL"),
+    )
+    openai_adaptive_model_routing_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_ADAPTIVE_MODEL_ROUTING"
+    )
+    openai_fast_model: str = Field(
+        default="gpt-4o-mini", validation_alias="OPENAI_FAST_MODEL"
     )
     openai_timeout_seconds: int = Field(
         default=120, validation_alias="OPENAI_TIMEOUT_SECONDS"
@@ -68,6 +75,16 @@ class Settings(BaseSettings):
     openai_field_recovery_enabled: bool = Field(
         default=False, validation_alias="OPENAI_FIELD_RECOVERY_ENABLED"
     )
+    openai_targeted_field_recovery_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_TARGETED_FIELD_RECOVERY_ENABLED"
+    )
+    openai_targeted_field_recovery_max_fields: int = Field(
+        default=2, validation_alias="OPENAI_TARGETED_FIELD_RECOVERY_MAX_FIELDS"
+    )
+    openai_targeted_field_recovery_min_confidence: float = Field(
+        default=0.65,
+        validation_alias="OPENAI_TARGETED_FIELD_RECOVERY_MIN_CONFIDENCE",
+    )
     extraction_eval_baseline_accuracy: float = Field(
         default=1.0, validation_alias="EXTRACTION_EVAL_BASELINE_ACCURACY"
     )
@@ -95,6 +112,18 @@ class Settings(BaseSettings):
     openai_pdf_render_scale: float = Field(
         default=1.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
     )
+    openai_adaptive_render_scale: bool = Field(
+        default=True, validation_alias="OPENAI_ADAPTIVE_RENDER_SCALE"
+    )
+    openai_render_scale_high: float = Field(
+        default=1.5, validation_alias="OPENAI_RENDER_SCALE_HIGH"
+    )
+    openai_render_scale_medium: float = Field(
+        default=1.25, validation_alias="OPENAI_RENDER_SCALE_MEDIUM"
+    )
+    openai_render_scale_low: float = Field(
+        default=1.0, validation_alias="OPENAI_RENDER_SCALE_LOW"
+    )
     openai_parallel_pdf_rendering: bool = Field(
         default=True, validation_alias="OPENAI_PARALLEL_PDF_RENDERING"
     )
@@ -116,6 +145,29 @@ class Settings(BaseSettings):
     )
     openai_dynamic_page_selection_max_pages: int = Field(
         default=4, validation_alias="OPENAI_DYNAMIC_PAGE_SELECTION_MAX_PAGES"
+    )
+    openai_preclassification_routing_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_PRECLASSIFICATION_ROUTING_ENABLED"
+    )
+    openai_queue_prioritization_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_QUEUE_PRIORITIZATION_ENABLED"
+    )
+    openai_queue_starvation_boost_seconds: int = Field(
+        default=60, validation_alias="OPENAI_QUEUE_STARVATION_BOOST_SECONDS"
+    )
+    openai_pipeline_overlap_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_PIPELINE_OVERLAP_ENABLED"
+    )
+    ocr_slo_total_ms: int = Field(default=8000, validation_alias="OCR_SLO_TOTAL_MS")
+    ocr_slo_openai_ms: int = Field(default=6000, validation_alias="OCR_SLO_OPENAI_MS")
+    ocr_slo_queue_wait_ms: int = Field(
+        default=5000, validation_alias="OCR_SLO_QUEUE_WAIT_MS"
+    )
+    ocr_slo_max_openai_calls: int = Field(
+        default=3, validation_alias="OCR_SLO_MAX_OPENAI_CALLS"
+    )
+    ocr_slo_max_fallback_rate: float = Field(
+        default=0.3, validation_alias="OCR_SLO_MAX_FALLBACK_RATE"
     )
     openai_deterministic_merge_enabled: bool = Field(
         default=True, validation_alias="OPENAI_DETERMINISTIC_MERGE_ENABLED"
