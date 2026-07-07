@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PdfCanvasPreview } from "@/components/invoices/PdfCanvasPreview";
@@ -42,6 +42,7 @@ export function InvoiceFilePreview({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -91,6 +92,14 @@ export function InvoiceFilePreview({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [displayName, invoiceId, mimeType]);
+
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || !previewUrl) return;
+    const onError = () => setImgError(true);
+    image.addEventListener("error", onError);
+    return () => image.removeEventListener("error", onError);
+  }, [previewUrl]);
 
   const resolvedMime = mimeFromName(displayName, mimeType);
   const isImage = previewIsImage && resolvedMime?.startsWith("image/") && !imgError;
@@ -176,10 +185,10 @@ export function InvoiceFilePreview({
         {showImage && (
           <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
             <img
+              ref={imageRef}
               src={previewUrl}
               alt={displayName}
               className="mx-auto h-auto max-w-full object-contain"
-              onError={() => setImgError(true)}
             />
           </div>
         )}

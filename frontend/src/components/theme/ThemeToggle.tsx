@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
+import { useTheme, type ThemeSetting } from "@/components/theme/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -51,7 +51,10 @@ export function ThemeToggle({ className }: { className?: string }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[8rem]">
-        <DropdownMenuRadioGroup value={resolved} onValueChange={setTheme}>
+        <DropdownMenuRadioGroup
+          value={resolved}
+          onValueChange={(value) => setTheme(value as ThemeSetting)}
+        >
           <DropdownMenuRadioItem value="light">
             <Sun className="mr-2 h-4 w-4" />
             Light
