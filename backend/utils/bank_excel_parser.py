@@ -282,7 +282,8 @@ def _is_empty_transaction(row: dict[str, Any]) -> bool:
     )
 
 
-def _transaction_dedupe_key(row: ParsedBankRow) -> tuple:
+def transaction_dedupe_key(row: ParsedBankRow) -> tuple:
+    """Natural key for comparing parsed rows against stored bank transactions."""
     return (
         row.transaction_date,
         row.debited_amount,
@@ -298,7 +299,7 @@ def dedupe_parsed_rows(rows: list[ParsedBankRow]) -> tuple[list[ParsedBankRow], 
     unique: list[ParsedBankRow] = []
     skipped = 0
     for row in rows:
-        key = _transaction_dedupe_key(row)
+        key = transaction_dedupe_key(row)
         if key in seen:
             skipped += 1
             continue

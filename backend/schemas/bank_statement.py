@@ -20,6 +20,9 @@ class BankStatementUploadResponse(BaseModel):
     processing_status: str
     unparsed_date_rows: int = 0
     duplicate_rows_skipped: int = 0
+    merged_into_existing: bool = False
+    new_rows_added: int = 0
+    existing_rows_kept: int = 0
     preview: list[BankTransactionPreview]
 
 

@@ -1,18 +1,15 @@
-"""Invoice visibility rules — finance users see own uploads plus shared access."""
+"""Invoice visibility rules — all authenticated users share company-wide access."""
 
 from sqlalchemy import exists, or_, select
 
-from core.roles import is_admin
 from models.invoice import Invoice
 from models.invoice_access import InvoiceAccess
 from schemas.auth import UserContext
 
 
 def invoice_owner_user_id(user: UserContext) -> int | None:
-    """Return user id to scope queries, or None when the user may see all invoices."""
-    if is_admin(user.role):
-        return None
-    return user.user_id
+    """Return None so all authenticated users see every invoice and bank statement."""
+    return None
 
 
 # Bank statements and uploads use the same uploaded_by scoping as invoices.

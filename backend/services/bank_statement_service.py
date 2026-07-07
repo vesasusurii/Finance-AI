@@ -21,6 +21,8 @@ from utils.bank_excel_parser import (
     dedupe_parsed_rows,
     extract_statement_date,
     parse_bank_statement_excel,
+    statement_id_from_date,
+    transaction_dedupe_key,
 )
 from utils.file_storage import delete_storage_object, read_bytes, save_bytes
 
@@ -108,18 +110,77 @@ class BankStatementService:
         ]
 
         try:
-            statement = await self._statement_repo.create(
-                source_file_id=upload_row.id,
-                uploaded_by=user.user_id,
-                row_count=len(row_dicts),
-                statement_date=statement_date,
-                processing_status="processed",
+            statement_id = statement_id_from_date(statement_date)
+            existing_statement = await self._statement_repo.get(
+                statement_id, owner_user_id=None
             )
+
+            if existing_statement is not None:
+                existing_txns = await self._transaction_repo.list_for_statement(
+                    existing_statement.id
+                )
+                existing_keys = {
+                    transaction_dedupe_key(txn) for txn in existing_txns
+                }
+                rows_to_add = [
+                    r
+                    for r in parsed_rows
+                    if transaction_dedupe_key(r) not in existing_keys
+                ]
+                add_dicts = [
+                    {
+                        "transaction_date": r.transaction_date,
+                        "debited_amount": r.debited_amount,
+                        "credited_amount": r.credited_amount,
+                        "transaction_type": r.transaction_type,
+                        "comment": r.comment,
+                        "detected_invoice_numbers": r.detected_invoice_numbers,
+                    }
+                    for r in rows_to_add
+                ]
+
+                if add_dicts:
+                    await self._transaction_repo.create_bulk(
+                        existing_statement.id, add_dicts
+                    )
+
+                new_row_count = len(existing_txns) + len(rows_to_add)
+                await self._statement_repo.update_status(
+                    existing_statement.id,
+                    "processed",
+                    row_count=new_row_count,
+                )
+                await self._statement_repo.update_source_file(
+                    existing_statement.id, upload_row.id
+                )
+
+                statement = existing_statement
+                merged_into_existing = True
+                new_rows_added = len(rows_to_add)
+                existing_rows_kept = len(existing_txns)
+                preview_source = rows_to_add
+                final_row_count = new_row_count
+            else:
+                statement = await self._statement_repo.create(
+                    source_file_id=upload_row.id,
+                    uploaded_by=user.user_id,
+                    row_count=len(row_dicts),
+                    statement_date=statement_date,
+                    processing_status="processed",
+                )
+                await self._transaction_repo.create_bulk(statement.id, row_dicts)
+                merged_into_existing = False
+                new_rows_added = len(parsed_rows)
+                existing_rows_kept = 0
+                preview_source = parsed_rows
+                final_row_count = len(row_dicts)
         except ValueError as exc:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise ExcelParseError(str(exc)) from exc
+        except Exception as exc:
+            await self._upload_repo.update_status(upload_row.id, "failed")
+            raise ExcelParseError(str(exc)) from exc
 
-        await self._transaction_repo.create_bulk(statement.id, row_dicts)
         await self._upload_repo.update_status(upload_row.id, "processed")
 
         preview = [
@@ -131,7 +192,7 @@ class BankStatementService:
                 comment=r.comment,
                 detected_invoice_numbers=r.detected_invoice_numbers,
             )
-            for r in parsed_rows[:10]
+            for r in preview_source[:10]
         ]
 
         unparsed_date_rows = sum(
@@ -148,10 +209,13 @@ class BankStatementService:
         return BankStatementUploadResponse(
             bank_statement_id=statement.id,
             statement_date=statement_date,
-            row_count=len(row_dicts),
+            row_count=final_row_count,
             processing_status="processed",
             unparsed_date_rows=unparsed_date_rows,
             duplicate_rows_skipped=duplicate_rows_skipped,
+            merged_into_existing=merged_into_existing,
+            new_rows_added=new_rows_added,
+            existing_rows_kept=existing_rows_kept,
             preview=preview,
         )
 

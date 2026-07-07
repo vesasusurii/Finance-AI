@@ -465,6 +465,15 @@ export function BankPage() {
               Run matching for this statement
             </button>
           </p>
+          {uploadResult.merged_into_existing ? (
+            <p className="text-[13px] text-muted-foreground">
+              Merged into the existing statement for this date — added{" "}
+              <strong>{uploadResult.new_rows_added}</strong> new row
+              {uploadResult.new_rows_added === 1 ? "" : "s"}, kept{" "}
+              <strong>{uploadResult.existing_rows_kept}</strong> existing row
+              {uploadResult.existing_rows_kept === 1 ? "" : "s"} untouched.
+            </p>
+          ) : null}
           {uploadResult.duplicate_rows_skipped ? (
             <p className="text-[13px] text-muted-foreground">
               Skipped{" "}

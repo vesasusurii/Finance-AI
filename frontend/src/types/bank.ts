@@ -14,6 +14,9 @@ export interface BankStatementUploadResponse {
   processing_status: string;
   unparsed_date_rows?: number;
   duplicate_rows_skipped?: number;
+  merged_into_existing?: boolean;
+  new_rows_added?: number;
+  existing_rows_kept?: number;
   preview: BankTransactionPreview[];
 }
 

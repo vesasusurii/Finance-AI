@@ -39,21 +39,6 @@ class BankStatementRepository:
         processing_status: str = "processed",
     ) -> BankStatement:
         statement_id = statement_id_from_date(statement_date)
-        existing_by_date = await self.get_by_date(uploaded_by, statement_date)
-        if existing_by_date:
-            await self.delete_statement(
-                existing_by_date.id,
-                owner_user_id=uploaded_by,
-            )
-
-        existing_id = await self.get(statement_id, owner_user_id=None)
-        if existing_id and existing_id.uploaded_by != uploaded_by:
-            raise ValueError(
-                "A bank statement for this date already exists for another user."
-            )
-        if existing_id:
-            await self.delete_statement(statement_id, owner_user_id=uploaded_by)
-
         row = BankStatement(
             id=statement_id,
             statement_date=statement_date,
@@ -86,19 +71,6 @@ class BankStatementRepository:
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_by_date(
-        self,
-        uploaded_by: int,
-        statement_date: date,
-    ) -> BankStatement | None:
-        result = await self._session.execute(
-            select(BankStatement).where(
-                BankStatement.uploaded_by == uploaded_by,
-                BankStatement.statement_date == statement_date,
-            )
-        )
-        return result.scalar_one_or_none()
-
     async def update_status(
         self, statement_id: int, status: str, row_count: int | None = None
     ) -> None:
@@ -107,6 +79,14 @@ class BankStatementRepository:
             row.processing_status = status
             if row_count is not None:
                 row.row_count = row_count
+            await self._session.flush()
+
+    async def update_source_file(
+        self, statement_id: int, source_file_id: int
+    ) -> None:
+        row = await self.get(statement_id)
+        if row:
+            row.source_file_id = source_file_id
             await self._session.flush()
 
     async def list_statements(
