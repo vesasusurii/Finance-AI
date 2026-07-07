@@ -48,6 +48,12 @@ export interface InvoiceListResponse {
   limit: number;
 }
 
+export interface InvoiceTabCounts {
+  all: number;
+  needs_review: number;
+  unmatched: number;
+}
+
 export interface InvoiceFilters {
   review_status?: string;
   match_status?: string;

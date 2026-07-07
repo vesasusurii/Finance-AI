@@ -55,7 +55,7 @@ services:
       # Use DATABASE_URL from .env (Supabase or local). Do not hardcode @db here — that overrides .env.
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-2}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-1}
       # Inside Compose, localhost is the container itself — use the redis service hostname.
       REDIS_URL: redis://redis:6379/0
       QUEUE_MODE: ${QUEUE_MODE:-adaptive}
@@ -93,7 +93,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-2}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-1}
       REDIS_URL: redis://redis:6379/0
       QUEUE_MODE: ${QUEUE_MODE:-adaptive}
       STORAGE_PATH: /data/uploads

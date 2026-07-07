@@ -129,6 +129,68 @@ class MatchRepository:
 
     _CONFIRMED_MATCH_STATUSES = ("matched", "approved")
 
+    def _build_match_count_query(
+        self,
+        status: str | None,
+        bank_statement_id: int | None,
+        *,
+        owner_user_id: int | None = None,
+        confirmed_only: bool = False,
+    ):
+        count_q = select(func.count()).select_from(InvoicePaymentMatch)
+        txn_joined = False
+
+        if owner_user_id is not None:
+            visible = invoice_visible_to_user_clause(owner_user_id)
+            count_q = count_q.join(
+                Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
+            ).where(visible)
+            count_q = count_q.join(
+                BankTransaction,
+                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+            )
+            txn_joined = True
+            count_q = count_q.join(
+                BankStatement,
+                BankTransaction.bank_statement_id == BankStatement.id,
+            ).where(BankStatement.uploaded_by == owner_user_id)
+
+        if status:
+            count_q = count_q.where(InvoicePaymentMatch.status == status)
+        elif confirmed_only:
+            count_q = count_q.where(
+                InvoicePaymentMatch.status.in_(self._CONFIRMED_MATCH_STATUSES)
+            )
+        else:
+            count_q = count_q.where(InvoicePaymentMatch.status != "rejected")
+
+        if bank_statement_id is not None:
+            if not txn_joined:
+                count_q = count_q.join(
+                    BankTransaction,
+                    InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+                )
+            count_q = count_q.where(
+                BankTransaction.bank_statement_id == bank_statement_id
+            )
+        return count_q
+
+    async def count_matches(
+        self,
+        status: str | None,
+        bank_statement_id: int | None,
+        *,
+        owner_user_id: int | None = None,
+        confirmed_only: bool = False,
+    ) -> int:
+        count_q = self._build_match_count_query(
+            status,
+            bank_statement_id,
+            owner_user_id=owner_user_id,
+            confirmed_only=confirmed_only,
+        )
+        return int((await self._session.execute(count_q)).scalar_one())
+
     async def list_matches(
         self,
         status: str | None,
@@ -140,48 +202,36 @@ class MatchRepository:
         confirmed_only: bool = False,
     ) -> tuple[list[MatchResultResponse], int]:
         query = select(InvoicePaymentMatch)
-        count_q = select(func.count()).select_from(InvoicePaymentMatch)
-        txn_joined = False
+        count_q = self._build_match_count_query(
+            status,
+            bank_statement_id,
+            owner_user_id=owner_user_id,
+            confirmed_only=confirmed_only,
+        )
+        txn_joined = owner_user_id is not None
 
         if owner_user_id is not None:
             visible = invoice_visible_to_user_clause(owner_user_id)
             query = query.join(
                 Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
             ).where(visible)
-            count_q = count_q.join(
-                Invoice, InvoicePaymentMatch.invoice_id == Invoice.id
-            ).where(visible)
             query = query.join(
                 BankTransaction,
                 InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
             )
-            count_q = count_q.join(
-                BankTransaction,
-                InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
-            )
-            txn_joined = True
             query = query.join(
-                BankStatement,
-                BankTransaction.bank_statement_id == BankStatement.id,
-            ).where(BankStatement.uploaded_by == owner_user_id)
-            count_q = count_q.join(
                 BankStatement,
                 BankTransaction.bank_statement_id == BankStatement.id,
             ).where(BankStatement.uploaded_by == owner_user_id)
 
         if status:
             query = query.where(InvoicePaymentMatch.status == status)
-            count_q = count_q.where(InvoicePaymentMatch.status == status)
         elif confirmed_only:
             query = query.where(
                 InvoicePaymentMatch.status.in_(self._CONFIRMED_MATCH_STATUSES)
             )
-            count_q = count_q.where(
-                InvoicePaymentMatch.status.in_(self._CONFIRMED_MATCH_STATUSES)
-            )
         else:
             query = query.where(InvoicePaymentMatch.status != "rejected")
-            count_q = count_q.where(InvoicePaymentMatch.status != "rejected")
 
         if bank_statement_id is not None:
             if not txn_joined:
@@ -189,14 +239,7 @@ class MatchRepository:
                     BankTransaction,
                     InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
                 )
-                count_q = count_q.join(
-                    BankTransaction,
-                    InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
-                )
             query = query.where(BankTransaction.bank_statement_id == bank_statement_id)
-            count_q = count_q.where(
-                BankTransaction.bank_statement_id == bank_statement_id
-            )
 
         total = (await self._session.execute(count_q)).scalar_one()
         offset = (page - 1) * limit

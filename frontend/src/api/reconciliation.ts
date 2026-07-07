@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { MatchListResponse, ReconciliationSummary } from "../types/match";
+import type { MatchListResponse, MatchingTabCounts, ReconciliationSummary } from "../types/match";
 
 export async function runReconciliation(
   bankStatementId?: number,
@@ -31,6 +31,19 @@ export async function getReconciliationResults(filters: {
   const qs = params.toString();
   return apiFetch<MatchListResponse>(
     `/api/reconciliation/results${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getMatchingTabCounts(
+  bankStatementId?: number,
+): Promise<MatchingTabCounts> {
+  const params = new URLSearchParams();
+  if (bankStatementId != null) {
+    params.set("bank_statement_id", String(bankStatementId));
+  }
+  const qs = params.toString();
+  return apiFetch<MatchingTabCounts>(
+    `/api/reconciliation/tab-counts${qs ? `?${qs}` : ""}`,
   );
 }
 

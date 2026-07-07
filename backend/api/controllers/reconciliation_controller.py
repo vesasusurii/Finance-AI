@@ -1,4 +1,5 @@
 from decimal import Decimal
+import asyncio
 
 from fastapi import HTTPException
 
@@ -18,6 +19,7 @@ from schemas.reconciliation import (
     ManualMatchResponse,
     MatchActionResponse,
     MatchListResponse,
+    MatchingTabCountsResponse,
     ReconciliationRunRequest,
     ReconciliationSummary,
     RejectMatchRequest,
@@ -34,6 +36,14 @@ _MATCH_NOT_FOUND = HTTPException(
         "message": "Match not found.",
     },
 )
+
+
+_TAB_COUNTS_TTL_SECONDS = 30
+
+
+def _invalidate_matching_tab_counts() -> None:
+    cache.delete_pattern("matching_tab_counts:*")
+    cache.delete_pattern("invoice_tab_counts:*")
 
 
 class ReconciliationController:
@@ -155,6 +165,69 @@ class ReconciliationController:
         )
 
     @debug_trace
+    async def tab_counts(
+        self,
+        user: UserContext,
+        bank_statement_id: int | None,
+    ) -> MatchingTabCountsResponse:
+        owner_invoice = invoice_owner_user_id(user)
+        owner_upload = upload_owner_user_id(user)
+        cache_key = (
+            f"matching_tab_counts:{owner_invoice}:{owner_upload}:{bank_statement_id}"
+        )
+        cached = cache.get_model(cache_key, MatchingTabCountsResponse)
+        if cached is not None:
+            return cached
+        (
+            matched,
+            partially_matched,
+            unmatched_invoices,
+            unmatched_transactions,
+            needs_review,
+            multi_invoice,
+        ) = await asyncio.gather(
+            self._match_repo.count_matches(
+                None,
+                bank_statement_id,
+                owner_user_id=owner_invoice,
+                confirmed_only=True,
+            ),
+            self._invoice_repo.count_by_match_status(
+                "partially_matched",
+                owner_user_id=owner_invoice,
+            ),
+            self._invoice_repo.count_by_match_status(
+                "unmatched",
+                owner_user_id=owner_invoice,
+            ),
+            self._bank_txn_repo.count_transactions(
+                bank_statement_id,
+                "needs_review",
+                owner_user_id=owner_upload,
+            ),
+            self._invoice_repo.count_by_match_statuses(
+                ["unmatched", "needs_review"],
+                owner_user_id=owner_invoice,
+            ),
+            self._bank_txn_repo.count_transactions(
+                bank_statement_id,
+                None,
+                owner_user_id=owner_upload,
+                multi_invoice=True,
+            ),
+        )
+        response = MatchingTabCountsResponse(
+            matched=matched,
+            partially_matched=partially_matched,
+            unmatched_invoices=unmatched_invoices,
+            unmatched_transactions=unmatched_transactions,
+            needs_review=needs_review,
+            multi_invoice=multi_invoice,
+        )
+        cache.set_model(cache_key, response, ttl_seconds=_TAB_COUNTS_TTL_SECONDS)
+        return response
+
+    @debug_trace
     async def manual_match(
         self, body: ManualMatchRequest, user: UserContext
     ) -> ManualMatchResponse:
@@ -167,6 +240,7 @@ class ReconciliationController:
         )
         cache.delete_pattern("review:*")
         cache.delete_pattern("bank_tx:*")
+        _invalidate_matching_tab_counts()
         return response
 
     @debug_trace
@@ -221,6 +295,7 @@ class ReconciliationController:
         )
         cache.delete_pattern("review:*")
         cache.delete_pattern("bank_tx:*")
+        _invalidate_matching_tab_counts()
         return MatchActionResponse(match_id=body.match_id, status=updated.status)
 
     @debug_trace
@@ -265,6 +340,7 @@ class ReconciliationController:
             await self._reset_bank_transaction_if_unmatched(bank_transaction_id)
             cache.delete_pattern("review:*")
             cache.delete_pattern("bank_tx:*")
+            _invalidate_matching_tab_counts()
             return MatchActionResponse(match_id=body.match_id, status="rejected")
 
         remaining_matches = await self._match_repo.list_active_for_invoice(
@@ -317,5 +393,6 @@ class ReconciliationController:
         )
         cache.delete_pattern("review:*")
         cache.delete_pattern("bank_tx:*")
+        _invalidate_matching_tab_counts()
         return MatchActionResponse(match_id=body.match_id, status="rejected")
 

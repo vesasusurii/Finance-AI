@@ -46,3 +46,12 @@ export interface MatchListResponse {
   page: number;
   limit: number;
 }
+
+export interface MatchingTabCounts {
+  matched: number;
+  partially_matched: number;
+  unmatched_invoices: number;
+  unmatched_transactions: number;
+  needs_review: number;
+  multi_invoice: number;
+}

@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MatchedTransactionsGrid } from "@/components/matching/MatchedTransactionsGrid";
 import {
   approveMatch,
+  getMatchingTabCounts,
   getReconciliationResults,
   rejectMatch,
   runReconciliation,
@@ -19,7 +20,7 @@ import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { ApiError } from "@/api/client";
 import { refreshSession } from "@/api/auth";
 import { listBankStatements, listBankTransactions } from "@/api/bankStatements";
-import { loadBankMatchInvoices } from "@/hooks/useManualReviewQueue";
+import { listManualReviewQueue } from "@/api/review";
 import { listInvoices } from "@/api/invoices";
 import type { InvoicePaymentMatch, ReconciliationSummary } from "@/types/match";
 import type { BankStatement, BankTransaction } from "@/types/bank";
@@ -79,12 +80,14 @@ function invoiceReviewReasonLabel(invoice: Invoice): string {
 }
 
 async function loadNeedsReviewInvoices(page: number, limit: number) {
-  const all = await loadBankMatchInvoices();
-  const total = all.length;
-  const offset = (page - 1) * limit;
+  const res = await listManualReviewQueue({
+    filter: "bank_match",
+    page,
+    limit,
+  });
   return {
-    items: all.slice(offset, offset + limit),
-    total,
+    items: res.items.map((entry) => entry.invoice),
+    total: res.total,
   };
 }
 
@@ -145,45 +148,14 @@ export function MatchingPage() {
 
   const loadTotals = useCallback(async () => {
     const filters = statementFilters();
-    const [
-      matchRes,
-      invoiceRes,
-      partialRes,
-      txnRes,
-      reviewRes,
-      multiTxnRes,
-    ] = await Promise.all([
-        getReconciliationResults({
-          ...filters,
-          confirmed_only: true,
-          page: 1,
-          limit: 1,
-        }),
-        listInvoices({ match_status: "unmatched", page: 1, limit: 1 }),
-        listInvoices({ match_status: "partially_matched", page: 1, limit: 1 }),
-        listBankTransactions({
-          ...filters,
-          reconciliation_status: "needs_review",
-          page: 1,
-          limit: 1,
-        }),
-        loadBankMatchInvoices().then((items) => ({
-          items: [],
-          total: items.length,
-        })),
-        listBankTransactions({
-          ...filters,
-          multi_invoice: true,
-          page: 1,
-          limit: 1,
-        }),
-      ]);
-    setMatchTotal(matchRes.total);
-    setUnmatchedInvoiceTotal(invoiceRes.total);
-    setPartialInvoiceTotal(partialRes.total);
-    setUnmatchedTxnTotal(txnRes.total);
-    setReviewTotal(reviewRes.total);
-    setMultiTxnTotal(multiTxnRes.total);
+    const sid = "bank_statement_id" in filters ? filters.bank_statement_id : undefined;
+    const counts = await getMatchingTabCounts(sid);
+    setMatchTotal(counts.matched);
+    setUnmatchedInvoiceTotal(counts.unmatched_invoices);
+    setPartialInvoiceTotal(counts.partially_matched);
+    setUnmatchedTxnTotal(counts.unmatched_transactions);
+    setReviewTotal(counts.needs_review);
+    setMultiTxnTotal(counts.multi_invoice);
   }, [statementFilters]);
 
   const loadActiveTab = useCallback(async () => {

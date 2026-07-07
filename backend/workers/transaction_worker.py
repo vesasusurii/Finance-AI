@@ -66,6 +66,7 @@ async def _match_bank_transactions(
 
     cache.delete_pattern("review:*")
     cache.delete_pattern("bank_tx:*")
+    cache.delete_pattern("matching_tab_counts:*")
     duration_ms = round((time.perf_counter() - t0) * 1000, 1)
     logger.info(
         {

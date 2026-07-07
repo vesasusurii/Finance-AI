@@ -69,6 +69,42 @@ def _apply_owner_scope(query, owner_user_id: int | None):
     return apply_invoice_visibility(query, owner_user_id)
 
 
+def _apply_list_filters(query, filters: dict):
+    if filters.get("review_status"):
+        query = query.where(Invoice.review_status == filters["review_status"])
+    if filters.get("match_statuses"):
+        statuses = tuple(filters["match_statuses"])
+        query = query.where(Invoice.match_status.in_(statuses))
+    elif filters.get("match_status"):
+        query = query.where(Invoice.match_status == filters["match_status"])
+    if filters.get("invoice_date_from"):
+        query = query.where(Invoice.invoice_date >= filters["invoice_date_from"])
+    if filters.get("invoice_date_to"):
+        query = query.where(Invoice.invoice_date <= filters["invoice_date_to"])
+    if filters.get("company"):
+        pattern = f"%{escape_ilike_pattern(str(filters['company']))}%"
+        query = query.where(Invoice.name_of_company.ilike(pattern, escape="\\"))
+    if filters.get("search"):
+        term = str(filters["search"]).strip()
+        if term:
+            pattern = f"%{escape_ilike_pattern(term)}%"
+            text_filter = or_(
+                Invoice.name_of_company.ilike(pattern, escape="\\"),
+                Invoice.invoice_number.ilike(pattern, escape="\\"),
+                Invoice.internal_note_description.ilike(pattern, escape="\\"),
+            )
+            query = query.where(text_filter)
+    if filters.get("category"):
+        pattern = f"%{escape_ilike_pattern(str(filters['category']))}%"
+        query = query.where(Invoice.category.ilike(pattern, escape="\\"))
+    if filters.get("upload_source"):
+        source = str(filters["upload_source"])
+        query = query.join(
+            UploadedFile, Invoice.source_file_id == UploadedFile.id
+        ).where(UploadedFile.upload_source == source)
+    return query
+
+
 def _normalize_invoice_sort(sort: str | None) -> str:
     if sort == "created_at":
         return "created_at_desc"
@@ -227,62 +263,8 @@ class InvoiceRepository:
 
         query = _apply_owner_scope(query, owner_user_id)
         count_query = _apply_owner_scope(count_query, owner_user_id)
-
-        if filters.get("review_status"):
-            query = query.where(Invoice.review_status == filters["review_status"])
-            count_query = count_query.where(
-                Invoice.review_status == filters["review_status"]
-            )
-        if filters.get("match_statuses"):
-            statuses = tuple(filters["match_statuses"])
-            query = query.where(Invoice.match_status.in_(statuses))
-            count_query = count_query.where(Invoice.match_status.in_(statuses))
-        elif filters.get("match_status"):
-            query = query.where(Invoice.match_status == filters["match_status"])
-            count_query = count_query.where(
-                Invoice.match_status == filters["match_status"]
-            )
-        if filters.get("invoice_date_from"):
-            query = query.where(Invoice.invoice_date >= filters["invoice_date_from"])
-            count_query = count_query.where(
-                Invoice.invoice_date >= filters["invoice_date_from"]
-            )
-        if filters.get("invoice_date_to"):
-            query = query.where(Invoice.invoice_date <= filters["invoice_date_to"])
-            count_query = count_query.where(
-                Invoice.invoice_date <= filters["invoice_date_to"]
-            )
-        if filters.get("company"):
-            pattern = f"%{escape_ilike_pattern(str(filters['company']))}%"
-            query = query.where(Invoice.name_of_company.ilike(pattern, escape="\\"))
-            count_query = count_query.where(
-                Invoice.name_of_company.ilike(pattern, escape="\\")
-            )
-        if filters.get("search"):
-            term = str(filters["search"]).strip()
-            if term:
-                pattern = f"%{escape_ilike_pattern(term)}%"
-                text_filter = or_(
-                    Invoice.name_of_company.ilike(pattern, escape="\\"),
-                    Invoice.invoice_number.ilike(pattern, escape="\\"),
-                    Invoice.internal_note_description.ilike(pattern, escape="\\"),
-                )
-                query = query.where(text_filter)
-                count_query = count_query.where(text_filter)
-        if filters.get("category"):
-            pattern = f"%{escape_ilike_pattern(str(filters['category']))}%"
-            query = query.where(Invoice.category.ilike(pattern, escape="\\"))
-            count_query = count_query.where(
-                Invoice.category.ilike(pattern, escape="\\")
-            )
-        if filters.get("upload_source"):
-            source = str(filters["upload_source"])
-            query = query.join(
-                UploadedFile, Invoice.source_file_id == UploadedFile.id
-            ).where(UploadedFile.upload_source == source)
-            count_query = count_query.join(
-                UploadedFile, Invoice.source_file_id == UploadedFile.id
-            ).where(UploadedFile.upload_source == source)
+        query = _apply_list_filters(query, filters)
+        count_query = _apply_list_filters(count_query, filters)
 
         query = query.order_by(*_invoice_order_by_clauses(filters.get("sort")))
 
@@ -303,6 +285,30 @@ class InvoiceRepository:
                 int(total),
             )
         return [_to_response(r) for r in rows], int(total)
+
+    async def count_by_tabs(
+        self,
+        filters: dict,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, int]:
+        count_query = select(
+            func.count().label("all_count"),
+            func.count()
+            .filter(Invoice.review_status == "needs_review")
+            .label("needs_review_count"),
+            func.count()
+            .filter(Invoice.match_status == "unmatched")
+            .label("unmatched_count"),
+        ).select_from(Invoice)
+        count_query = _apply_owner_scope(count_query, owner_user_id)
+        count_query = _apply_list_filters(count_query, filters)
+        row = (await self._session.execute(count_query)).one()
+        return {
+            "all": int(row.all_count),
+            "needs_review": int(row.needs_review_count),
+            "unmatched": int(row.unmatched_count),
+        }
 
     async def list_invoices_for_export(
         self,
@@ -660,6 +666,18 @@ class InvoiceRepository:
     ) -> int:
         q = select(func.count()).select_from(Invoice).where(
             Invoice.match_status == match_status
+        )
+        q = _apply_owner_scope(q, owner_user_id)
+        return int((await self._session.execute(q)).scalar_one())
+
+    async def count_by_match_statuses(
+        self,
+        match_statuses: list[str],
+        *,
+        owner_user_id: int | None = None,
+    ) -> int:
+        q = select(func.count()).select_from(Invoice).where(
+            Invoice.match_status.in_(match_statuses)
         )
         q = _apply_owner_scope(q, owner_user_id)
         return int((await self._session.execute(q)).scalar_one())

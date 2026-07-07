@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { fetchInvoiceFile } from "@/api/invoices";
+import { fetchInvoiceFile, invoiceFileUrl } from "@/api/invoices";
 import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
@@ -26,7 +26,8 @@ export function InvoiceFilePreview({
   minHeightClass?: string;
   className?: string;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewIsImage, setPreviewIsImage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -38,13 +39,23 @@ export function InvoiceFilePreview({
     setLoading(true);
     setError(null);
     setImgError(false);
-    setBlobUrl(null);
+    setPreviewUrl(null);
+    setPreviewIsImage(false);
 
     void fetchInvoiceFile(invoiceId)
       .then((blob) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
+        const resolvedMime =
+          blob.type || mimeFromName(displayName, mimeType) || "";
+        const image = resolvedMime.startsWith("image/");
+        setPreviewIsImage(image);
+        if (image) {
+          objectUrl = URL.createObjectURL(blob);
+          setPreviewUrl(objectUrl);
+          return;
+        }
+        // PDFs in blob iframes inherit the SPA CSP and block the built-in viewer.
+        setPreviewUrl(invoiceFileUrl(invoiceId));
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -60,10 +71,10 @@ export function InvoiceFilePreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [invoiceId]);
+  }, [displayName, invoiceId, mimeType]);
 
   const resolvedMime = mimeFromName(displayName, mimeType);
-  const isImage = resolvedMime?.startsWith("image/") && !imgError;
+  const isImage = previewIsImage && resolvedMime?.startsWith("image/") && !imgError;
   const typeLabel =
     resolvedMime === "application/pdf" || resolvedMime?.includes("pdf")
       ? "PDF"
@@ -95,9 +106,9 @@ export function InvoiceFilePreview({
               {typeLabel}
             </span>
           )}
-          {blobUrl && (
+          {previewUrl && (
             <a
-              href={blobUrl}
+              href={previewIsImage ? previewUrl : invoiceFileUrl(invoiceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
@@ -131,10 +142,10 @@ export function InvoiceFilePreview({
           </div>
         )}
 
-        {!loading && !error && blobUrl && isImage && (
+        {!loading && !error && previewUrl && isImage && (
           <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
             <img
-              src={blobUrl}
+              src={previewUrl}
               alt={displayName}
               className="mx-auto h-auto max-w-full object-contain"
               onError={() => setImgError(true)}
@@ -142,15 +153,15 @@ export function InvoiceFilePreview({
           </div>
         )}
 
-        {!loading && !error && blobUrl && !isImage && (
+        {!loading && !error && previewUrl && !previewIsImage && (
           <iframe
-            src={blobUrl}
+            src={previewUrl}
             title={displayName}
             className={`h-full min-h-[400px] w-full border-0 ${minHeightClass}`}
           />
         )}
 
-        {!loading && !error && blobUrl && imgError && (
+        {!loading && !error && previewUrl && imgError && (
           <div
             className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
           >
@@ -158,7 +169,7 @@ export function InvoiceFilePreview({
               Preview unavailable for this file type.
             </p>
             <a
-              href={blobUrl}
+              href={invoiceFileUrl(invoiceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[12px] text-primary hover:underline"

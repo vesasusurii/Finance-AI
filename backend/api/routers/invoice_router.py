@@ -11,6 +11,7 @@ from schemas.invoice import (
     InvoiceApproveResponse,
     InvoiceListResponse,
     InvoiceResponse,
+    InvoiceTabCountsResponse,
     InvoiceUpdate,
     InvoiceUploadResponse,
 )
@@ -60,6 +61,15 @@ async def list_invoices(
         page,
         limit,
     )
+
+
+@router.get("/tab-counts", response_model=InvoiceTabCountsResponse)
+async def invoice_tab_counts(
+    search: str | None = None,
+    user: UserContext = Depends(get_current_user),
+    ctrl: InvoiceController = Depends(get_invoice_controller),
+):
+    return await ctrl.tab_counts(user, search)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceResponse)

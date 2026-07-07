@@ -3,6 +3,7 @@ import type {
   Invoice,
   InvoiceFilters,
   InvoiceListResponse,
+  InvoiceTabCounts,
   UploadResponse,
 } from "../types/invoice";
 import type { MatchListResponse } from "../types/match";
@@ -40,6 +41,19 @@ export async function listInvoices(
   const qs = params.toString();
   return apiFetch<InvoiceListResponse>(
     `/api/invoices${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getInvoiceTabCounts(
+  search?: string,
+): Promise<InvoiceTabCounts> {
+  const params = new URLSearchParams();
+  if (search) {
+    params.set("search", search);
+  }
+  const qs = params.toString();
+  return apiFetch<InvoiceTabCounts>(
+    `/api/invoices/tab-counts${qs ? `?${qs}` : ""}`,
   );
 }
 
