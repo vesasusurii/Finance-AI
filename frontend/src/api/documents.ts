@@ -1,3 +1,5 @@
+import { ApiError, apiFetch } from "./client";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export interface DocumentUploadItem {
@@ -52,16 +54,16 @@ function sleep(ms: number): Promise<void> {
 export async function getDocumentStatus(
   documentId: number,
 ): Promise<DocumentStatusResponse | null> {
-  const res = await fetch(`${API_BASE}/api/documents/${documentId}/status`, {
-    credentials: "include",
-  });
-  if (res.status === 404) {
-    return null;
+  try {
+    return await apiFetch<DocumentStatusResponse>(
+      `/api/documents/${documentId}/status`,
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return null;
+    }
+    throw e;
   }
-  if (!res.ok) {
-    throw new Error("Could not load document status");
-  }
-  return res.json() as Promise<DocumentStatusResponse>;
 }
 
 /** Poll until worker finishes OCR (does not block the upload HTTP request). */

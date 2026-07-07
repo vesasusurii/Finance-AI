@@ -50,7 +50,7 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_REASONING_MAX_COMPLETION_TOKENS",
     )
     openai_strong_retry_enabled: bool = Field(
-        default=True, validation_alias="OPENAI_STRONG_RETRY_ENABLED"
+        default=False, validation_alias="OPENAI_STRONG_RETRY_ENABLED"
     )
     openai_hybrid_text_enabled: bool = Field(
         default=True, validation_alias="OPENAI_HYBRID_TEXT_ENABLED"
@@ -60,13 +60,13 @@ class Settings(BaseSettings):
         default=True, validation_alias="OPENAI_TEXT_FIRST_ENABLED"
     )
     openai_text_first_max_pages: int = Field(
-        default=3, validation_alias="OPENAI_TEXT_FIRST_MAX_PAGES"
+        default=5, validation_alias="OPENAI_TEXT_FIRST_MAX_PAGES"
     )
     openai_text_first_min_chars: int = Field(
         default=200, validation_alias="OPENAI_TEXT_FIRST_MIN_CHARS"
     )
     openai_field_recovery_enabled: bool = Field(
-        default=True, validation_alias="OPENAI_FIELD_RECOVERY_ENABLED"
+        default=False, validation_alias="OPENAI_FIELD_RECOVERY_ENABLED"
     )
     extraction_eval_baseline_accuracy: float = Field(
         default=1.0, validation_alias="EXTRACTION_EVAL_BASELINE_ACCURACY"
@@ -75,21 +75,21 @@ class Settings(BaseSettings):
         default=25, validation_alias="OPENAI_MAX_PDF_PAGES"
     )
     openai_vision_pages_per_request: int = Field(
-        default=6, validation_alias="OPENAI_VISION_PAGES_PER_REQUEST"
+        default=8, validation_alias="OPENAI_VISION_PAGES_PER_REQUEST"
     )
     openai_vision_page_batch_size: int = Field(
-        default=5, validation_alias="OPENAI_VISION_PAGE_BATCH_SIZE"
+        default=6, validation_alias="OPENAI_VISION_PAGE_BATCH_SIZE"
     )
     # Parallel PDF page batches improve multi-page throughput while keeping
     # per-upload OpenAI fan-out bounded for rate-limit safety.
     openai_page_batch_concurrency: int = Field(
-        default=3, validation_alias="OPENAI_PAGE_BATCH_CONCURRENCY"
+        default=4, validation_alias="OPENAI_PAGE_BATCH_CONCURRENCY"
     )
     openai_max_supplemental_chars: int = Field(
         default=80000, validation_alias="OPENAI_MAX_SUPPLEMENTAL_CHARS"
     )
     openai_pdf_render_scale: float = Field(
-        default=2.0, validation_alias="OPENAI_PDF_RENDER_SCALE"
+        default=1.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
     )
     ocr_cache_enabled: bool = Field(default=True, validation_alias="OCR_CACHE_ENABLED")
     max_startup_recovery_jobs: int = Field(
@@ -169,9 +169,9 @@ class Settings(BaseSettings):
     task_retry_base_seconds: int = Field(
         default=10, validation_alias="TASK_RETRY_BASE_SECONDS"
     )
-    openai_rps_limit: float = Field(default=2.0, validation_alias="OPENAI_RPS_LIMIT")
+    openai_rps_limit: float = Field(default=5.0, validation_alias="OPENAI_RPS_LIMIT")
     openai_concurrency_limit: int = Field(
-        default=2, validation_alias="OPENAI_CONCURRENCY_LIMIT"
+        default=4, validation_alias="OPENAI_CONCURRENCY_LIMIT"
     )
     ocr_backlog_defer_threshold: int = Field(
         default=5000, validation_alias="OCR_BACKLOG_DEFER_THRESHOLD"

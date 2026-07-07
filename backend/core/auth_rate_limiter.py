@@ -5,9 +5,13 @@ from __future__ import annotations
 import time
 
 from fastapi import HTTPException, Request
+from redis.exceptions import RedisError
 
 from config import settings
+from core.debug_logger import get_logger
 from core.redis_client import get_redis_connection
+
+logger = get_logger(__name__)
 
 
 class RateLimitExceeded(HTTPException):
@@ -35,14 +39,18 @@ def _client_ip(request: Request) -> str:
 def _check_rate_limit(*, key: str, limit: int, window_seconds: int) -> None:
     if limit <= 0:
         return
-    redis = get_redis_connection()
-    now = time.time()
-    pipe = redis.pipeline()
-    pipe.zremrangebyscore(key, 0, now - window_seconds)
-    pipe.zadd(key, {str(now): now})
-    pipe.zcard(key)
-    pipe.expire(key, window_seconds + 1)
-    _, _, count, _ = pipe.execute()
+    try:
+        redis = get_redis_connection()
+        now = time.time()
+        pipe = redis.pipeline()
+        pipe.zremrangebyscore(key, 0, now - window_seconds)
+        pipe.zadd(key, {str(now): now})
+        pipe.zcard(key)
+        pipe.expire(key, window_seconds + 1)
+        _, _, count, _ = pipe.execute()
+    except RedisError:
+        logger.warning("Redis unavailable for rate limit key=%s; allowing request", key)
+        return
     if int(count) > limit:
         oldest = redis.zrange(key, 0, 0, withscores=True)
         retry_after = window_seconds

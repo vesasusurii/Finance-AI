@@ -5,6 +5,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { AppDialogProvider } from "./components/dialogs/AppDialogProvider";
 import { ThemeProvider } from "./components/theme/ThemeProvider";
 import App from "./App";
+import "@brand/theme.css";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
