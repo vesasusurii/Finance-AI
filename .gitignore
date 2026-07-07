@@ -76,3 +76,7 @@ raw/
 *.pem
 *.key
 credentials.json
+
+.deploy/
+deploy/
+deploy 
