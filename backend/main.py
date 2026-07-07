@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+from utils.static_mime_types import register_frontend_static_mime_types
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -41,6 +43,9 @@ from services.upload_recovery import recover_stuck_invoice_uploads
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 setup_debug_logging()
 logger = get_logger(__name__)
+
+# Required for pdf.js worker modules served from /assets/*.mjs via StaticFiles.
+register_frontend_static_mime_types()
 
 _IS_LOCAL = settings.environment == "local"
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
