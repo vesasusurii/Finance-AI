@@ -9,6 +9,7 @@ from schemas.reconciliation import (
     ManualMatchResponse,
     MatchActionResponse,
     MatchListResponse,
+    MatchingTabCountsResponse,
     ReconciliationRunRequest,
     ReconciliationSummary,
     RejectMatchRequest,
@@ -45,6 +46,15 @@ async def reconciliation_results(
         limit,
         confirmed_only=confirmed_only,
     )
+
+
+@router.get("/tab-counts", response_model=MatchingTabCountsResponse)
+async def matching_tab_counts(
+    bank_statement_id: int | None = None,
+    user: UserContext = Depends(get_current_user),
+    ctrl: ReconciliationController = Depends(get_reconciliation_controller),
+):
+    return await ctrl.tab_counts(user, bank_statement_id)
 
 
 @router.post("/manual-match", response_model=ManualMatchResponse)

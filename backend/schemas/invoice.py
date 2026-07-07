@@ -121,6 +121,12 @@ class InvoiceListResponse(BaseModel):
     limit: int
 
 
+class InvoiceTabCountsResponse(BaseModel):
+    all: int
+    needs_review: int
+    unmatched: int
+
+
 class UploadItemResponse(BaseModel):
     upload_id: int
     original_filename: str

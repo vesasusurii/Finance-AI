@@ -59,6 +59,15 @@ class MatchListResponse(BaseModel):
     limit: int
 
 
+class MatchingTabCountsResponse(BaseModel):
+    matched: int
+    partially_matched: int
+    unmatched_invoices: int
+    unmatched_transactions: int
+    needs_review: int
+    multi_invoice: int
+
+
 class ManualMatchRequest(BaseModel):
     invoice_id: int = Field(..., ge=1)
     bank_transaction_id: int = Field(..., ge=1)

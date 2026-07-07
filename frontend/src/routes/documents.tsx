@@ -17,7 +17,7 @@ import { ConfidenceIndicator } from "@/components/ui-finance/ConfidenceIndicator
 import { FilterBar } from "@/components/ui-finance/FilterBar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/auth/AuthContext";
-import { deleteInvoice, listInvoices } from "@/api/invoices";
+import { deleteInvoice, getInvoiceTabCounts, listInvoices } from "@/api/invoices";
 import { useAppDialog } from "@/components/dialogs/AppDialogProvider";
 import { uploadProgressEvents } from "@/services/uploadProgressEvents";
 import type { Invoice } from "@/types/invoice";
@@ -132,18 +132,12 @@ export function DocumentsPage() {
   );
 
   const loadTotals = useCallback(async () => {
-    const countFilters = debouncedSearch ? { search: debouncedSearch } : {};
-    const totals = {} as Record<DocumentsTab, number>;
-    for (const tab of DOCUMENT_TABS) {
-      const res = await listInvoices({
-        ...countFilters,
-        ...tabFilters(tab.id),
-        page: 1,
-        limit: 1,
-      });
-      totals[tab.id] = res.total;
-    }
-    setTabTotals(totals);
+    const counts = await getInvoiceTabCounts(debouncedSearch || undefined);
+    setTabTotals({
+      all: counts.all,
+      "needs-review": counts.needs_review,
+      unmatched: counts.unmatched,
+    });
   }, [debouncedSearch]);
 
   const loadActiveTab = useCallback(async () => {

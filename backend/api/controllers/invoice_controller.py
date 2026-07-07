@@ -1,9 +1,11 @@
+import hashlib
 import mimetypes
 from datetime import date
 
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 
+from core.cache import cache
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExtractionError
 from core.invoice_access import invoice_owner_user_id, user_may_delete_invoice
@@ -22,6 +24,7 @@ from schemas.invoice import (
     InvoiceApproveResponse,
     InvoiceListResponse,
     InvoiceResponse,
+    InvoiceTabCountsResponse,
     InvoiceUpdate,
     InvoiceUploadResponse,
     UploadItemResponse,
@@ -33,6 +36,18 @@ from utils.safe_filename import content_disposition_inline
 from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
+
+_TAB_COUNTS_TTL_SECONDS = 30
+
+
+def _invoice_tab_counts_cache_token(search: str | None) -> str:
+    if not search:
+        return "all"
+    return hashlib.sha256(search.strip().encode()).hexdigest()[:16]
+
+
+def _invalidate_invoice_tab_counts() -> None:
+    cache.delete_pattern("invoice_tab_counts:*")
 
 
 class InvoiceController:
@@ -155,6 +170,31 @@ class InvoiceController:
         )
 
     @debug_trace
+    async def tab_counts(
+        self,
+        user: UserContext,
+        search: str | None,
+    ) -> InvoiceTabCountsResponse:
+        owner = invoice_owner_user_id(user)
+        cache_key = (
+            f"invoice_tab_counts:{owner}:"
+            f"{_invoice_tab_counts_cache_token(search)}"
+        )
+        cached = cache.get_model(cache_key, InvoiceTabCountsResponse)
+        if cached is not None:
+            return cached
+        filters: dict = {}
+        if search is not None:
+            filters["search"] = search
+        counts = await self._invoice_repo.count_by_tabs(
+            filters,
+            owner_user_id=owner,
+        )
+        response = InvoiceTabCountsResponse(**counts)
+        cache.set_model(cache_key, response, ttl_seconds=_TAB_COUNTS_TTL_SECONDS)
+        return response
+
+    @debug_trace
     async def get(self, invoice_id: int, user: UserContext) -> InvoiceResponse:
         invoice = await self._invoice_repo.get(
             invoice_id,
@@ -247,6 +287,7 @@ class InvoiceController:
             before.model_dump(mode="json"),
             updated.model_dump(mode="json"),
         )
+        _invalidate_invoice_tab_counts()
         return updated
 
     @debug_trace
@@ -281,6 +322,7 @@ class InvoiceController:
                 invoice.model_dump(mode="json"),
                 None,
             )
+            _invalidate_invoice_tab_counts()
             return
 
         if owner is not None and await self._invoice_access_repo.revoke(
@@ -294,6 +336,7 @@ class InvoiceController:
                 None,
                 {"reason": "user_removed_shared_invoice"},
             )
+            _invalidate_invoice_tab_counts()
             return
 
         raise HTTPException(
@@ -329,6 +372,7 @@ class InvoiceController:
             None,
             {"review_status": "approved"},
         )
+        _invalidate_invoice_tab_counts()
         return InvoiceApproveResponse(id=invoice.id, review_status=invoice.review_status)
 
     async def serve_file(self, invoice_id: int, user: UserContext) -> Response:

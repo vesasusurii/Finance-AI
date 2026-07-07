@@ -54,6 +54,7 @@ async def _process_upload(upload_id: int, user_id: int) -> dict:
                 await upload_repo.update_status(upload_id, "processed")
                 await session.commit()
                 cache.delete_pattern("review:*")
+                cache.delete_pattern("invoice_tab_counts:*")
                 cache.delete_pattern(f"ocr:upload:{upload_id}")
                 return {
                     "upload_id": upload_id,
@@ -96,6 +97,8 @@ async def _process_upload(upload_id: int, user_id: int) -> dict:
     duration_ms = round((time.perf_counter() - t0) * 1000, 1)
     cache.delete_pattern("review:*")
     cache.delete_pattern("bank_tx:*")
+    cache.delete_pattern("invoice_tab_counts:*")
+    cache.delete_pattern("matching_tab_counts:*")
     cache.delete_pattern(f"ocr:upload:{upload_id}")
     logger.info(
         {

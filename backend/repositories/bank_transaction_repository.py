@@ -91,6 +91,59 @@ class BankTransactionRepository:
 
     _RECONCILABLE_STATUSES = ("pending", "needs_review", "partial", "unmatched")
 
+    def _build_transaction_count_query(
+        self,
+        bank_statement_id: int | None,
+        reconciliation_status: str | None,
+        *,
+        owner_user_id: int | None = None,
+        multi_invoice: bool = False,
+        reconciliation_statuses: list[str] | None = None,
+    ):
+        count_q = select(func.count()).select_from(BankTransaction)
+
+        if owner_user_id is not None:
+            join_condition = BankTransaction.bank_statement_id == BankStatement.id
+            count_q = count_q.join(BankStatement, join_condition)
+            count_q = count_q.where(BankStatement.uploaded_by == owner_user_id)
+
+        if bank_statement_id is not None:
+            count_q = count_q.where(
+                BankTransaction.bank_statement_id == bank_statement_id
+            )
+        if reconciliation_statuses:
+            count_q = count_q.where(
+                BankTransaction.reconciliation_status.in_(reconciliation_statuses)
+            )
+        elif reconciliation_status:
+            count_q = count_q.where(
+                BankTransaction.reconciliation_status == reconciliation_status
+            )
+        if multi_invoice:
+            multi_filter = func.jsonb_array_length(
+                BankTransaction.detected_invoice_numbers
+            ) > 1
+            count_q = count_q.where(multi_filter)
+        return count_q
+
+    async def count_transactions(
+        self,
+        bank_statement_id: int | None,
+        reconciliation_status: str | None = None,
+        *,
+        owner_user_id: int | None = None,
+        multi_invoice: bool = False,
+        reconciliation_statuses: list[str] | None = None,
+    ) -> int:
+        count_q = self._build_transaction_count_query(
+            bank_statement_id,
+            reconciliation_status,
+            owner_user_id=owner_user_id,
+            multi_invoice=multi_invoice,
+            reconciliation_statuses=reconciliation_statuses,
+        )
+        return int((await self._session.execute(count_q)).scalar_one())
+
     async def list_reconciliation_candidates(
         self,
         *,
@@ -125,32 +178,27 @@ class BankTransactionRepository:
         reconciliation_statuses: list[str] | None = None,
     ) -> tuple[list[BankTransactionResponse], int]:
         base = select(BankTransaction)
-        count_q = select(func.count()).select_from(BankTransaction)
+        count_q = self._build_transaction_count_query(
+            bank_statement_id,
+            reconciliation_status,
+            owner_user_id=owner_user_id,
+            multi_invoice=multi_invoice,
+            reconciliation_statuses=reconciliation_statuses,
+        )
 
         if owner_user_id is not None:
             join_condition = BankTransaction.bank_statement_id == BankStatement.id
             base = base.join(BankStatement, join_condition)
-            count_q = count_q.join(BankStatement, join_condition)
             base = base.where(BankStatement.uploaded_by == owner_user_id)
-            count_q = count_q.where(BankStatement.uploaded_by == owner_user_id)
 
         if bank_statement_id is not None:
             base = base.where(BankTransaction.bank_statement_id == bank_statement_id)
-            count_q = count_q.where(
-                BankTransaction.bank_statement_id == bank_statement_id
-            )
         if reconciliation_statuses:
             base = base.where(
                 BankTransaction.reconciliation_status.in_(reconciliation_statuses)
             )
-            count_q = count_q.where(
-                BankTransaction.reconciliation_status.in_(reconciliation_statuses)
-            )
         elif reconciliation_status:
             base = base.where(
-                BankTransaction.reconciliation_status == reconciliation_status
-            )
-            count_q = count_q.where(
                 BankTransaction.reconciliation_status == reconciliation_status
             )
         if multi_invoice:
@@ -158,7 +206,6 @@ class BankTransactionRepository:
                 BankTransaction.detected_invoice_numbers
             ) > 1
             base = base.where(multi_filter)
-            count_q = count_q.where(multi_filter)
 
         db_t0 = time.perf_counter()
         total = (await self._session.execute(count_q)).scalar_one()
