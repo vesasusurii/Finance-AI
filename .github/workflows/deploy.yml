@@ -88,7 +88,9 @@ jobs:
           inlineScript: |
             az containerapp update \
               --name worker --resource-group "$RESOURCE_GROUP" \
-              --image "$ACR_LOGIN_SERVER/finance-backend:$IMAGE_TAG"
+              --image "$ACR_LOGIN_SERVER/finance-backend:$IMAGE_TAG" \
+              --command "/app/run_worker.sh" \
+              --min-replicas 1
 
       - name: Deploy frontend
         uses: azure/cli@v2

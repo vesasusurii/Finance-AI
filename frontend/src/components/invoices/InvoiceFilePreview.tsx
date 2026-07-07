@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { PdfCanvasPreview } from "@/components/invoices/PdfCanvasPreview";
 import { fetchInvoiceFile, invoiceFileUrl } from "@/api/invoices";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +12,14 @@ function mimeFromName(name: string, fallback: string | null): string | null {
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   return null;
+}
+
+function isPdfMime(mime: string, displayName: string): boolean {
+  return (
+    mime === "application/pdf" ||
+    mime.includes("pdf") ||
+    displayName.toLowerCase().endsWith(".pdf")
+  );
 }
 
 export function InvoiceFilePreview({
@@ -27,7 +36,9 @@ export function InvoiceFilePreview({
   className?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewIsImage, setPreviewIsImage] = useState(false);
+  const [previewIsPdf, setPreviewIsPdf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -40,7 +51,9 @@ export function InvoiceFilePreview({
     setError(null);
     setImgError(false);
     setPreviewUrl(null);
+    setPreviewBlob(null);
     setPreviewIsImage(false);
+    setPreviewIsPdf(false);
 
     void fetchInvoiceFile(invoiceId)
       .then((blob) => {
@@ -48,14 +61,20 @@ export function InvoiceFilePreview({
         const resolvedMime =
           blob.type || mimeFromName(displayName, mimeType) || "";
         const image = resolvedMime.startsWith("image/");
+        const pdf = isPdfMime(resolvedMime, displayName);
+
         setPreviewIsImage(image);
+        setPreviewIsPdf(pdf);
+
         if (image) {
           objectUrl = URL.createObjectURL(blob);
           setPreviewUrl(objectUrl);
           return;
         }
-        // PDFs in blob iframes inherit the SPA CSP and block the built-in viewer.
-        setPreviewUrl(invoiceFileUrl(invoiceId));
+
+        if (pdf) {
+          setPreviewBlob(blob);
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -83,6 +102,18 @@ export function InvoiceFilePreview({
         : resolvedMime
           ? "FILE"
           : null;
+  const canOpen = !loading && !error;
+  const showImage = !loading && !error && previewUrl !== null && isImage;
+  const showPdf = !loading && !error && previewBlob !== null && previewIsPdf;
+  const showImgError =
+    !loading && !error && previewIsImage && imgError && previewUrl !== null;
+  const showUnsupported =
+    !loading &&
+    !error &&
+    !previewIsImage &&
+    !previewIsPdf &&
+    previewUrl === null &&
+    previewBlob === null;
 
   return (
     <div
@@ -106,9 +137,9 @@ export function InvoiceFilePreview({
               {typeLabel}
             </span>
           )}
-          {previewUrl && (
+          {canOpen && (
             <a
-              href={previewIsImage ? previewUrl : invoiceFileUrl(invoiceId)}
+              href={invoiceFileUrl(invoiceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
@@ -142,7 +173,7 @@ export function InvoiceFilePreview({
           </div>
         )}
 
-        {!loading && !error && previewUrl && isImage && (
+        {showImage && (
           <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
             <img
               src={previewUrl}
@@ -153,15 +184,15 @@ export function InvoiceFilePreview({
           </div>
         )}
 
-        {!loading && !error && previewUrl && !previewIsImage && (
-          <iframe
-            src={previewUrl}
-            title={displayName}
-            className={`h-full min-h-[400px] w-full border-0 ${minHeightClass}`}
+        {showPdf && (
+          <PdfCanvasPreview
+            blob={previewBlob}
+            minHeightClass={minHeightClass}
+            className="h-full"
           />
         )}
 
-        {!loading && !error && previewUrl && imgError && (
+        {(showUnsupported || showImgError) && (
           <div
             className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
           >

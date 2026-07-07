@@ -10,7 +10,13 @@ from services.ocr.pdf_text_extractor import TextLayerHints
 logger = get_logger(__name__)
 
 # Fields where deterministic text-layer reads are preferred over Vision
-_TEXT_PREFERRED_FIELDS = ("invoice_number", "invoice_date", "amount", "name_of_company")
+_TEXT_PREFERRED_FIELDS = (
+    "invoice_number",
+    "invoice_date",
+    "amount",
+    "name_of_company",
+    "account_details",
+)
 
 
 class HybridExtractionService:
@@ -51,6 +57,12 @@ class HybridExtractionService:
                 hints.name_of_company
             )
             merged_fields.append("name_of_company")
+
+        if hints.account_details and not data.get("account_details"):
+            data["account_details"] = self._ai_validation._clean_text(
+                hints.account_details
+            )
+            merged_fields.append("account_details")
 
         if merged_fields:
             logger.info(

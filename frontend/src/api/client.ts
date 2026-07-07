@@ -21,6 +21,52 @@ export class ApiError extends Error {
   }
 }
 
+type ApiErrorBody = {
+  error?: string;
+  message?: string;
+  retry_after_seconds?: number;
+};
+
+function isJsonResponse(res: Response): boolean {
+  const contentType = res.headers.get("content-type") ?? "";
+  return /\bapplication\/json\b|\+json\b/i.test(contentType);
+}
+
+async function readApiJson<T>(res: Response): Promise<T> {
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  if (!isJsonResponse(res)) {
+    const body = await res.text().catch(() => "");
+    const looksLikeHtml = /^\s*<!doctype\b|^\s*<html\b/i.test(body);
+    throw new ApiError(
+      looksLikeHtml
+        ? "API request returned the frontend HTML shell. Check the /api proxy/backend route."
+        : "API returned a non-JSON response.",
+      res.status,
+      "invalid_api_response",
+    );
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError(
+      "API returned invalid JSON.",
+      res.status,
+      "invalid_api_response",
+    );
+  }
+}
+
+async function readApiErrorBody(res: Response): Promise<ApiErrorBody> {
+  if (!isJsonResponse(res)) {
+    return {};
+  }
+  return (await res.json().catch(() => ({}))) as ApiErrorBody;
+}
+
 let refreshInFlight: Promise<unknown> | null = null;
 
 /** Refresh session using the httpOnly refresh cookie (deduped across callers). */
@@ -32,17 +78,14 @@ export async function refreshAccessToken<T = unknown>(): Promise<T> {
         credentials: "include",
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          message?: string;
-        };
+        const body = await readApiErrorBody(res);
         throw new ApiError(
           body.message ?? "Session expired. Please sign in again.",
           res.status,
           body.error,
         );
       }
-      return res.json().catch(() => undefined);
+      return readApiJson<T>(res);
     })().finally(() => {
       refreshInFlight = null;
     });
@@ -99,11 +142,7 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as {
-      error?: string;
-      message?: string;
-      retry_after_seconds?: number;
-    };
+    const body = await readApiErrorBody(res);
     throw new ApiError(
       body.message ?? res.statusText,
       res.status,
@@ -112,11 +151,7 @@ export async function apiFetch<T>(
     );
   }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  return res.json() as Promise<T>;
+  return readApiJson<T>(res);
 }
 
 export function getAuthRefreshIntervalMs(): number {

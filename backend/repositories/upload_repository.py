@@ -21,7 +21,6 @@ class UploadRepository:
         processing_status: str = "pending",
         file_size: int | None = None,
         content_sha256: str | None = None,
-        upload_source: str = "portal",
     ) -> UploadedFile:
         row = UploadedFile(
             original_filename=filename,
@@ -32,7 +31,6 @@ class UploadRepository:
             processing_status=processing_status,
             file_size=file_size,
             content_sha256=content_sha256,
-            upload_source=upload_source,
         )
         self._session.add(row)
         await self._session.flush()

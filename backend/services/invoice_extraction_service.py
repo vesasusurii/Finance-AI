@@ -21,6 +21,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 from config import settings
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.exceptions import ExtractionError
+from core.ocr_progress import get_ocr_progress, record_recent_ocr_timing, update_ocr_progress
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import DuplicateInvoiceNumberError, InvoiceRepository
@@ -79,6 +80,7 @@ class _ExtractionContext:
     supplemental_text: str | None
     vision_system_prompt: str
     batch_system_prompt: str
+    text_extraction_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,17 @@ class InvoiceExtractionService:
         self._hybrid = HybridExtractionService(ai_validation)
         self._field_recovery = FieldRecoveryService(openai_client, ai_validation)
         self._text_first = TextFirstExtractionService(openai_client, ai_validation)
+        self._progress_upload_id: int | None = None
+        self._openai_timings: list[dict] = []
+        self._last_merge_ms: float | None = None
+
+    def _update_progress(self, **fields) -> None:
+        if self._progress_upload_id is not None:
+            update_ocr_progress(self._progress_upload_id, **fields)
+
+    async def _release_db_connection(self) -> None:
+        """Return the checked-out connection before slow OCR / OpenAI work."""
+        await self._upload_repo._session.close()
 
     # ─────────────────────────────────────────────────────────────────────
     # Public entry point
@@ -135,7 +148,6 @@ class InvoiceExtractionService:
         user: UserContext,
         *,
         content: bytes | None = None,
-        upload_source: str = "portal",
     ) -> PreparedUpload | UploadItemResponse:
         """Store file bytes and create an upload row — fast path for async OCR."""
         logger.debug(
@@ -200,7 +212,6 @@ class InvoiceExtractionService:
                     processing_status="queued",
                     file_size=file_size,
                     content_sha256=content_hash,
-                    upload_source=upload_source,
                 )
         except IntegrityError:
             logger.warning(
@@ -218,6 +229,19 @@ class InvoiceExtractionService:
             ) from None
         logger.debug(
             "Upload row created: id=%d storage_path=%r", upload_row.id, storage_path
+        )
+        update_ocr_progress(
+            upload_row.id,
+            document_id=upload_row.id,
+            filename=stored_filename,
+            upload_status="queued",
+            stage="queued",
+            stage_label="Queued",
+            queued_at=time.time(),
+            model=settings.openai_model,
+            mime_type=mime,
+            file_size=file_size,
+            uploaded_by=user.user_id,
         )
         return PreparedUpload(
             upload_id=upload_row.id,
@@ -238,15 +262,27 @@ class InvoiceExtractionService:
     ) -> UploadItemResponse:
         """Run OCR and persist invoice data for a prepared upload row."""
         t0 = time.perf_counter()
+        self._progress_upload_id = upload_id
         upload_row = await self._upload_repo.get(upload_id)
         if upload_row is None:
             raise ExtractionError(f"Upload {upload_id} not found")
+
+        progress_snapshot = get_ocr_progress(upload_id)
+        queue_wait_ms = None
+        queued_at = progress_snapshot.get("queued_at")
+        if isinstance(queued_at, (int, float)):
+            queue_wait_ms = round((time.time() - float(queued_at)) * 1000, 1)
+            self._update_progress(queue_wait_ms=queue_wait_ms)
 
         content_source = "memory"
         storage_download_ms = 0.0
         if content is None:
             content_source = "storage"
             storage_t0 = time.perf_counter()
+            self._update_progress(
+                stage="downloading",
+                stage_label="Downloading file",
+            )
             logger.info(
                 "OCR upload_id=%d downloading bytes from Supabase/storage path=%s",
                 upload_id,
@@ -258,6 +294,10 @@ class InvoiceExtractionService:
             )
             storage_download_ms = round((time.perf_counter() - storage_t0) * 1000, 1)
         else:
+            self._update_progress(
+                stage="preparing",
+                stage_label="Using uploaded file",
+            )
             logger.info(
                 "OCR upload_id=%d using in-memory upload bytes (%d bytes)",
                 upload_id,
@@ -277,15 +317,24 @@ class InvoiceExtractionService:
         if mime == "image/jpg":
             mime = "image/jpeg"
         stored_filename = upload_row.original_filename
+        source_file_id = upload_row.id
+
+        # Release the read transaction and connection before slow OCR/OpenAI work.
+        # The session re-acquires a connection when persisting results.
+        await self._upload_repo.commit()
+        await self._release_db_connection()
 
         try:
             extract_t0 = time.perf_counter()
+            self._openai_timings = []
+            self._last_merge_ms = None
             result, model_used, meta = await self._extract(
                 stored_filename, mime, content
             )
             extract_ms = round((time.perf_counter() - extract_t0) * 1000, 1)
             meta["ocr_ms"] = extract_ms
             meta["storage_download_ms"] = storage_download_ms
+            meta["queue_wait_ms"] = queue_wait_ms
             logger.info(
                 "OCR extract finished upload_id=%d ocr_ms=%s model=%s mode=%s",
                 upload_id,
@@ -314,8 +363,14 @@ class InvoiceExtractionService:
                 review_status, type(review_status).__name__,
             )
 
+            persist_t0 = time.perf_counter()
+            self._update_progress(
+                stage="saving",
+                stage_label="Saving invoice",
+                upload_status="processing",
+            )
             invoice = await self._invoice_repo.create(
-                result, upload_row.id, review_status, uploaded_by=user_id
+                result, source_file_id, review_status, uploaded_by=user_id
             )
             logger.debug(
                 "Invoice persisted: id=%d (%s)", invoice.id, type(invoice).__name__
@@ -334,9 +389,65 @@ class InvoiceExtractionService:
                     **meta,
                 },
             )
-            await self._upload_repo.update_status(upload_row.id, "processed")
+            await self._upload_repo.update_status(source_file_id, "processed")
+            persist_ms = round((time.perf_counter() - persist_t0) * 1000, 1)
+            total_ms = round((time.perf_counter() - t0) * 1000, 1)
+            meta["persist_ms"] = persist_ms
+            meta["total_ms"] = total_ms
+            meta["openai_calls"] = self._openai_timings
+            meta["openai_total_ms"] = round(
+                sum(float(call.get("openai_ms", 0.0)) for call in self._openai_timings),
+                1,
+            )
+            meta["openai_call_count"] = len(self._openai_timings)
+            record_recent_ocr_timing(
+                {
+                    "upload_id": source_file_id,
+                    "invoice_id": invoice.id,
+                    "model": model_used,
+                    "extraction_mode": meta.get("extraction_mode"),
+                    "queue_wait_ms": queue_wait_ms,
+                    "pages_processed": meta.get("pages_processed"),
+                    "total_pdf_pages": meta.get("total_pdf_pages"),
+                    "text_layer_chars": meta.get("text_layer_chars"),
+                    "text_extraction_ms": meta.get("text_extraction_ms"),
+                    "text_llm_ms": meta.get("text_llm_ms"),
+                    "render_ms": meta.get("render_ms"),
+                    "rendered_image_bytes": meta.get("rendered_image_bytes"),
+                    "merge_ms": meta.get("merge_ms"),
+                    "storage_download_ms": storage_download_ms,
+                    "ocr_ms": extract_ms,
+                    "persist_ms": persist_ms,
+                    "total_ms": total_ms,
+                    "openai_total_ms": meta["openai_total_ms"],
+                    "openai_call_count": meta["openai_call_count"],
+                    "openai_calls": self._openai_timings,
+                }
+            )
+            self._update_progress(
+                stage="processed",
+                stage_label="Invoice saved",
+                upload_status="processed",
+                invoice_id=invoice.id,
+                model=model_used,
+                extraction_mode=meta.get("extraction_mode"),
+                queue_wait_ms=queue_wait_ms,
+                pages_processed=meta.get("pages_processed"),
+                total_pdf_pages=meta.get("total_pdf_pages"),
+                storage_download_ms=storage_download_ms,
+                text_extraction_ms=meta.get("text_extraction_ms"),
+                text_llm_ms=meta.get("text_llm_ms"),
+                render_ms=meta.get("render_ms"),
+                rendered_image_bytes=meta.get("rendered_image_bytes"),
+                merge_ms=meta.get("merge_ms"),
+                ocr_ms=extract_ms,
+                persist_ms=persist_ms,
+                total_ms=total_ms,
+                openai_total_ms=meta["openai_total_ms"],
+                openai_call_count=meta["openai_call_count"],
+            )
             return UploadItemResponse(
-                upload_id=upload_row.id,
+                upload_id=source_file_id,
                 original_filename=stored_filename,
                 processing_status="processed",
                 invoice_id=invoice.id,
@@ -348,17 +459,31 @@ class InvoiceExtractionService:
                 exc,
             )
             await self._upload_repo.rollback()
-            await self._upload_repo.update_status(upload_row.id, "failed")
+            await self._upload_repo.update_status(source_file_id, "failed")
             await self._upload_repo.commit()
+            self._update_progress(
+                stage="failed",
+                stage_label="Extraction failed",
+                upload_status="failed",
+                error=str(exc),
+            )
             raise ExtractionError(
                 f"Invoice number already exists: {exc}"
             ) from exc
         except Exception as exc:
             logger.exception("Extraction failed for upload_id=%d", upload_id)
             await self._upload_repo.rollback()
-            await self._upload_repo.update_status(upload_row.id, "failed")
+            await self._upload_repo.update_status(source_file_id, "failed")
             await self._upload_repo.commit()
+            self._update_progress(
+                stage="failed",
+                stage_label="Extraction failed",
+                upload_status="failed",
+                error=str(exc),
+            )
             raise ExtractionError(str(exc)) from exc
+        finally:
+            self._progress_upload_id = None
 
     def _prepared_from_row(self, upload_row, mime: str) -> PreparedUpload:
         resolved_mime = mime or upload_row.mime_type or "application/pdf"
@@ -468,13 +593,21 @@ class InvoiceExtractionService:
     ) -> _ExtractionContext:
         raw_text = ""
         hints = TextLayerHints(raw_text="")
+        text_t0 = time.perf_counter()
+        text_extraction_ms = 0.0
         if (
             mime == "application/pdf"
             and content
             and settings.openai_hybrid_text_enabled
         ):
+            self._update_progress(
+                stage="extracting_text",
+                stage_label="Extracting PDF text",
+            )
             raw_text = extract_pdf_text(content)
             hints = parse_text_layer_hints(raw_text)
+            text_extraction_ms = round((time.perf_counter() - text_t0) * 1000, 1)
+            self._update_progress(text_extraction_ms=text_extraction_ms)
 
         category = self._classifier.classify(hints.raw_text or raw_text, filename=filename)
         supplemental: str | None = None
@@ -500,6 +633,7 @@ class InvoiceExtractionService:
                 category,
                 legacy_include_utility=False,
             ),
+            text_extraction_ms=text_extraction_ms,
         )
 
     async def _apply_post_vision_pipeline(
@@ -537,7 +671,7 @@ class InvoiceExtractionService:
         *,
         total_pages: int,
         ctx: _ExtractionContext,
-    ) -> tuple[ExtractionResult, str, str] | None:
+    ) -> tuple[ExtractionResult, str, str, dict] | None:
         """Fast path for digital PDFs — regex hints or text-only LLM, no Vision."""
         if not self._text_first.can_attempt(
             total_pages=total_pages,
@@ -553,8 +687,13 @@ class InvoiceExtractionService:
                 total_pages,
                 len(ctx.text_hints.raw_text),
             )
-            return hints_result, settings.openai_model, "text_hints"
+            return hints_result, settings.openai_model, "text_hints", {}
 
+        text_llm_t0 = time.perf_counter()
+        self._update_progress(
+            stage="text_llm",
+            stage_label="Extracting from PDF text",
+        )
         text_result = await self._text_first.extract_from_text(
             raw_text=ctx.text_hints.raw_text,
             filename=filename,
@@ -563,6 +702,8 @@ class InvoiceExtractionService:
             chat_completion=self._chat_completion,
             parse_response=self._parse_response,
         )
+        text_llm_ms = round((time.perf_counter() - text_llm_t0) * 1000, 1)
+        self._update_progress(text_llm_ms=text_llm_ms)
         if text_result is not None:
             logger.info(
                 "Text-first LLM path for %r (pages=%d, chars=%d)",
@@ -570,7 +711,9 @@ class InvoiceExtractionService:
                 total_pages,
                 len(ctx.text_hints.raw_text),
             )
-            return text_result, settings.openai_model, "text_llm"
+            return text_result, settings.openai_model, "text_llm", {
+                "text_llm_ms": text_llm_ms
+            }
 
         logger.info(
             "Text-first insufficient for %r — falling back to Vision",
@@ -607,25 +750,37 @@ class InvoiceExtractionService:
                 ctx=ctx,
             )
             if text_first is not None:
-                result, model_used, mode = text_first
+                result, model_used, mode, text_meta = text_first
                 meta = {
-                    "pages_processed": total_pages,
+                    "pages_processed": 0,
                     "total_pdf_pages": total_pages,
                     "document_category": ctx.document_category.value,
                     "text_layer_chars": len(ctx.text_hints.raw_text),
+                    "text_extraction_ms": ctx.text_extraction_ms,
                     "extraction_mode": mode,
                     "model": model_used,
+                    **text_meta,
                 }
                 return result, model_used, meta
 
+            render_t0 = time.perf_counter()
+            self._update_progress(
+                stage="rendering_pdf",
+                stage_label="Rendering PDF pages",
+            )
             images = render_pdf_pages_as_images(
                 content,
                 max_pages=settings.openai_max_pdf_pages,
                 scale=settings.openai_pdf_render_scale,
             )
+            render_ms = round((time.perf_counter() - render_t0) * 1000, 1)
+            rendered_bytes = sum(len(img) for img, _mime in images)
             logger.debug(
-                "Rendered PDF pages: count=%d (%s of (bytes, mime) tuples)",
-                len(images), type(images).__name__,
+                "Rendered PDF pages: count=%d bytes=%d render_ms=%s (%s of tuples)",
+                len(images),
+                rendered_bytes,
+                render_ms,
+                type(images).__name__,
             )
             if not images:
                 raise ExtractionError("PDF has no readable pages")
@@ -635,16 +790,32 @@ class InvoiceExtractionService:
                 "total_pdf_pages": total_pages,
                 "document_category": ctx.document_category.value,
                 "text_layer_chars": len(ctx.text_hints.raw_text),
+                "text_extraction_ms": ctx.text_extraction_ms,
+                "render_ms": render_ms,
+                "rendered_image_bytes": rendered_bytes,
             }
 
             async def _run_pdf(model: str):
-                r, m, mode = await self._extract_pdf_pages(
-                    filename,
-                    images,
-                    total_pages=total_pages,
-                    model=model,
-                    ctx=ctx,
+                use_edges_first = len(images) >= 5 or (
+                    len(images) > 2
+                    and rendered_bytes > settings.openai_vision_full_document_max_bytes
                 )
+                if use_edges_first:
+                    r, m, mode = await self._extract_pdf_edges_then_middle(
+                        filename,
+                        images,
+                        total_pages=total_pages,
+                        model=model,
+                        ctx=ctx,
+                    )
+                else:
+                    r, m, mode = await self._extract_pdf_pages(
+                        filename,
+                        images,
+                        total_pages=total_pages,
+                        model=model,
+                        ctx=ctx,
+                    )
                 r = await self._apply_post_vision_pipeline(
                     r, ctx=ctx, images=images, filename=filename, model=m
                 )
@@ -660,6 +831,12 @@ class InvoiceExtractionService:
                 )
             meta["extraction_mode"] = mode
             meta["model"] = model_used
+            if mode == "vision_first_last":
+                meta["pages_processed"] = min(2, len(images))
+            else:
+                meta["pages_processed"] = len(images)
+            if self._last_merge_ms is not None:
+                meta["merge_ms"] = self._last_merge_ms
             return await self._maybe_retry_strong(
                 filename,
                 result,
@@ -678,6 +855,11 @@ class InvoiceExtractionService:
         images = [(content, vision_mime)]
 
         async def _extract_image(model: str):
+            self._update_progress(
+                stage="openai_vision",
+                stage_label="Extracting with Vision",
+                model=model,
+            )
             r = await self._openai_vision_extract(
                 images,
                 filename=filename,
@@ -704,6 +886,8 @@ class InvoiceExtractionService:
             )
         meta = {
             "pages_processed": 1,
+            "total_pdf_pages": None,
+            "rendered_image_bytes": len(content),
             "extraction_mode": mode,
             "model": model_used,
             "document_category": ctx.document_category.value,
@@ -721,6 +905,106 @@ class InvoiceExtractionService:
     # ─────────────────────────────────────────────────────────────────────
     # PDF multi-page extraction
     # ─────────────────────────────────────────────────────────────────────
+
+    @debug_trace
+    async def _extract_pdf_edges_then_middle(
+        self,
+        filename: str,
+        images: list[tuple[bytes, str]],
+        *,
+        total_pages: int,
+        model: str,
+        ctx: _ExtractionContext,
+    ) -> tuple[ExtractionResult, str, str]:
+        """Extract first/last pages before paying to read middle pages."""
+        vision_prompt = ctx.vision_system_prompt
+        category = ctx.document_category
+        supplemental = ctx.supplemental_text
+
+        self._update_progress(
+            stage="openai_vision",
+            stage_label="Extracting first and last pages",
+            model=model,
+        )
+
+        first_task = self._openai_vision_extract(
+            [images[0]],
+            filename=filename,
+            file_type="pdf",
+            model=model,
+            page_range=(1, 1),
+            total_pages=total_pages,
+            system_prompt=vision_prompt,
+            supplemental_text=supplemental,
+            document_category=category,
+        )
+        last_task = self._openai_vision_extract(
+            [images[-1]],
+            filename=filename,
+            file_type="pdf",
+            model=model,
+            page_range=(total_pages, total_pages),
+            total_pages=total_pages,
+            system_prompt=vision_prompt,
+            context_hint="Final page: focus on totals, payment details, and bank accounts.",
+            document_category=category,
+        )
+        partials = list(await asyncio.gather(first_task, last_task))
+        merged = await self._merge_partial_extractions(
+            partials, total_pages=total_pages, model=model
+        )
+        merged = self._ai_validation.sanitize_and_validate(merged)
+        missing = self._ai_validation.validate_required_fields(merged)
+        suspicious = self._ai_validation.detect_suspicious_values(merged)
+        if not missing and not suspicious:
+            logger.info(
+                "PDF first/last extraction sufficient for %r (pages=%d)",
+                filename,
+                total_pages,
+            )
+            return merged, model, "vision_first_last"
+
+        middle_images = images[1:-1]
+        if not middle_images:
+            return merged, model, "vision_first_last"
+
+        self._update_progress(
+            stage="openai_vision",
+            stage_label="Extracting middle pages",
+            model=model,
+        )
+        logger.info(
+            "PDF first/last needed middle pages for %r: missing=%s suspicious=%s",
+            filename,
+            missing,
+            suspicious,
+        )
+        middle = await self._openai_vision_extract(
+            middle_images,
+            filename=filename,
+            file_type="pdf",
+            model=model,
+            page_range=(2, total_pages - 1),
+            total_pages=total_pages,
+            system_prompt=ctx.batch_system_prompt,
+            context_hint=self._context_hint_from_result(partials[0]),
+            document_category=category,
+        )
+        partials.insert(1, middle)
+        merged = await self._merge_partial_extractions(
+            partials, total_pages=total_pages, model=model
+        )
+        return merged, model, "vision_first_last_middle"
+
+    def _context_hint_from_result(self, result: ExtractionResult) -> str | None:
+        parts = []
+        if result.name_of_company:
+            parts.append(f"Issuer: {result.name_of_company}")
+        if result.invoice_number:
+            parts.append(f"Invoice #: {result.invoice_number}")
+        if result.invoice_date:
+            parts.append(f"Date: {result.invoice_date}")
+        return " | ".join(parts) if parts else None
 
     @debug_trace
     async def _extract_pdf_pages(
@@ -742,6 +1026,11 @@ class InvoiceExtractionService:
 
         # Single request — all pages fit in one call
         if len(images) <= per_request:
+            self._update_progress(
+                stage="openai_vision",
+                stage_label="Extracting invoice pages",
+                model=model,
+            )
             result = await self._openai_vision_extract(
                 images,
                 filename=filename,
@@ -769,6 +1058,11 @@ class InvoiceExtractionService:
             batches.append((page_start, page_end, batch))
 
         first_page_start, first_page_end, first_batch = batches[0]
+        self._update_progress(
+            stage="openai_vision",
+            stage_label="Extracting first page batch",
+            model=model,
+        )
         first_partial = await self._openai_vision_extract(
             first_batch,
             filename=filename,
@@ -803,6 +1097,11 @@ class InvoiceExtractionService:
                 filename,
                 len(batches),
                 concurrency,
+            )
+            self._update_progress(
+                stage="openai_vision",
+                stage_label="Extracting remaining page batches",
+                model=model,
             )
 
             async def _extract_batch(
@@ -844,6 +1143,8 @@ class InvoiceExtractionService:
         model: str,
     ) -> ExtractionResult:
         payload = [p.model_dump() for p in partials]
+        self._update_progress(stage="merging", stage_label="Merging page results")
+        merge_t0 = time.perf_counter()
         user_text = (
             f"Merge these {len(partials)} partial Vision extractions from a "
             f"{total_pages}-page invoice into one final JSON.\n\n"
@@ -857,6 +1158,8 @@ class InvoiceExtractionService:
                 {"role": "user", "content": user_text},
             ],
         )
+        self._last_merge_ms = round((time.perf_counter() - merge_t0) * 1000, 1)
+        self._update_progress(merge_ms=self._last_merge_ms)
         return self._parse_response(response.choices[0].message.content or "{}")
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1154,6 +1457,14 @@ class InvoiceExtractionService:
                     ),
                 )
                 openai_ms = round((time.perf_counter() - openai_t0) * 1000, 1)
+                self._openai_timings.append(
+                    {
+                        "model": model,
+                        "attempt": attempt + 1,
+                        "openai_ms": openai_ms,
+                        "content_len": len((response.choices[0].message.content or "").strip()),
+                    }
+                )
                 choice = response.choices[0]
                 content = (choice.message.content or "").strip()
                 logger.info(

@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Normalise Windows CRLF so exec does not fail with "no such file or directory".
+RUN sed -i 's/\r$//' /app/run_worker.sh && chmod +x /app/run_worker.sh
 RUN mkdir -p /data/uploads /var/log/borek
 
 EXPOSE 8000

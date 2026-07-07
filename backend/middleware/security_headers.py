@@ -5,8 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import settings
 
-# Same-origin preview iframes (invoice PDF viewer). Blob URLs inherit the SPA CSP
-# and break the browser PDF plugin; these routes are loaded via direct URL instead.
+# Invoice file downloads may be opened in a new tab; preview uses pdf.js (no iframe).
 _EMBEDDABLE_FILE_PATH = re.compile(r"^/api/invoices/\d+/file$")
 
 

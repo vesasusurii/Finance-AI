@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     openai_pdf_render_scale: float = Field(
         default=1.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
     )
+    openai_vision_full_document_max_bytes: int = Field(
+        default=2_500_000, validation_alias="OPENAI_VISION_FULL_DOCUMENT_MAX_BYTES"
+    )
     ocr_cache_enabled: bool = Field(default=True, validation_alias="OCR_CACHE_ENABLED")
     max_startup_recovery_jobs: int = Field(
         default=50, validation_alias="MAX_STARTUP_RECOVERY_JOBS"
@@ -275,6 +278,16 @@ def validate_settings_on_startup() -> list[str]:
             warnings.append("JWT_SECRET still uses a placeholder value")
         if settings.debug:
             warnings.append("DEBUG logging is enabled")
+        if settings.openai_model != "gpt-4o-mini":
+            warnings.append(
+                "OPENAI_MODEL is not gpt-4o-mini; local invoice OCR may be slow"
+            )
+        if settings.openai_max_retries > 2:
+            warnings.append("OPENAI_MAX_RETRIES above 2 can slow local invoice OCR")
+        if settings.openai_strong_retry_enabled:
+            warnings.append("OPENAI_STRONG_RETRY_ENABLED slows local invoice OCR")
+        if settings.openai_field_recovery_enabled:
+            warnings.append("OPENAI_FIELD_RECOVERY_ENABLED slows local invoice OCR")
     return warnings
 
 

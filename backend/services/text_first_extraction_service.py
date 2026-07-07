@@ -58,8 +58,16 @@ class TextFirstExtractionService:
             invoice_number=invoice_number,
             amount=hints.amount,
             name_of_company=self._ai_validation._clean_text(hints.name_of_company or ""),
+            account_details=self._ai_validation._clean_text(hints.account_details or ""),
             confidence_score=0.88,
             needs_review=False,
+            field_confidences={
+                "invoice_number": 0.9,
+                "invoice_date": 0.9,
+                "amount": 0.88,
+                "name_of_company": 0.82,
+                "account_details": 0.8 if hints.account_details else 0.0,
+            },
         )
         return self._ai_validation.sanitize_and_validate(result)
 

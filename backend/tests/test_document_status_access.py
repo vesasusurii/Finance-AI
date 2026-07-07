@@ -62,3 +62,75 @@ async def test_get_status_denies_foreign_upload_without_invoice(
         await document_service.get_status(141, _user(21))
 
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_status_falls_back_to_cached_progress_on_db_timeout(
+    document_service: DocumentService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    document_service._upload_repo.get = AsyncMock(side_effect=TimeoutError("db busy"))
+    monkeypatch.setattr(
+        "services.document_service.get_ocr_progress",
+        lambda _document_id: {
+            "uploaded_by": 21,
+            "filename": "invoice.pdf",
+            "upload_status": "processing",
+            "stage": "openai_vision",
+            "stage_label": "Extracting with Vision",
+        },
+    )
+
+    result = await document_service.get_status(141, _user(21))
+
+    assert result.document_id == 141
+    assert result.filename == "invoice.pdf"
+    assert result.upload_status == "processing"
+    assert result.stage_label == "Extracting with Vision"
+
+
+@pytest.mark.asyncio
+async def test_get_status_serves_active_cached_progress_without_db(
+    document_service: DocumentService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    document_service._upload_repo.get = AsyncMock()
+    monkeypatch.setattr(
+        "services.document_service.get_ocr_progress",
+        lambda _document_id: {
+            "uploaded_by": 21,
+            "filename": "invoice.pdf",
+            "upload_status": "queued",
+            "stage": "queued",
+            "stage_label": "Queued",
+            "queue_wait_ms": 125.0,
+        },
+    )
+
+    result = await document_service.get_status(141, _user(21))
+
+    assert result.document_id == 141
+    assert result.upload_status == "queued"
+    assert result.queue_wait_ms == 125.0
+    document_service._upload_repo.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_status_cache_fallback_preserves_owner_scope(
+    document_service: DocumentService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    document_service._upload_repo.get = AsyncMock(side_effect=TimeoutError("db busy"))
+    monkeypatch.setattr(
+        "services.document_service.get_ocr_progress",
+        lambda _document_id: {
+            "uploaded_by": 99,
+            "filename": "invoice.pdf",
+            "upload_status": "processing",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await document_service.get_status(141, _user(21))
+
+    assert exc.value.status_code == 503

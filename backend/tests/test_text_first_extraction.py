@@ -1,4 +1,5 @@
 from services.ocr.pdf_text_extractor import TextLayerHints
+from services.ocr.pdf_text_extractor import parse_text_layer_hints
 from services.text_first_extraction_service import TextFirstExtractionService
 
 
@@ -21,6 +22,7 @@ def test_result_from_hints_when_all_critical_present():
     assert result is not None
     assert result.invoice_number == "INV-26063"
     assert result.amount == 220.66
+    assert result.account_details is None
     assert result.confidence_score >= 0.85
 
 
@@ -34,3 +36,21 @@ def test_result_from_hints_returns_none_when_incomplete():
         name_of_company="Acme",
     )
     assert svc.result_from_hints(hints) is None
+
+
+def test_parse_text_layer_hints_common_labels_and_iban():
+    text = """
+    ADIA Group SH.P.K.
+    Invoice No: INV-26063
+    Invoice date: 15.05.2026
+    Grand Total EUR 220.66
+    IBAN XK051701010500018287
+    """
+
+    hints = parse_text_layer_hints(text)
+
+    assert hints.invoice_number == "INV-26063"
+    assert hints.invoice_date == "15.05.2026"
+    assert hints.amount == 220.66
+    assert hints.name_of_company == "ADIA Group SH.P.K."
+    assert hints.account_details == "XK051701010500018287"

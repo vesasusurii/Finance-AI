@@ -29,22 +29,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column("email_verified_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "users",
-        sa.Column("email_verification_code_hash", sa.String(length=500), nullable=True),
-    )
-    op.add_column(
-        "users",
-        sa.Column(
-            "email_verification_expires_at",
-            sa.DateTime(timezone=True),
-            nullable=True,
-        ),
-    )
-    op.execute(
-        "UPDATE users SET email_verified_at = created_at, must_change_password = false"
-    )
+    pass

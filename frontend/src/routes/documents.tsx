@@ -47,7 +47,6 @@ function isDocumentsTab(value: string | null): value is DocumentsTab {
 }
 
 function tabFilters(tab: DocumentsTab): {
-  upload_source?: string;
   review_status?: string;
   match_status?: string;
 } {
@@ -59,11 +58,6 @@ function tabFilters(tab: DocumentsTab): {
     default:
       return {};
   }
-}
-
-function uploadSourceLabel(source: string | null | undefined): string {
-  if (source === "outlook_email") return "Email";
-  return "Portal";
 }
 
 export function DocumentsPage() {
@@ -233,18 +227,6 @@ export function DocumentsPage() {
         ),
       },
     ];
-
-    if (activeTab === "all") {
-      base.push({
-        key: "source",
-        header: "Source",
-        cell: (r) => (
-          <span className="text-[12px] text-muted-foreground">
-            {uploadSourceLabel(r.upload_source)}
-          </span>
-        ),
-      });
-    }
 
     base.push(
       {

@@ -26,3 +26,19 @@ def test_hybrid_does_not_override_vision_invoice_number():
     hints = TextLayerHints(raw_text="x" * 100, invoice_number="14465")
     merged = HybridExtractionService(AIValidationService()).merge(vision, hints)
     assert merged.invoice_number == "99999"
+
+
+def test_hybrid_fills_missing_account_details():
+    vision = ExtractionResult(
+        invoice_number="99999",
+        amount=100.0,
+        confidence_score=0.9,
+    )
+    hints = TextLayerHints(
+        raw_text="x" * 100,
+        account_details="XK051701010500018287",
+    )
+
+    merged = HybridExtractionService(AIValidationService()).merge(vision, hints)
+
+    assert merged.account_details == "XK051701010500018287"

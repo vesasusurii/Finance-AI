@@ -12,6 +12,7 @@ from config import settings
 from core.cache import cache
 from core.cost_control import apply_ocr_cost_controls
 from core.debug_logger import get_logger
+from core.ocr_progress import update_ocr_progress
 from core.processing_locks import acquire_ocr_lock, release_lock
 from core.rate_limit_exceptions import RateLimitExceeded
 from core.rate_limiter import OpenAIRateLease
@@ -29,7 +30,18 @@ logger = get_logger(__name__)
 _running_tasks: Set[asyncio.Task[None]] = set()
 
 
-def schedule_invoice_ocr(upload_id: int, user_id: int) -> None:
+async def mark_upload_failed(upload_id: int) -> None:
+    async with async_session() as session:
+        await UploadRepository(session).update_status(upload_id, "failed")
+        await session.commit()
+
+
+def schedule_invoice_ocr(
+    upload_id: int,
+    user_id: int,
+    *,
+    content: bytes | None = None,
+) -> None:
     """Fire-and-forget OCR after upload commit. Must not raise to callers."""
     try:
         loop = asyncio.get_running_loop()
@@ -39,7 +51,7 @@ def schedule_invoice_ocr(upload_id: int, user_id: int) -> None:
             upload_id,
         )
         return
-    task = loop.create_task(_run_with_retries(upload_id, user_id))
+    task = loop.create_task(_run_with_retries(upload_id, user_id, content=content))
     _running_tasks.add(task)
     task.add_done_callback(_running_tasks.discard)
 
@@ -49,6 +61,7 @@ async def _run_with_retries(
     user_id: int,
     *,
     attempt: int = 0,
+    content: bytes | None = None,
 ) -> None:
     lock_owner = f"ocr:{upload_id}:{time.time()}"
     lock_key = acquire_ocr_lock(upload_id, lock_owner)
@@ -56,11 +69,16 @@ async def _run_with_retries(
         logger.info("Skipping duplicate OCR for upload_id=%d", upload_id)
         return
     try:
-        await process_invoice_upload(upload_id, user_id)
+        await process_invoice_upload(upload_id, user_id, content=content)
     except RateLimitExceeded as exc:
         if attempt < settings.task_max_retries:
             await asyncio.sleep(exc.retry_after_seconds)
-            await _run_with_retries(upload_id, user_id, attempt=attempt + 1)
+            await _run_with_retries(
+                upload_id,
+                user_id,
+                attempt=attempt + 1,
+                content=content,
+            )
         else:
             logger.warning(
                 "OCR rate-limited upload_id=%d after %d attempts",
@@ -73,7 +91,12 @@ async def _run_with_retries(
         release_lock(lock_key, lock_owner)
 
 
-async def process_invoice_upload(upload_id: int, user_id: int) -> dict:
+async def process_invoice_upload(
+    upload_id: int,
+    user_id: int,
+    *,
+    content: bytes | None = None,
+) -> dict:
     t0 = time.perf_counter()
     system_mode = current_system_mode()
 
@@ -96,34 +119,41 @@ async def process_invoice_upload(upload_id: int, user_id: int) -> dict:
         await upload_repo.update_status(upload_id, "processing")
         await session.commit()
 
-        if not settings.openai_api_key:
-            await upload_repo.update_status(upload_id, "failed")
-            await session.commit()
-            raise RuntimeError("OPENAI_API_KEY is not configured")
+    update_ocr_progress(
+        upload_id,
+        stage="processing",
+        stage_label="Preparing extraction",
+        upload_status="processing",
+        model=settings.openai_model,
+    )
 
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-        response = None
-        try:
-            with OpenAIRateLease(settings.openai_model), apply_ocr_cost_controls(
-                system_mode
-            ):
+    if not settings.openai_api_key:
+        await mark_upload_failed(upload_id)
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    response = None
+    try:
+        with OpenAIRateLease(settings.openai_model), apply_ocr_cost_controls(
+            system_mode
+        ):
+            async with async_session() as session:
                 extraction = InvoiceExtractionService(
-                    upload_repo,
-                    invoice_repo,
+                    UploadRepository(session),
+                    InvoiceRepository(session),
                     InvoiceAccessRepository(session),
                     AuditRepository(session),
                     AIValidationService(),
                     client,
                 )
                 response = await extraction.complete_upload(
-                    upload_id, user_id, content=None
+                    upload_id, user_id, content=content
                 )
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await client.close()
+                await session.commit()
+    except Exception:
+        raise
+    finally:
+        await client.close()
 
     duration_ms = round((time.perf_counter() - t0) * 1000, 1)
     cache.delete_pattern("review:*")
@@ -141,6 +171,14 @@ async def process_invoice_upload(upload_id: int, user_id: int) -> dict:
             "system_mode": system_mode,
             "invoice_id": response.invoice_id if response else None,
         }
+    )
+    update_ocr_progress(
+        upload_id,
+        stage="processed",
+        stage_label="Invoice saved",
+        upload_status="processed",
+        duration_ms=duration_ms,
+        invoice_id=response.invoice_id if response else None,
     )
     return {
         "upload_id": upload_id,

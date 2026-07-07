@@ -42,7 +42,6 @@ async def list_invoices(
     company: str | None = None,
     search: str | None = None,
     sort: str | None = None,
-    upload_source: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     user: UserContext = Depends(get_current_user),
@@ -57,7 +56,6 @@ async def list_invoices(
         company,
         search,
         sort,
-        upload_source,
         page,
         limit,
     )

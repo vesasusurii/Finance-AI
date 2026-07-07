@@ -20,7 +20,7 @@ import type {
   InvoiceQueueStatus,
 } from "@/types/uploadQueue";
 
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 2;
 
 function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -134,7 +134,10 @@ export function useUploadQueue() {
           const extracted = await waitForDocumentExtraction(documentId, {
             signal: controller.signal,
             onPoll: (status, elapsedMs) => {
-              if (status.upload_status === "processing") {
+              if (
+                status.upload_status === "queued" ||
+                status.upload_status === "processing"
+              ) {
                 const progress = Math.min(
                   88,
                   STAGE_PROGRESS.ocr_processing +
@@ -143,7 +146,7 @@ export function useUploadQueue() {
                 patchItem(itemId, {
                   status: "ocr_processing",
                   progress,
-                  stageLabel: STAGE_LABELS.ocr_processing,
+                  stageLabel: status.stage_label ?? STAGE_LABELS.ocr_processing,
                 });
               }
             },

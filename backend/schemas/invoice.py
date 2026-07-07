@@ -105,11 +105,6 @@ class InvoiceResponse(BaseModel):
     source_file_id: int | None
     source_filename: str | None = None
     source_mime_type: str | None = None
-    upload_source: str | None = None
-    ingest_sender_email: str | None = None
-    ingest_sender_name: str | None = None
-    ingest_email_subject: str | None = None
-    ingest_message_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -36,7 +36,6 @@ export interface Invoice {
   source_file_id: number | null;
   source_filename: string | null;
   source_mime_type: string | null;
-  upload_source?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -62,7 +61,6 @@ export interface InvoiceFilters {
   company?: string;
   search?: string;
   sort?: string;
-  upload_source?: string;
   page?: number;
   limit?: number;
 }

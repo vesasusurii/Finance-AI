@@ -1,11 +1,14 @@
+from typing import Any
+
 from fastapi import HTTPException, UploadFile
 from openai import AsyncOpenAI
 
 from core.debug_logger import get_logger
 from core.document_types import is_ocr_ready, validate_document_file
 from core.exceptions import ExtractionError
+from core.ocr_progress import get_ocr_progress
 from core.roles import is_admin
-from core.upload_enqueue import safe_enqueue_invoice_ocr
+from core.upload_enqueue import maybe_reenqueue_stale_invoice_ocr, safe_enqueue_invoice_ocr
 from repositories.invoice_repository import InvoiceRepository
 from repositories.upload_repository import UploadRepository
 from schemas.auth import UserContext
@@ -86,6 +89,7 @@ class DocumentService:
                         prepared.upload_id,
                         user.user_id,
                         priority=priority,
+                        content=prepared.content,
                     )
                     logger.info(
                         "Upload stored upload_id=%d filename=%r",
@@ -161,13 +165,82 @@ class DocumentService:
         )
         return invoice is not None
 
+    def _status_from_progress(
+        self,
+        document_id: int,
+        user: UserContext,
+        *,
+        exc: Exception | None = None,
+        require_active: bool = False,
+    ) -> DocumentStatusResponse:
+        progress: dict[str, Any] = get_ocr_progress(document_id)
+        uploaded_by = progress.get("uploaded_by")
+        can_view = uploaded_by == user.user_id or is_admin(user.role)
+        upload_status = progress.get("upload_status")
+        if require_active and upload_status not in ("queued", "processing"):
+            raise LookupError("No active cached upload status")
+        if not progress or not can_view:
+            if exc is not None:
+                logger.warning(
+                    "Document status unavailable for document_id=%d: %s",
+                    document_id,
+                    exc,
+                )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "status_unavailable",
+                    "message": "Upload status is temporarily unavailable. Try again shortly.",
+                },
+            )
+
+        progress.pop("uploaded_by", None)
+        progress.pop("updated_at", None)
+        progress.pop("document_id", None)
+        invoice_id = progress.pop("invoice_id", None)
+        filename = progress.pop("filename", None) or f"document-{document_id}"
+        upload_status = progress.pop("upload_status", None) or "processing"
+        return DocumentStatusResponse(
+            document_id=document_id,
+            filename=filename,
+            upload_status=upload_status,
+            mime_type=progress.pop("mime_type", None),
+            file_size=progress.pop("file_size", None),
+            invoice_id=invoice_id,
+            error=progress.pop("error", None),
+            **progress,
+        )
+
     async def get_status(
         self,
         document_id: int,
         user: UserContext,
     ) -> DocumentStatusResponse:
-        row = await self._upload_repo.get(document_id)
-        if row is None or not await self._user_can_view_upload(row, user):
+        try:
+            return self._status_from_progress(document_id, user, require_active=True)
+        except LookupError:
+            pass
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+
+        try:
+            row = await self._upload_repo.get(document_id)
+        except Exception as exc:
+            return self._status_from_progress(document_id, user, exc=exc)
+
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": "Document not found."},
+            )
+
+        try:
+            can_view = await self._user_can_view_upload(row, user)
+        except Exception as exc:
+            return self._status_from_progress(document_id, user, exc=exc)
+
+        if not can_view:
             raise HTTPException(
                 status_code=404,
                 detail={"error": "not_found", "message": "Document not found."},
@@ -175,7 +248,31 @@ class DocumentService:
 
         invoice_id = None
         if row.processing_status == "processed":
-            invoice_id = await self._invoice_repo.get_id_by_source_file(row.id)
+            try:
+                invoice_id = await self._invoice_repo.get_id_by_source_file(row.id)
+            except Exception as exc:
+                logger.warning(
+                    "Invoice id lookup failed for processed document_id=%d: %s",
+                    row.id,
+                    exc,
+                )
+        else:
+            maybe_reenqueue_stale_invoice_ocr(
+                row.id,
+                row.uploaded_by,
+                processing_status=row.processing_status,
+                uploaded_at=row.uploaded_at,
+            )
+
+        progress = get_ocr_progress(row.id)
+        progress.pop("invoice_id", None)
+        progress.pop("updated_at", None)
+        progress.pop("uploaded_by", None)
+        progress.pop("document_id", None)
+        progress.pop("filename", None)
+        progress.pop("upload_status", None)
+        progress.pop("mime_type", None)
+        progress.pop("file_size", None)
 
         return DocumentStatusResponse(
             document_id=row.id,
@@ -184,4 +281,5 @@ class DocumentService:
             mime_type=row.mime_type,
             file_size=row.file_size,
             invoice_id=invoice_id,
+            **progress,
         )

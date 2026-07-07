@@ -56,11 +56,6 @@ def _to_response(row: Invoice) -> InvoiceResponse:
         update={
             "source_filename": upload.original_filename,
             "source_mime_type": upload.mime_type,
-            "upload_source": upload.upload_source,
-            "ingest_sender_email": upload.ingest_sender_email,
-            "ingest_sender_name": upload.ingest_sender_name,
-            "ingest_email_subject": upload.ingest_email_subject,
-            "ingest_message_id": upload.ingest_message_id,
         }
     )
 
@@ -97,11 +92,6 @@ def _apply_list_filters(query, filters: dict):
     if filters.get("category"):
         pattern = f"%{escape_ilike_pattern(str(filters['category']))}%"
         query = query.where(Invoice.category.ilike(pattern, escape="\\"))
-    if filters.get("upload_source"):
-        source = str(filters["upload_source"])
-        query = query.join(
-            UploadedFile, Invoice.source_file_id == UploadedFile.id
-        ).where(UploadedFile.upload_source == source)
     return query
 
 

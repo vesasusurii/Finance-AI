@@ -72,8 +72,6 @@ class InvoiceController:
         self,
         files: list[UploadFile],
         user: UserContext,
-        *,
-        upload_source: str = "portal",
     ) -> InvoiceUploadResponse:
         if not files:
             raise HTTPException(
@@ -86,7 +84,7 @@ class InvoiceController:
         for file in files:
             try:
                 prepared = await self._extraction.prepare_upload(
-                    file, user, upload_source=upload_source
+                    file, user
                 )
                 if isinstance(prepared, UploadItemResponse):
                     await self._upload_repo.commit()
@@ -109,6 +107,7 @@ class InvoiceController:
                     prepared.upload_id,
                     user.user_id,
                     priority=priority,
+                    content=prepared.content,
                 )
                 items.append(
                     UploadItemResponse(
@@ -141,7 +140,6 @@ class InvoiceController:
         company: str | None,
         search: str | None,
         sort: str | None,
-        upload_source: str | None,
         page: int,
         limit: int,
     ) -> InvoiceListResponse:
@@ -155,7 +153,6 @@ class InvoiceController:
                 "company": company,
                 "search": search,
                 "sort": sort,
-                "upload_source": upload_source,
             }.items()
             if v is not None
         }

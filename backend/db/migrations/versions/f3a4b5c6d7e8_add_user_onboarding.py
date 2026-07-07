@@ -19,10 +19,6 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "users",
-        sa.Column("email_verified_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "users",
         sa.Column(
             "must_change_password",
             sa.Boolean(),
@@ -30,25 +26,7 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.add_column(
-        "users",
-        sa.Column("email_verification_code_hash", sa.String(length=500), nullable=True),
-    )
-    op.add_column(
-        "users",
-        sa.Column(
-            "email_verification_expires_at",
-            sa.DateTime(timezone=True),
-            nullable=True,
-        ),
-    )
-    op.execute(
-        "UPDATE users SET email_verified_at = created_at, must_change_password = false"
-    )
 
 
 def downgrade() -> None:
-    op.drop_column("users", "email_verification_expires_at")
-    op.drop_column("users", "email_verification_code_hash")
     op.drop_column("users", "must_change_password")
-    op.drop_column("users", "email_verified_at")

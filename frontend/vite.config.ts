@@ -17,6 +17,14 @@ const brandingDir =
   path.resolve(repoRoot, "DOCS/branding");
 
 const isDocker = process.env.VITE_BRANDING_DIR === "/branding";
+const apiProxyTarget =
+  process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8000";
+const apiProxy = {
+  "/api": {
+    target: apiProxyTarget,
+    changeOrigin: true,
+  },
+};
 
 export default defineConfig({
   envDir: __dirname,
@@ -57,11 +65,12 @@ export default defineConfig({
           interval: 1000,
         }
       : undefined,
-    proxy: {
-      "/api": {
-        target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8000",
-        changeOrigin: true,
-      },
-    },
+    proxy: apiProxy,
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 5173,
+    strictPort: true,
+    proxy: apiProxy,
   },
 });
