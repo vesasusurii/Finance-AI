@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from config import settings
 from core.debug_logger import get_logger
 from core.queue import enqueue_process_invoice_upload
+from services.invoice_processing_service import schedule_invoice_ocr
 
 logger = get_logger(__name__)
 
@@ -14,6 +16,10 @@ def safe_enqueue_invoice_ocr(
     *,
     priority: str | None = None,
 ) -> None:
+    if settings.queue_mode == "inline":
+        schedule_invoice_ocr(upload_id, user_id)
+        return
+
     try:
         enqueue_process_invoice_upload(
             upload_id,

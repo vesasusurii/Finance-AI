@@ -7,7 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from services.verification_email_template import LOGO_CID, LOGO_FILENAME, _logo_path
+from services.email_branding import LOGO_CID, LOGO_FILENAME, logo_path
 
 _BG = "#FFFFFF"
 _SURFACE = "#F4F5F8"
@@ -158,8 +158,8 @@ def build_password_reset_email_message(
     ttl_minutes: int,
 ) -> MIMEMultipart:
     plain = build_password_reset_email_plain(reset_url, ttl_minutes=ttl_minutes)
-    logo_path = _logo_path()
-    logo_src = f"cid:{LOGO_CID}" if logo_path is not None else None
+    brand_logo = logo_path()
+    logo_src = f"cid:{LOGO_CID}" if brand_logo is not None else None
     html = build_password_reset_email_html(
         reset_url, ttl_minutes=ttl_minutes, logo_src=logo_src
     )
@@ -174,8 +174,8 @@ def build_password_reset_email_message(
     alternative.attach(MIMEText(plain, "plain", "utf-8"))
     alternative.attach(MIMEText(html, "html", "utf-8"))
 
-    if logo_path is not None:
-        with logo_path.open("rb") as logo_file:
+    if brand_logo is not None:
+        with brand_logo.open("rb") as logo_file:
             image = MIMEImage(logo_file.read(), _subtype="png")
         image.add_header("Content-ID", f"<{LOGO_CID}>")
         image.add_header("Content-Disposition", "inline", filename=LOGO_FILENAME)

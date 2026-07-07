@@ -7,11 +7,11 @@ from schemas.auth import UserRole
 
 class CreateUserRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class ResetUserPasswordRequest(BaseModel):
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class UserSummary(BaseModel):

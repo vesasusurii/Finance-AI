@@ -12,7 +12,7 @@ Source: [10. Excel-File-Formats.md](./10. Excel-File-Formats.md) §12 and §Phas
 |---|----------|---------|-------------------------|
 | 1 | **Monthly report download format** | Excel only · PDF only · Both | Period report is **Excel** via `/api/export/period-report-excel`; UI on **Reports**. PDF not built. |
 | 2 | **Currency in official 12-column export** | Add column · Keep DB-only · Embed in Amount text | **DB-only** (`currency` on `invoices`); export uses amount number without separate currency column. |
-| 3 | **Legacy master Excel import** | One-time migration tool (Phase 2) · Manual re-entry · Defer | **Not implemented**; invoices enter via PDF/image upload or email ingest only. |
+| 3 | **Legacy master Excel import** | One-time migration tool (Phase 2) · Manual re-entry · Defer | **Not implemented**; invoices enter via PDF/image upload only. |
 | 4 | Date format in export cells | `DD.MM.YYYY` · `YYYY-MM-DD` | Confirm with sample workbook |
 | 5 | Rows in export when `needs_review` | Include all · Approved only · Toggle | Export filters on **Reports** support `review_status`; default is unfiltered |
 | 6 | Extra columns on export | AI confidence · Match status · Review status · Off | **Off** (12 official columns only) |
@@ -43,7 +43,6 @@ Source: [10. Excel-File-Formats.md](./10. Excel-File-Formats.md) §12 and §Phas
 
 ## Not blocked (already shipped or engineering-owned)
 
-- Email ingest via n8n — [PHASE_A_STABILISATION.md](./PHASE_A_STABILISATION.md)
 - Documents tabs and filters
 - Bank statement import and re-parse
 - Partially paid / split payments (matching + Documents debt display)

@@ -254,12 +254,12 @@ export function UsersPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={12}
+                minLength={8}
                 autoComplete="new-password"
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:border-ring focus:outline-none"
               />
               <span className="mt-1 block text-[11px] text-muted-foreground">
-                Minimum 12 characters
+                Minimum 8 characters
               </span>
             </label>
           </div>
@@ -333,12 +333,12 @@ export function UsersPage() {
                 value={resetPasswordValue}
                 onChange={(e) => setResetPasswordValue(e.target.value)}
                 required
-                minLength={12}
+                minLength={8}
                 autoComplete="new-password"
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:border-ring focus:outline-none"
               />
               <span className="mt-1 block text-[11px] text-muted-foreground">
-                Minimum 12 characters
+                Minimum 8 characters
               </span>
             </label>
 

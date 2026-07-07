@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ForgotPasswordPage } from "./auth/ForgotPasswordPage";
 import { LoginPage } from "./auth/LoginPage";
+import { ResetPasswordPage } from "./auth/ResetPasswordPage";
 import { AdminRoute } from "./auth/AdminRoute";
 import { FinanceRoute } from "./auth/FinanceRoute";
 import { FinanceOrAdminRoute } from "./auth/FinanceOrAdminRoute";
@@ -27,6 +29,8 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route element={<OnboardedRoute />}>

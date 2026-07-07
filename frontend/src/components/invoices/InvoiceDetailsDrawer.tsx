@@ -84,21 +84,21 @@ export function InvoiceDetailsDrawer({
                 OCR extracted data
               </p>
               <dl className="grid gap-2 rounded-lg border border-border bg-surface-muted p-4 text-[13px]">
-                <div className="grid grid-cols-[120px_1fr] gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                   <dt className="text-muted-foreground">Company</dt>
                   <dd className="text-foreground">{invoice.name_of_company ?? "—"}</dd>
                 </div>
-                <div className="grid grid-cols-[120px_1fr] gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                   <dt className="text-muted-foreground">Invoice #</dt>
                   <dd className="font-mono text-foreground">
                     {invoice.invoice_number ?? "—"}
                   </dd>
                 </div>
-                <div className="grid grid-cols-[120px_1fr] gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                   <dt className="text-muted-foreground">Date</dt>
                   <dd className="text-foreground">{formatDate(invoice.invoice_date)}</dd>
                 </div>
-                <div className="grid grid-cols-[120px_1fr] gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                   <dt className="text-muted-foreground">Amount</dt>
                   <dd className="text-foreground">
                     {formatCurrency(
@@ -107,7 +107,7 @@ export function InvoiceDetailsDrawer({
                     )}
                   </dd>
                 </div>
-                <div className="grid grid-cols-[120px_1fr] gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                   <dt className="text-muted-foreground">Category</dt>
                   <dd className="text-foreground">{invoice.category ?? "—"}</dd>
                 </div>

@@ -63,44 +63,10 @@ def check_login_rate_limit(request: Request) -> None:
     )
 
 
-def check_verify_rate_limit(user_id: int) -> None:
-    _check_rate_limit(
-        key=f"ratelimit:verify:{user_id}",
-        limit=settings.auth_verify_rate_limit,
-        window_seconds=settings.auth_verify_rate_window_seconds,
-    )
-
-
-def check_resend_ip_rate_limit(request: Request) -> None:
+def check_forgot_password_rate_limit(request: Request) -> None:
     ip = _client_ip(request)
     _check_rate_limit(
-        key=f"ratelimit:resend:{ip}",
-        limit=settings.auth_resend_ip_rate_limit,
-        window_seconds=settings.auth_resend_ip_rate_window_seconds,
+        key=f"ratelimit:forgot-password:{ip}",
+        limit=settings.auth_forgot_password_rate_limit,
+        window_seconds=settings.auth_forgot_password_rate_window_seconds,
     )
-
-
-def check_verification_attempts(user_id: int) -> None:
-    redis = get_redis_connection()
-    key = f"verify:attempts:{user_id}"
-    attempts = int(redis.get(key) or 0)
-    if attempts >= settings.auth_verify_max_attempts:
-        ttl = redis.ttl(key)
-        retry = max(1, int(ttl)) if ttl and ttl > 0 else 60
-        raise RateLimitExceeded(
-            retry_after_seconds=retry,
-            message="Too many failed verification attempts. Request a new code.",
-        )
-
-
-def record_verification_failure(user_id: int) -> None:
-    redis = get_redis_connection()
-    key = f"verify:attempts:{user_id}"
-    pipe = redis.pipeline()
-    pipe.incr(key)
-    pipe.expire(key, settings.auth_verify_rate_window_seconds)
-    pipe.execute()
-
-
-def clear_verification_attempts(user_id: int) -> None:
-    get_redis_connection().delete(f"verify:attempts:{user_id}")

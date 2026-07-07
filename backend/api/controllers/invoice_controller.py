@@ -18,7 +18,6 @@ from repositories.match_repository import MatchRepository
 from repositories.upload_repository import UploadRepository
 from schemas.reconciliation import MatchListResponse
 from schemas.auth import UserContext
-from schemas.email_ingest import EmailIngestResponse
 from schemas.invoice import (
     InvoiceApproveResponse,
     InvoiceListResponse,
@@ -34,63 +33,6 @@ from utils.safe_filename import content_disposition_inline
 from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
-
-
-def _email_ingest_response(
-    item: UploadItemResponse,
-    *,
-    invoice: InvoiceResponse | None,
-    message_id: str | None,
-    sender_email: str | None,
-    attachment_name: str | None,
-) -> EmailIngestResponse:
-    duplicate = item.processing_status == "linked"
-    status = item.processing_status
-    if status in ("saved", "queued"):
-        status = "queued"
-    elif status == "processing":
-        status = "processing"
-    elif status == "completed":
-        status = "processed"
-    elif status == "failed":
-        status = "failed"
-    elif duplicate:
-        status = "duplicate"
-
-    amount: float | None = None
-    confidence: float | None = None
-    supplier: str | None = None
-    invoice_number: str | None = None
-    invoice_date: str | None = None
-    currency: str | None = None
-
-    if invoice is not None:
-        supplier = invoice.name_of_company
-        invoice_number = invoice.invoice_number
-        invoice_date = (
-            invoice.invoice_date.isoformat() if invoice.invoice_date else None
-        )
-        amount = float(invoice.amount) if invoice.amount is not None else None
-        currency = invoice.currency
-        if invoice.extraction_confidence is not None:
-            confidence = float(invoice.extraction_confidence)
-
-    return EmailIngestResponse(
-        supplier=supplier,
-        invoice_number=invoice_number,
-        invoice_date=invoice_date,
-        amount=amount,
-        currency=currency,
-        confidence=confidence,
-        status=status,
-        duplicate=duplicate,
-        upload_id=item.upload_id,
-        invoice_id=item.invoice_id,
-        message_id=message_id,
-        attachment_name=attachment_name,
-        sender_email=sender_email,
-        error=item.error,
-    )
 
 
 class InvoiceController:
@@ -172,86 +114,6 @@ class InvoiceController:
                 )
 
         return InvoiceUploadResponse(uploaded=len(items), items=items)
-
-    @debug_trace
-    async def email_upload(
-        self,
-        file: UploadFile,
-        user: UserContext,
-        *,
-        source: str,
-        sender_email: str | None,
-        sender_name: str | None,
-        email_subject: str | None,
-        message_id: str | None,
-        attachment_name: str | None,
-    ) -> EmailIngestResponse:
-        if not file.filename:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "missing_filename",
-                    "message": "Attachment must include a filename.",
-                },
-            )
-
-        if attachment_name and not file.filename:
-            file.filename = attachment_name
-
-        batch = await self.upload([file], user, upload_source=source or "outlook_email")
-        item = batch.items[0] if batch.items else None
-        if item is None:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "upload_failed",
-                    "message": "No upload result returned.",
-                },
-            )
-
-        if item.upload_id:
-            await self._upload_repo.update_email_ingest_metadata(
-                item.upload_id,
-                upload_source=source or "outlook_email",
-                sender_email=sender_email,
-                sender_name=sender_name,
-                email_subject=email_subject,
-                message_id=message_id,
-            )
-            await self._upload_repo.commit()
-
-        invoice: InvoiceResponse | None = None
-        if item.invoice_id:
-            invoice = await self._invoice_repo.get(
-                item.invoice_id,
-                owner_user_id=invoice_owner_user_id(user),
-            )
-
-        await self._audit_repo.log(
-            user_id=user.user_id,
-            action="email_ingest",
-            entity_type="uploaded_file",
-            entity_id=item.upload_id or 0,
-            before=None,
-            after={
-                "source": source,
-                "sender_email": sender_email,
-                "sender_name": sender_name,
-                "email_subject": email_subject,
-                "message_id": message_id,
-                "attachment_name": attachment_name or file.filename,
-                "processing_status": item.processing_status,
-                "duplicate": item.processing_status == "linked",
-            },
-        )
-
-        return _email_ingest_response(
-            item,
-            invoice=invoice,
-            message_id=message_id,
-            sender_email=sender_email,
-            attachment_name=attachment_name or file.filename,
-        )
 
     @debug_trace
     async def list(

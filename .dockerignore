@@ -14,4 +14,3 @@ logs
 DOCS/*
 !DOCS/branding
 !DOCS/branding/**
-n8n

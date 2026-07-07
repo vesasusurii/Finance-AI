@@ -53,4 +53,26 @@ export async function changePassword(
     }),
   });
 }
+
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(
+  email: string,
+  token: string,
+  newPassword: string,
+): Promise<AuthUser> {
+  return apiFetch<AuthUser>("/api/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      token,
+      new_password: newPassword,
+    }),
+  });
+}
  

@@ -4,9 +4,7 @@ export interface AuthUser {
   user_id: number;
   email: string;
   role: UserRole;
-  email_verified: boolean;
   must_change_password: boolean;
-  verification_resend_in_seconds?: number;
 }
 
 export function needsOnboarding(user: AuthUser | null | undefined): boolean {

@@ -11,8 +11,11 @@ from repositories.audit_repository import AuditRepository
 from repositories.user_repository import UserRepository
 from schemas.auth import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
+    MessageResponse,
+    ResetPasswordRequest,
     UserContext,
 )
 from services.jwt_service import (
@@ -27,6 +30,15 @@ from services.refresh_token_store import (
     revoke_all_refresh_tokens,
     store_refresh_jti,
 )
+from services.password_reset_service import (
+    FORGOT_PASSWORD_MESSAGE,
+    generate_reset_token,
+    hash_reset_token,
+    reset_cooldown_remaining_seconds,
+    reset_expires_at,
+    send_password_reset_email,
+    verify_reset_token,
+)
 from utils.password_hashing import hash_password, verify_password
 
 logger = get_logger(__name__)
@@ -40,24 +52,16 @@ def _cookie_params() -> dict:
     }
 
 
-def _user_auth_flags(user: User) -> tuple[bool, bool]:
-    return True, user.must_change_password
-
-
 def _login_response(user: User) -> LoginResponse:
-    email_verified, must_change_password = _user_auth_flags(user)
     return LoginResponse(
         user_id=user.id,
         email=user.email,
         role=user.role,
-        email_verified=email_verified,
-        must_change_password=must_change_password,
-        verification_resend_in_seconds=0,
+        must_change_password=user.must_change_password,
     )
 
 
 def set_auth_cookies(response: Response, *, user: User) -> None:
-    email_verified, must_change_password = _user_auth_flags(user)
     token_version = int(user.token_version or 1)
     cache_token_version(user.id, token_version)
     jti = new_refresh_jti()
@@ -65,16 +69,14 @@ def set_auth_cookies(response: Response, *, user: User) -> None:
         user_id=user.id,
         email=user.email,
         role=user.role,
-        email_verified=email_verified,
-        must_change_password=must_change_password,
+        must_change_password=user.must_change_password,
         token_version=token_version,
     )
     refresh = create_refresh_token(
         user_id=user.id,
         email=user.email,
         role=user.role,
-        email_verified=email_verified,
-        must_change_password=must_change_password,
+        must_change_password=user.must_change_password,
         token_version=token_version,
         jti=jti,
     )
@@ -306,4 +308,62 @@ class AuthController:
         assert user is not None
         revoke_all_refresh_tokens(user.id)
         set_auth_cookies(response, user=user)
+        return _login_response(user)
+
+    async def forgot_password(
+        self,
+        body: ForgotPasswordRequest,
+    ) -> MessageResponse:
+        user = await self._user_repo.find_by_email(body.email)
+        if user is None or not user.is_active:
+            return MessageResponse(message=FORGOT_PASSWORD_MESSAGE)
+
+        if reset_cooldown_remaining_seconds(user) > 0:
+            return MessageResponse(message=FORGOT_PASSWORD_MESSAGE)
+
+        token = generate_reset_token()
+        await self._user_repo.set_password_reset_token(
+            user,
+            token_hash=hash_reset_token(token),
+            expires_at=reset_expires_at(),
+        )
+        await self._audit_security(
+            user.id,
+            "password_reset_requested",
+            entity_id=user.id,
+        )
+        try:
+            send_password_reset_email(user.email, token)
+        except Exception:
+            logger.exception("Failed to send password reset email for user_id=%d", user.id)
+        return MessageResponse(message=FORGOT_PASSWORD_MESSAGE)
+
+    async def reset_password(
+        self,
+        body: ResetPasswordRequest,
+        response: Response,
+    ) -> LoginResponse:
+        user = await self._user_repo.find_by_email(body.email)
+        if user is None or not user.is_active or not verify_reset_token(user, body.token):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_reset_token",
+                    "message": "This password reset link is invalid or has expired.",
+                },
+            )
+
+        password_hash = hash_password(body.new_password)
+        user = await self._user_repo.update_password(user, password_hash)
+        user = await self._user_repo.clear_password_reset_token(user)
+        await self._user_repo.bump_token_version(user.id)
+        user = await self._user_repo.get(user.id)
+        assert user is not None
+        revoke_all_refresh_tokens(user.id)
+        set_auth_cookies(response, user=user)
+        await self._audit_security(
+            user.id,
+            "password_reset_completed",
+            entity_id=user.id,
+        )
         return _login_response(user)

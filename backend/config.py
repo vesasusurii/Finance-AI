@@ -33,15 +33,6 @@ class Settings(BaseSettings):
     )
     cors_origins: str = Field(validation_alias="CORS_ORIGINS")
 
-    # Outlook / n8n email ingestion (POST /api/invoices/email-upload)
-    email_ingest_api_key: str = Field(
-        default="", validation_alias="EMAIL_INGEST_API_KEY"
-    )
-    email_ingest_user_email: str = Field(
-        default="finance@borek.com",
-        validation_alias="EMAIL_INGEST_USER_EMAIL",
-    )
-
     environment: str = Field(default="local", validation_alias="ENVIRONMENT")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     # Invoice OCR: OpenAI Vision only. GPT-4o-mini is fastest; GPT-5 needs a
@@ -102,7 +93,7 @@ class Settings(BaseSettings):
     )
     ocr_cache_enabled: bool = Field(default=True, validation_alias="OCR_CACHE_ENABLED")
     max_startup_recovery_jobs: int = Field(
-        default=3, validation_alias="MAX_STARTUP_RECOVERY_JOBS"
+        default=50, validation_alias="MAX_STARTUP_RECOVERY_JOBS"
     )
 
     # Bank comment hybrid extraction (doc 9). Regex always runs first; LLM is
@@ -157,6 +148,10 @@ class Settings(BaseSettings):
         validation_alias="SMTP_FROM_EMAIL",
     )
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
+    app_base_url: str = Field(
+        default="http://localhost:5173",
+        validation_alias="APP_BASE_URL",
+    )
     log_level: str = Field(default="info", validation_alias="LOG_LEVEL")
     slow_route_ms: int = Field(default=1500, validation_alias="SLOW_ROUTE_MS")
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
@@ -213,29 +208,16 @@ class Settings(BaseSettings):
         default=400, validation_alias="DEBUG_MAX_VALUE_CHARS"
     )
 
-    log_verification_codes: bool = Field(
-        default=False, validation_alias="LOG_VERIFICATION_CODES"
-    )
-
     # Auth rate limits (sliding window via Redis)
     auth_login_rate_limit: int = Field(default=5, validation_alias="AUTH_LOGIN_RATE_LIMIT")
     auth_login_rate_window_seconds: int = Field(
         default=60, validation_alias="AUTH_LOGIN_RATE_WINDOW_SECONDS"
     )
-    auth_verify_rate_limit: int = Field(
-        default=5, validation_alias="AUTH_VERIFY_RATE_LIMIT"
+    auth_forgot_password_rate_limit: int = Field(
+        default=5, validation_alias="AUTH_FORGOT_PASSWORD_RATE_LIMIT"
     )
-    auth_verify_rate_window_seconds: int = Field(
-        default=600, validation_alias="AUTH_VERIFY_RATE_WINDOW_SECONDS"
-    )
-    auth_verify_max_attempts: int = Field(
-        default=5, validation_alias="AUTH_VERIFY_MAX_ATTEMPTS"
-    )
-    auth_resend_ip_rate_limit: int = Field(
-        default=3, validation_alias="AUTH_RESEND_IP_RATE_LIMIT"
-    )
-    auth_resend_ip_rate_window_seconds: int = Field(
-        default=3600, validation_alias="AUTH_RESEND_IP_RATE_WINDOW_SECONDS"
+    auth_forgot_password_rate_window_seconds: int = Field(
+        default=300, validation_alias="AUTH_FORGOT_PASSWORD_RATE_WINDOW_SECONDS"
     )
 
     @property

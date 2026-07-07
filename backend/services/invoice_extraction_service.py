@@ -23,7 +23,7 @@ from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.exceptions import ExtractionError
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_access_repository import InvoiceAccessRepository
-from repositories.invoice_repository import InvoiceRepository
+from repositories.invoice_repository import DuplicateInvoiceNumberError, InvoiceRepository
 from repositories.upload_repository import UploadRepository
 from utils.content_hash import sha256_hex
 from schemas.auth import UserContext
@@ -341,9 +341,23 @@ class InvoiceExtractionService:
                 processing_status="processed",
                 invoice_id=invoice.id,
             )
+        except DuplicateInvoiceNumberError as exc:
+            logger.warning(
+                "Duplicate invoice number for upload_id=%d: %s",
+                upload_id,
+                exc,
+            )
+            await self._upload_repo.rollback()
+            await self._upload_repo.update_status(upload_row.id, "failed")
+            await self._upload_repo.commit()
+            raise ExtractionError(
+                f"Invoice number already exists: {exc}"
+            ) from exc
         except Exception as exc:
             logger.exception("Extraction failed for upload_id=%d", upload_id)
+            await self._upload_repo.rollback()
             await self._upload_repo.update_status(upload_row.id, "failed")
+            await self._upload_repo.commit()
             raise ExtractionError(str(exc)) from exc
 
     def _prepared_from_row(self, upload_row, mime: str) -> PreparedUpload:

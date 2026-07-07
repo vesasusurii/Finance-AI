@@ -28,7 +28,6 @@ def create_access_token(
     user_id: int,
     email: str,
     role: str,
-    email_verified: bool = True,
     must_change_password: bool = False,
     token_version: int = 1,
 ) -> str:
@@ -38,7 +37,6 @@ def create_access_token(
             "user_id": user_id,
             "email": email,
             "role": role,
-            "email_verified": email_verified,
             "must_change_password": must_change_password,
             "token_version": token_version,
             "type": TOKEN_TYPE_ACCESS,
@@ -52,7 +50,6 @@ def create_refresh_token(
     user_id: int,
     email: str,
     role: str,
-    email_verified: bool = True,
     must_change_password: bool = False,
     token_version: int = 1,
     jti: str,
@@ -63,7 +60,6 @@ def create_refresh_token(
             "user_id": user_id,
             "email": email,
             "role": role,
-            "email_verified": email_verified,
             "must_change_password": must_change_password,
             "token_version": token_version,
             "jti": jti,
@@ -142,7 +138,6 @@ def _payload_to_context(payload: dict[str, Any]) -> UserContext | None:
             user_id=int(payload["user_id"]),
             email=str(payload.get("email", "")),
             role=role,
-            email_verified=bool(payload.get("email_verified", True)),
             must_change_password=bool(payload.get("must_change_password", False)),
         )
     except (KeyError, TypeError, ValueError):

@@ -37,10 +37,6 @@ export interface Invoice {
   source_filename: string | null;
   source_mime_type: string | null;
   upload_source?: string | null;
-  ingest_sender_email?: string | null;
-  ingest_sender_name?: string | null;
-  ingest_email_subject?: string | null;
-  ingest_message_id?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -88,7 +88,7 @@ async def _process_upload(upload_id: int, user_id: int) -> dict:
                     )
                 await session.commit()
             except Exception:
-                await session.commit()
+                await session.rollback()
                 raise
             finally:
                 await client.close()

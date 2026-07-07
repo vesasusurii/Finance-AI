@@ -86,7 +86,10 @@ async def lifespan(app: FastAPI):
         settings.openai_model_strong,
     )
     try:
-        await recover_stuck_invoice_uploads(app.state.openai_client)
+        await recover_stuck_invoice_uploads(
+            app.state.openai_client,
+            http_client=app.state.http_client,
+        )
     except Exception as exc:
         logger.warning(
             "Startup OCR recovery skipped (is Redis running? REDIS_URL=%s): %s",

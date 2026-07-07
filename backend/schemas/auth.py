@@ -16,19 +16,30 @@ class LoginResponse(BaseModel):
     user_id: int
     email: str
     role: UserRole = Field(default=ROLE_FINANCE)
-    email_verified: bool = True
     must_change_password: bool = False
-    verification_resend_in_seconds: int = 0
 
 
 class UserContext(BaseModel):
     user_id: int
     email: str
     role: UserRole
-    email_verified: bool = True
     must_change_password: bool = False
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    token: str = Field(min_length=16, max_length=256)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str

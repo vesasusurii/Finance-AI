@@ -194,7 +194,7 @@ export function InvoiceDocumentEditor({
     <div
       className={cn(
         "grid grid-cols-1 gap-4 lg:grid-cols-2",
-        embedded ? "min-h-[640px]" : "min-h-[calc(100vh-11rem)]",
+        embedded ? "min-h-0 lg:min-h-[640px]" : "min-h-0 lg:min-h-[calc(100vh-11rem)]",
       )}
     >
       {invoice.source_file_id ? (
@@ -207,11 +207,11 @@ export function InvoiceDocumentEditor({
             `Invoice #${invoice.id}`
           }
           mimeType={invoice.source_mime_type}
-          minHeightClass="min-h-[480px] lg:min-h-0"
+          minHeightClass="min-h-[280px] sm:min-h-[360px] lg:min-h-0"
         />
       ) : (
-        <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
-          <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 px-6 text-center">
+        <div className="flex min-h-[280px] flex-col overflow-hidden rounded-lg border border-border bg-card sm:min-h-[360px] lg:min-h-0">
+          <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-4 text-center sm:min-h-[320px] sm:px-6">
             <p className="text-[13px] text-muted-foreground">
               No source file attached to this invoice.
             </p>
@@ -219,8 +219,8 @@ export function InvoiceDocumentEditor({
         </div>
       )}
 
-      <div className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-0">
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
+      <div className="flex min-h-[280px] flex-col overflow-hidden rounded-lg border border-border bg-card sm:min-h-[360px] lg:min-h-0">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 sm:px-5">
           <div className="flex items-center gap-3">
             <span className="text-[13px] font-semibold text-foreground">
               Extracted data
@@ -252,7 +252,7 @@ export function InvoiceDocumentEditor({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <div className="space-y-3">
             <FieldRow
               label="Company name"
@@ -267,7 +267,7 @@ export function InvoiceDocumentEditor({
               onChange={(v) => handleField("address_of_company", v)}
               multiline
             />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FieldRow
                 label="Invoice date"
                 value={form.invoice_date}
@@ -283,7 +283,7 @@ export function InvoiceDocumentEditor({
                 mono
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FieldRow
                 label="Bill amount"
                 value={form.amount}
@@ -409,11 +409,11 @@ export function InvoiceDocumentEditor({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-border px-5 py-3">
+        <div className="shrink-0 border-t border-border px-4 py-3 sm:px-5">
           {saveError && (
             <p className="mb-2 text-[12px] text-destructive">{saveError}</p>
           )}
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-[12px] text-muted-foreground">
               {saved && !isDirty ? (
                 <span className="text-success">Changes saved</span>

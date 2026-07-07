@@ -16,5 +16,5 @@ RUN mkdir -p /data/uploads /var/log/borek
 
 EXPOSE 8000
 
-# Render and other PaaS set $PORT; Compose/local default to 8000.
+# PaaS platforms set $PORT; Compose/local default to 8000.
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]

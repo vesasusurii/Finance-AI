@@ -31,13 +31,11 @@ import {
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
-const EMAIL_UPLOAD_SOURCE = "outlook_email";
 
-type DocumentsTab = "all" | "email-ingest" | "needs-review" | "unmatched";
+type DocumentsTab = "all" | "needs-review" | "unmatched";
 
 const DOCUMENT_TABS: { id: DocumentsTab; label: string }[] = [
   { id: "all", label: "All invoices" },
-  { id: "email-ingest", label: "Email ingest" },
   { id: "needs-review", label: "Needs review" },
   { id: "unmatched", label: "Unmatched" },
 ];
@@ -54,8 +52,6 @@ function tabFilters(tab: DocumentsTab): {
   match_status?: string;
 } {
   switch (tab) {
-    case "email-ingest":
-      return { upload_source: EMAIL_UPLOAD_SOURCE };
     case "needs-review":
       return { review_status: "needs_review" };
     case "unmatched":
@@ -66,7 +62,7 @@ function tabFilters(tab: DocumentsTab): {
 }
 
 function uploadSourceLabel(source: string | null | undefined): string {
-  if (source === EMAIL_UPLOAD_SOURCE) return "Email";
+  if (source === "outlook_email") return "Email";
   return "Portal";
 }
 
@@ -91,7 +87,6 @@ export function DocumentsPage() {
   const [total, setTotal] = useState(0);
   const [tabTotals, setTabTotals] = useState<Record<DocumentsTab, number>>({
     all: 0,
-    "email-ingest": 0,
     "needs-review": 0,
     unmatched: 0,
   });
@@ -245,7 +240,7 @@ export function DocumentsPage() {
       },
     ];
 
-    if (activeTab === "all" || activeTab === "email-ingest") {
+    if (activeTab === "all") {
       base.push({
         key: "source",
         header: "Source",
@@ -255,39 +250,6 @@ export function DocumentsPage() {
           </span>
         ),
       });
-    }
-
-    if (activeTab === "email-ingest") {
-      base.push(
-        {
-          key: "sender",
-          header: "Sender",
-          cell: (r) => (
-            <div>
-              <div className="text-[12px] text-foreground">
-                {r.ingest_sender_email ?? "—"}
-              </div>
-              {r.ingest_sender_name ? (
-                <div className="text-[11px] text-muted-foreground">
-                  {r.ingest_sender_name}
-                </div>
-              ) : null}
-            </div>
-          ),
-        },
-        {
-          key: "subject",
-          header: "Subject",
-          cell: (r) => (
-            <span
-              className="line-clamp-2 max-w-[220px] text-[12px] text-muted-foreground"
-              title={r.ingest_email_subject ?? undefined}
-            >
-              {r.ingest_email_subject ?? "—"}
-            </span>
-          ),
-        },
-      );
     }
 
     base.push(
@@ -334,7 +296,6 @@ export function DocumentsPage() {
 
   const emptyMessages: Record<DocumentsTab, string> = {
     all: "No invoices match your filters.",
-    "email-ingest": "No invoices from email ingest yet. Connect n8n to Outlook to import attachments.",
     "needs-review": "No invoices need review.",
     unmatched: "No unmatched invoices.",
   };
@@ -529,7 +490,7 @@ function DocumentDrawer({
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-foreground/20" onClick={onClose} />
       <aside className="absolute right-0 top-0 flex h-full w-full max-w-[1180px] flex-col border-l border-border bg-background">
-        <div className="flex shrink-0 items-start justify-between border-b border-border px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between border-b border-border px-4 py-4 sm:px-5">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               Document detail
@@ -547,19 +508,16 @@ function DocumentDrawer({
           </button>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-5">
           <StatusBadge value={reviewStatusLabel(invoice.review_status)} />
           <StatusBadge value={matchStatusLabel(invoice.match_status)} />
-          {invoice.upload_source === EMAIL_UPLOAD_SOURCE ? (
-            <span className="text-[11px] text-muted-foreground">Email ingest</span>
-          ) : null}
         </div>
 
         {drawerError && (
-          <p className="shrink-0 px-5 pt-3 text-[13px] text-destructive">{drawerError}</p>
+          <p className="shrink-0 px-4 pt-3 text-[13px] text-destructive sm:px-5">{drawerError}</p>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <InvoiceDocumentEditor
             key={invoice.id}
             embedded
@@ -570,7 +528,7 @@ function DocumentDrawer({
           <InvoiceMatchedTransactionsSection invoice={invoice} />
         </div>
 
-        <div className="flex shrink-0 items-center border-t border-border px-5 py-3">
+        <div className="flex shrink-0 items-center border-t border-border px-4 py-3 sm:px-5">
           <Button
             variant="danger"
             size="sm"

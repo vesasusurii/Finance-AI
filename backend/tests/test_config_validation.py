@@ -15,12 +15,12 @@ def test_production_rejects_weak_jwt(monkeypatch):
         Settings()
 
 
-def test_normalizes_render_postgres_url(monkeypatch):
+def test_normalizes_postgresql_url_to_asyncpg(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "local")
     monkeypatch.setenv("JWT_SECRET", "local-dev-jwt-secret-minimum-32-chars")
     monkeypatch.setenv(
         "DATABASE_URL",
-        "postgresql://user:pass@dpg.example.com/finance_ai",
+        "postgresql://user:pass@db.example.com/finance_ai",
     )
     monkeypatch.setenv("STORAGE_PATH", "/data")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")

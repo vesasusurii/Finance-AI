@@ -27,10 +27,9 @@ def _user(
     email: str = "finance@example.com",
     password: str = "changeme",
     must_change_password: bool = True,
-    email_verified: bool = False,
     token_version: int = 1,
 ) -> User:
-    user = User(
+    return User(
         id=user_id,
         email=email,
         password_hash=_hash_password(password),
@@ -40,9 +39,6 @@ def _user(
         token_version=token_version,
         created_at=datetime.now(timezone.utc),
     )
-    if email_verified:
-        user.email_verified_at = datetime.now(timezone.utc)
-    return user
 
 
 @pytest.fixture
@@ -63,7 +59,7 @@ def user_controller(user_repo: AsyncMock) -> UserController:
 @pytest.mark.asyncio
 async def test_create_user_sets_must_change_password(user_controller: UserController, user_repo: AsyncMock):
     user_repo.find_by_email.return_value = None
-    created = _user(must_change_password=True, email_verified=False)
+    created = _user(must_change_password=True)
     user_repo.create.return_value = created
 
     result = await user_controller.create_user(
@@ -76,19 +72,17 @@ async def test_create_user_sets_must_change_password(user_controller: UserContro
 
 
 @pytest.mark.asyncio
-async def test_login_with_must_change_password_skips_verification(
+async def test_login_with_must_change_password(
     auth_controller: AuthController,
     user_repo: AsyncMock,
 ):
-    user = _user(must_change_password=True, email_verified=True)
+    user = _user(must_change_password=True)
     user_repo.find_by_email.return_value = user
     response = MagicMock()
 
     with (
         patch("api.controllers.auth_controller.revoke_all_refresh_tokens"),
         patch("api.controllers.auth_controller.set_auth_cookies"),
-        patch("api.controllers.auth_controller.send_verification_code") as send_code,
-        patch("api.controllers.auth_controller.generate_verification_code") as gen_code,
     ):
         result = await auth_controller.login(
             LoginRequest(email=user.email, password="changeme"),
@@ -96,27 +90,20 @@ async def test_login_with_must_change_password_skips_verification(
         )
 
     assert result.must_change_password is True
-    user_repo.set_email_verification_code.assert_not_awaited()
-    gen_code.assert_not_called()
-    send_code.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_login_without_must_change_password_sends_verification(
+async def test_login_without_must_change_password(
     auth_controller: AuthController,
     user_repo: AsyncMock,
 ):
-    user = _user(must_change_password=False, email_verified=True)
-    updated = _user(must_change_password=False, email_verified=False)
+    user = _user(must_change_password=False)
     user_repo.find_by_email.return_value = user
-    user_repo.set_email_verification_code.return_value = updated
     response = MagicMock()
 
     with (
         patch("api.controllers.auth_controller.revoke_all_refresh_tokens"),
         patch("api.controllers.auth_controller.set_auth_cookies"),
-        patch("api.controllers.auth_controller.send_verification_code") as send_code,
-        patch("api.controllers.auth_controller.generate_verification_code", return_value="123456"),
     ):
         result = await auth_controller.login(
             LoginRequest(email=user.email, password="changeme"),
@@ -124,35 +111,28 @@ async def test_login_without_must_change_password_sends_verification(
         )
 
     assert result.must_change_password is False
-    user_repo.set_email_verification_code.assert_awaited_once()
-    send_code.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_change_password_clears_flag_and_sends_verification(
+async def test_change_password_clears_flag(
     auth_controller: AuthController,
     user_repo: AsyncMock,
 ):
     user = _user(must_change_password=True)
-    cleared = _user(must_change_password=False, email_verified=False)
-    after_verify_setup = _user(must_change_password=False, email_verified=False)
+    cleared = _user(must_change_password=False)
     user_repo.get.side_effect = [user, cleared]
     user_repo.update_password.return_value = cleared
-    user_repo.set_email_verification_code.return_value = after_verify_setup
     response = MagicMock()
     user_ctx = UserContext(
         user_id=user.id,
         email=user.email,
         role="finance",
-        email_verified=False,
         must_change_password=True,
     )
 
     with (
         patch("api.controllers.auth_controller.revoke_all_refresh_tokens"),
         patch("api.controllers.auth_controller.set_auth_cookies"),
-        patch("api.controllers.auth_controller.send_verification_code") as send_code,
-        patch("api.controllers.auth_controller.generate_verification_code", return_value="123456"),
     ):
         result = await auth_controller.change_password(
             user_ctx,
@@ -165,8 +145,6 @@ async def test_change_password_clears_flag_and_sends_verification(
 
     user_repo.update_password.assert_awaited_once()
     user_repo.bump_token_version.assert_awaited_once_with(user.id)
-    user_repo.set_email_verification_code.assert_awaited_once()
-    send_code.assert_called_once()
     assert result.must_change_password is False
 
 
@@ -175,13 +153,12 @@ async def test_reset_user_password_sets_flag_and_bumps_token_version(
     user_controller: UserController,
     user_repo: AsyncMock,
 ):
-    target = _user(user_id=2, must_change_password=False, email_verified=True)
-    reset = _user(user_id=2, must_change_password=True, email_verified=True)
+    target = _user(user_id=2, must_change_password=False)
+    reset = _user(user_id=2, must_change_password=True)
     admin = UserContext(
         user_id=1,
         email="admin@example.com",
         role="admin",
-        email_verified=True,
         must_change_password=False,
     )
     user_repo.get.side_effect = [target, reset]
@@ -209,7 +186,6 @@ async def test_reset_user_password_rejects_self_reset(
         user_id=1,
         email="admin@example.com",
         role="admin",
-        email_verified=True,
         must_change_password=False,
     )
 
@@ -231,7 +207,6 @@ async def test_middleware_blocks_protected_route_when_must_change_password():
         user_id=1,
         email="finance@example.com",
         role="finance",
-        email_verified=True,
         must_change_password=True,
     )
 
@@ -269,7 +244,6 @@ async def test_middleware_allows_change_password_during_onboarding():
         user_id=1,
         email="finance@example.com",
         role="finance",
-        email_verified=False,
         must_change_password=True,
     )
 

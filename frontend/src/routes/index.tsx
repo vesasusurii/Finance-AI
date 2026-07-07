@@ -92,7 +92,7 @@ export function UploadPage() {
           onFiles(e.dataTransfer.files);
         }}
         className={
-          "mb-6 rounded-xl border-2 border-dashed bg-surface-muted px-8 py-12 text-center transition-colors " +
+          "mb-6 rounded-xl border-2 border-dashed bg-surface-muted px-4 py-8 text-center transition-colors sm:px-8 sm:py-12 " +
           (dragging ? "border-primary bg-accent" : "border-border")
         }
       >

@@ -15,21 +15,23 @@ export function FilterBar({
   right?: ReactNode;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <div className="relative">
+    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="relative w-full sm:w-auto">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
           value={search ?? ""}
           onChange={(e) => onSearch?.(e.target.value)}
           placeholder={placeholder ?? "Search…"}
-          className="h-8 w-[280px] rounded-md border border-input bg-background pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
+          className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none sm:w-[280px]"
         />
       </div>
-      {children}
-      <button className="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-[12px] font-medium text-foreground hover:bg-secondary">
-        <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
-      </button>
-      <div className="ml-auto flex items-center gap-2">{right}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        {children}
+        <button className="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-[12px] font-medium text-foreground hover:bg-secondary">
+          <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
+        </button>
+        {right ? <div className="flex items-center gap-2 sm:ml-auto">{right}</div> : null}
+      </div>
     </div>
   );
 }

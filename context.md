@@ -103,7 +103,6 @@ Tuning env vars: `BANK_COMMENT_USE_LLM`, `BANK_COMMENT_LLM_MODEL`, `BANK_COMMENT
 | Documents UI | `frontend/src/routes/documents.tsx` |
 | Matching UI | `frontend/src/routes/matching.tsx` |
 | Specs | `DOCS/*.md` (see `DOCS/0. Roadmap.md`) |
-| Phase A runbook (n8n + Documents) | `DOCS/PHASE_A_STABILISATION.md` |
 | Finance sign-off items | `DOCS/FINANCE_PENDING_DECISIONS.md` |
 
 ## Session notes

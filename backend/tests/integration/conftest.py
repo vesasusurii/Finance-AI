@@ -27,10 +27,6 @@ os.environ.setdefault(
     os.getenv("TEST_REDIS_URL", "redis://localhost:6379/1"),
 )
 os.environ.setdefault("OPENAI_API_KEY", "sk-integration-placeholder")
-os.environ.setdefault("EMAIL_INGEST_API_KEY", "test-ingest-key")
-os.environ.setdefault("EMAIL_INGEST_USER_EMAIL", "finance@borek.com")
-
-from datetime import datetime, timezone
 
 from db.pool import async_session  # noqa: E402
 from main import app  # noqa: E402
@@ -51,7 +47,6 @@ async def _ensure_finance_user() -> None:
             FINANCE_PASSWORD.encode("utf-8"),
             bcrypt.gensalt(),
         ).decode("utf-8")
-        verified_at = datetime.now(timezone.utc)
         if user is None:
             session.add(
                 User(
@@ -59,7 +54,6 @@ async def _ensure_finance_user() -> None:
                     password_hash=password_hash,
                     role="finance",
                     is_active=True,
-                    email_verified_at=verified_at,
                     must_change_password=False,
                 )
             )
@@ -68,7 +62,6 @@ async def _ensure_finance_user() -> None:
             user.is_active = True
             user.role = "finance"
             user.must_change_password = False
-            user.email_verified_at = user.email_verified_at or verified_at
         await session.commit()
 
 
@@ -103,7 +96,6 @@ async def auth_client(client: AsyncClient) -> AsyncClient:
         user_id=user.id,
         email=user.email,
         role=user.role,
-        email_verified=True,
         must_change_password=False,
     )
     client.cookies.set("access_token", token)

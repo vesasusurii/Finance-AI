@@ -1,14 +1,12 @@
 import mimetypes
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import Response
 
 from api.controllers.invoice_controller import InvoiceController
 from api.dependencies import get_current_user, get_invoice_controller
-from api.dependencies_email_ingest import verify_email_ingest_user
 from schemas.auth import UserContext
-from schemas.email_ingest import EmailIngestResponse
 from schemas.invoice import (
     InvoiceApproveResponse,
     InvoiceListResponse,
@@ -32,35 +30,6 @@ async def upload_invoices(
     ctrl: InvoiceController = Depends(get_invoice_controller),
 ):
     return await ctrl.upload(files, user)
-
-
-@router.post(
-    "/email-upload",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=EmailIngestResponse,
-)
-async def email_upload_invoice(
-    file: UploadFile = File(..., description="Invoice attachment (PDF, PNG, JPG, JPEG)"),
-    source: str = Form(default="outlook_email"),
-    sender_email: str | None = Form(default=None),
-    sender_name: str | None = Form(default=None),
-    email_subject: str | None = Form(default=None),
-    message_id: str | None = Form(default=None),
-    attachment_name: str | None = Form(default=None),
-    user: UserContext = Depends(verify_email_ingest_user),
-    ctrl: InvoiceController = Depends(get_invoice_controller),
-) -> EmailIngestResponse:
-    """n8n / Outlook ingestion — stores file and queues OCR (no extraction in n8n)."""
-    return await ctrl.email_upload(
-        file,
-        user,
-        source=source,
-        sender_email=sender_email,
-        sender_name=sender_name,
-        email_subject=email_subject,
-        message_id=message_id,
-        attachment_name=attachment_name,
-    )
 
 
 @router.get("", response_model=InvoiceListResponse)

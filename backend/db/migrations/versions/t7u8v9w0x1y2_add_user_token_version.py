@@ -1,7 +1,7 @@
 """add users.token_version for JWT invalidation
 
-Revision ID: t7u8v9w0x1y2
-Revises: s6t7u8v9w0x1
+Revision ID: t8u9v0w1x2y3
+Revises: t7u8v9w0x1y2
 Create Date: 2026-06-09 12:00:00.000000
 """
 from typing import Sequence, Union
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "t7u8v9w0x1y2"
-down_revision: Union[str, Sequence[str], None] = "s6t7u8v9w0x1"
+revision: str = "t8u9v0w1x2y3"
+down_revision: Union[str, Sequence[str], None] = "t7u8v9w0x1y2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

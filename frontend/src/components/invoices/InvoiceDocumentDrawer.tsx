@@ -11,8 +11,6 @@ import { matchStatusLabel, reviewStatusLabel } from "@/lib/labels";
 import { isAdminRole } from "@/types/auth";
 import type { Invoice } from "@/types/invoice";
 
-const EMAIL_UPLOAD_SOURCE = "outlook_email";
-
 export function InvoiceDocumentDrawer({
   invoice,
   title = "Document detail",
@@ -65,7 +63,7 @@ export function InvoiceDocumentDrawer({
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-foreground/20" onClick={onClose} />
       <aside className="absolute right-0 top-0 flex h-full w-full max-w-[1180px] flex-col border-l border-border bg-background">
-        <div className="flex shrink-0 items-start justify-between border-b border-border px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between border-b border-border px-4 py-4 sm:px-5">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               {title}
@@ -83,19 +81,16 @@ export function InvoiceDocumentDrawer({
           </button>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-5">
           <StatusBadge value={reviewStatusLabel(invoice.review_status)} />
           <StatusBadge value={matchStatusLabel(invoice.match_status)} />
-          {invoice.upload_source === EMAIL_UPLOAD_SOURCE ? (
-            <span className="text-[11px] text-muted-foreground">Email ingest</span>
-          ) : null}
         </div>
 
         {drawerError && (
-          <p className="shrink-0 px-5 pt-3 text-[13px] text-destructive">{drawerError}</p>
+          <p className="shrink-0 px-4 pt-3 text-[13px] text-destructive sm:px-5">{drawerError}</p>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <InvoiceDocumentEditor
             key={invoice.id}
             embedded
@@ -106,7 +101,7 @@ export function InvoiceDocumentDrawer({
           <InvoiceMatchedTransactionsSection invoice={invoice} />
         </div>
 
-        <div className="flex shrink-0 items-center border-t border-border px-5 py-3">
+        <div className="flex shrink-0 items-center border-t border-border px-4 py-3 sm:px-5">
           <Button
             variant="danger"
             size="sm"

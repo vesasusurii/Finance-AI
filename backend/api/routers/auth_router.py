@@ -2,11 +2,14 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from api.controllers.auth_controller import AuthController
 from api.dependencies import get_auth_controller, get_current_user
-from core.auth_rate_limiter import check_login_rate_limit
+from core.auth_rate_limiter import check_forgot_password_rate_limit, check_login_rate_limit
 from schemas.auth import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
+    MessageResponse,
+    ResetPasswordRequest,
     UserContext,
 )
 
@@ -61,3 +64,22 @@ async def change_password(
     ctrl: AuthController = Depends(get_auth_controller),
 ):
     return await ctrl.change_password(user, body, response)
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    ctrl: AuthController = Depends(get_auth_controller),
+):
+    check_forgot_password_rate_limit(request)
+    return await ctrl.forgot_password(body)
+
+
+@router.post("/reset-password", response_model=LoginResponse)
+async def reset_password(
+    body: ResetPasswordRequest,
+    response: Response,
+    ctrl: AuthController = Depends(get_auth_controller),
+):
+    return await ctrl.reset_password(body, response)
