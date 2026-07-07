@@ -8,7 +8,7 @@ const themeInit = readFileSync(path.join(root, "public", "theme-init.js"), "utf8
 
 const required = [
   'defineProperty(document, "oninput"',
-  "setAttribute(\"oninput\", \"return;\")",
+  "isInlineEventHandlerAttribute",
   "Element.prototype.setAttribute",
 ];
 
@@ -22,6 +22,9 @@ for (const snippet of required) {
 const elementProto = {
   setAttribute(name, value) {
     if (name === "oninput" && typeof value === "string") {
+      throw new Error("CSP blocked inline event handler");
+    }
+    if (name === "onclick" && typeof value === "string") {
       throw new Error("CSP blocked inline event handler");
     }
   },
@@ -49,11 +52,16 @@ sandbox.window.document = sandbox.document;
 vm.createContext(sandbox);
 vm.runInContext(themeInit, sandbox);
 
-try {
-  sandbox.document.createElement("div").setAttribute("oninput", "return;");
-} catch (e) {
-  console.error("React oninput probe was not neutralised:", e.message);
-  process.exit(1);
+for (const [name, value] of [
+  ["oninput", "return;"],
+  ["onclick", "doSomething()"],
+]) {
+  try {
+    sandbox.document.createElement("div").setAttribute(name, value);
+  } catch (e) {
+    console.error(`Inline handler ${name} was not neutralised:`, e.message);
+    process.exit(1);
+  }
 }
 
-console.log("CSP polyfill markers present and React oninput probe is neutralised");
+console.log("CSP polyfill blocks inline on* setAttribute probes");

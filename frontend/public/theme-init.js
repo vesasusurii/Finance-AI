@@ -12,9 +12,19 @@
     // Already defined in some browsers; setAttribute guard below still applies.
   }
 
+  function isInlineEventHandlerAttribute(name, value) {
+    return (
+      typeof name === "string" &&
+      name.length > 2 &&
+      name.charCodeAt(0) === 111 &&
+      name.charCodeAt(1) === 110 &&
+      typeof value === "string"
+    );
+  }
+
   var nativeSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (name, value) {
-    if (name === "oninput" && value === "return;") {
+    if (isInlineEventHandlerAttribute(name, value)) {
       return;
     }
     return nativeSetAttribute.call(this, name, value);
