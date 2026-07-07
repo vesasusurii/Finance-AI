@@ -1,8 +1,41 @@
 import { ApiError, apiFetch, refreshAccessToken } from "./client";
 import type { AuthUser } from "../types/auth";
- 
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
 export type { AuthUser as LoginResponse };
- 
+
+export type MeSessionState =
+  | { status: "authenticated"; user: AuthUser }
+  | { status: "anonymous" }
+  | { status: "expired" };
+
+/** Resolve session from /me without triggering refresh retries. */
+export async function resolveMeSession(): Promise<MeSessionState> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    credentials: "include",
+  });
+  if (res.status === 204) {
+    return { status: "anonymous" };
+  }
+  if (res.status === 401) {
+    return { status: "expired" };
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      message?: string;
+    };
+    throw new ApiError(
+      body.message ?? res.statusText,
+      res.status,
+      body.error,
+    );
+  }
+  const user = (await res.json()) as AuthUser;
+  return { status: "authenticated", user };
+}
+
 export async function login(
   email: string,
   password: string,
@@ -30,15 +63,11 @@ export async function refreshSession(): Promise<AuthUser> {
 }
  
 export async function getMe(): Promise<AuthUser | null> {
-  try {
-    const user = await apiFetch<AuthUser>("/api/auth/me");
-    return user ?? null;
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401) {
-      return null;
-    }
-    throw e;
+  const state = await resolveMeSession();
+  if (state.status === "authenticated") {
+    return state.user;
   }
+  return null;
 }
  
 export async function changePassword(

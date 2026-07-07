@@ -19,6 +19,7 @@ from utils.bank_excel_parser import (
     dedupe_parsed_rows,
     extract_statement_date,
     statement_id_from_date,
+    statement_month_from_date,
 )
 
 
@@ -139,6 +140,25 @@ def test_extract_statement_date_raises_when_unknown():
 
 def test_statement_id_from_date():
     assert statement_id_from_date(date(2026, 2, 28)) == 20260228
+
+
+def test_statement_month_from_date():
+    assert statement_month_from_date(date(2026, 5, 15)) == date(2026, 5, 1)
+    assert statement_month_from_date(date(2026, 5, 31)) == date(2026, 5, 1)
+
+
+def test_extract_statement_date_from_procredit_filename_with_account_number():
+    rows = [_sample_row(txn_date=date(2026, 5, 1))]
+    partial = "XK051110343587000119_20260501-20260515.xls"
+    full = "XK051110343587000119_20260501-20260531.xls"
+    assert extract_statement_date(partial, rows) == date(2026, 5, 1)
+    assert extract_statement_date(full, rows) == date(2026, 5, 1)
+    assert statement_month_from_date(extract_statement_date(partial, rows)) == date(
+        2026, 5, 1
+    )
+    assert statement_month_from_date(extract_statement_date(full, rows)) == date(
+        2026, 5, 1
+    )
 
 
 @pytest.mark.parametrize(

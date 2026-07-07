@@ -11,15 +11,16 @@ class BankStatement(Base):
     __table_args__ = (
         Index("ix_bank_statements_processing_status", "processing_status"),
         Index(
-            "ix_bank_statements_user_statement_date",
+            "ix_bank_statements_user_statement_month",
             "uploaded_by",
-            "statement_date",
+            "statement_month",
             unique=True,
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     statement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    statement_month: Mapped[date] = mapped_column(Date, nullable=False)
     source_file_id: Mapped[int] = mapped_column(
         ForeignKey("uploaded_files.id"),
         nullable=False,

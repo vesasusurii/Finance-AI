@@ -26,7 +26,7 @@ import { useAdminUsers } from "@/hooks/useAdminUsers";
 import {
   formatCurrency,
   formatDate,
-  formatStatementId,
+  formatStatementPeriod,
   processingStatusLabel,
 } from "@/lib/labels";
 
@@ -125,10 +125,10 @@ export function BankPage() {
 
   const handleDelete = useCallback(
     async (statement: BankStatement) => {
-      const label = formatStatementId(statement);
+      const label = formatStatementPeriod(statement);
       const ok = await confirm({
         title: "Delete bank statement",
-        description: `Delete bank statement ${label} (${statement.original_filename})? This cannot be undone.`,
+        description: `Delete bank statement for ${label} (${statement.original_filename})? This cannot be undone.`,
         confirmLabel: "Delete",
         variant: "destructive",
       });
@@ -159,7 +159,7 @@ export function BankPage() {
       try {
         const res = await reparseBankStatement(statement.id);
         setReparseMessage(
-          `Re-parsed ${formatStatementId(statement)}: ${res.dates_fixed} date(s) fixed, ${res.rows_updated} row(s) updated.`,
+          `Re-parsed ${formatStatementPeriod(statement)}: ${res.dates_fixed} date(s) fixed, ${res.rows_updated} row(s) updated.`,
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Re-parse failed");
@@ -233,10 +233,10 @@ export function BankPage() {
 
   const statementColumns: Column<BankStatement>[] = [
     {
-      key: "id",
-      header: "Statement ID",
+      key: "period",
+      header: "Period",
       cell: (r) => (
-        <span className="font-mono tabular-nums">{formatStatementId(r)}</span>
+        <span className="font-mono tabular-nums">{formatStatementPeriod(r)}</span>
       ),
     },
     {
@@ -444,8 +444,8 @@ export function BankPage() {
         <section className="space-y-3">
           <p className="text-[13px] text-foreground">
             Imported{" "}
-            <strong>{uploadResult.row_count}</strong> transactions (statement ID{" "}
-            <strong>{formatStatementId(uploadResult)}</strong>).{" "}
+            <strong>{uploadResult.row_count}</strong> transactions (period{" "}
+            <strong>{formatStatementPeriod(uploadResult)}</strong>).{" "}
             <Link
               to={`/bank-transactions?bank_statement_id=${uploadResult.bank_statement_id}`}
               className="text-primary hover:underline"
@@ -465,6 +465,15 @@ export function BankPage() {
               Run matching for this statement
             </button>
           </p>
+          {uploadResult.merged_into_existing ? (
+            <p className="text-[13px] text-muted-foreground">
+              Merged into the existing statement for this month — added{" "}
+              <strong>{uploadResult.new_rows_added}</strong> new row
+              {uploadResult.new_rows_added === 1 ? "" : "s"}, kept{" "}
+              <strong>{uploadResult.existing_rows_kept}</strong> existing row
+              {uploadResult.existing_rows_kept === 1 ? "" : "s"} untouched.
+            </p>
+          ) : null}
           {uploadResult.duplicate_rows_skipped ? (
             <p className="text-[13px] text-muted-foreground">
               Skipped{" "}

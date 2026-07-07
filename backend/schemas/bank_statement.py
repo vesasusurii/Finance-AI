@@ -16,10 +16,14 @@ class BankTransactionPreview(BaseModel):
 class BankStatementUploadResponse(BaseModel):
     bank_statement_id: int
     statement_date: date
+    statement_month: date
     row_count: int
     processing_status: str
     unparsed_date_rows: int = 0
     duplicate_rows_skipped: int = 0
+    merged_into_existing: bool = False
+    new_rows_added: int = 0
+    existing_rows_kept: int = 0
     preview: list[BankTransactionPreview]
 
 
@@ -36,6 +40,7 @@ class BankStatementListItem(BaseModel):
 
     id: int
     statement_date: date | None
+    statement_month: date
     original_filename: str
     uploaded_at: datetime
     uploaded_by: int

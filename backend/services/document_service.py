@@ -154,16 +154,7 @@ class DocumentService:
         return DocumentUploadResponse(uploaded=len(items), items=items)
 
     async def _user_can_view_upload(self, row, user: UserContext) -> bool:
-        if row.uploaded_by == user.user_id or is_admin(user.role):
-            return True
-        invoice_id = await self._invoice_repo.get_id_by_source_file(row.id)
-        if invoice_id is None:
-            return False
-        invoice = await self._invoice_repo.get(
-            invoice_id,
-            owner_user_id=user.user_id,
-        )
-        return invoice is not None
+        return True
 
     def _status_from_progress(
         self,

@@ -9,10 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getMe,
   login as apiLogin,
   logout as apiLogout,
   refreshSession,
+  resolveMeSession,
 } from "../api/auth";
 import { getAuthRefreshIntervalMs } from "../api/client";
 import type { AuthUser } from "../types/auth";
@@ -54,10 +54,14 @@ async function refreshSessionWithRetry(): Promise<AuthUser> {
 
 async function loadSession(): Promise<AuthUser | null> {
   try {
-    const user = await getMe();
-    if (user) {
-      return user;
+    const state = await resolveMeSession();
+    if (state.status === "authenticated") {
+      return state.user;
     }
+    if (state.status === "anonymous") {
+      return null;
+    }
+    return await refreshSessionWithRetry();
   } catch (e) {
     if (import.meta.env.DEV) {
       console.warn(
@@ -65,11 +69,6 @@ async function loadSession(): Promise<AuthUser | null> {
         e instanceof Error ? e.message : e,
       );
     }
-  }
-
-  try {
-    return await refreshSessionWithRetry();
-  } catch {
     return null;
   }
 }
