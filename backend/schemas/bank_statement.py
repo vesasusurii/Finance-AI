@@ -16,6 +16,7 @@ class BankTransactionPreview(BaseModel):
 class BankStatementUploadResponse(BaseModel):
     bank_statement_id: int
     statement_date: date
+    statement_month: date
     row_count: int
     processing_status: str
     unparsed_date_rows: int = 0
@@ -39,6 +40,7 @@ class BankStatementListItem(BaseModel):
 
     id: int
     statement_date: date | None
+    statement_month: date
     original_filename: str
     uploaded_at: datetime
     uploaded_by: int

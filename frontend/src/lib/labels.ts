@@ -151,6 +151,21 @@ export function isoDateFromInput(value: string): string | null {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+export function formatStatementPeriod(
+  statement: {
+    statement_month?: string | null;
+    statement_date?: string | null;
+  },
+): string {
+  if (statement.statement_month) {
+    return statement.statement_month.slice(0, 7);
+  }
+  if (statement.statement_date) {
+    return statement.statement_date.slice(0, 7);
+  }
+  return "";
+}
+
 export function formatStatementId(
   statement: {
     id?: number;

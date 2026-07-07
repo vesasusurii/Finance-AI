@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.bank_statement import BankStatement
@@ -10,7 +10,6 @@ from models.bank_transaction import BankTransaction
 from models.uploaded_file import UploadedFile
 from models.user import User
 from schemas.bank_statement import BankStatementListItem
-from utils.bank_excel_parser import statement_id_from_date
 
 
 def _apply_owner_scope(
@@ -36,12 +35,12 @@ class BankStatementRepository:
         uploaded_by: int,
         row_count: int,
         statement_date: date,
+        statement_month: date,
         processing_status: str = "processed",
     ) -> BankStatement:
-        statement_id = statement_id_from_date(statement_date)
         row = BankStatement(
-            id=statement_id,
             statement_date=statement_date,
+            statement_month=statement_month,
             source_file_id=source_file_id,
             uploaded_by=uploaded_by,
             row_count=row_count,
@@ -50,14 +49,6 @@ class BankStatementRepository:
         self._session.add(row)
         await self._session.flush()
         await self._session.refresh(row)
-        await self._session.execute(
-            text(
-                "SELECT setval("
-                "pg_get_serial_sequence('bank_statements', 'id'), "
-                "(SELECT COALESCE(MAX(id), 1) FROM bank_statements)"
-                ")"
-            )
-        )
         return row
 
     async def get(
@@ -67,6 +58,19 @@ class BankStatementRepository:
         owner_user_id: int | None = None,
     ) -> BankStatement | None:
         query = select(BankStatement).where(BankStatement.id == statement_id)
+        query = _apply_owner_scope(query, owner_user_id)
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_month(
+        self,
+        statement_month: date,
+        *,
+        owner_user_id: int | None = None,
+    ) -> BankStatement | None:
+        query = select(BankStatement).where(
+            BankStatement.statement_month == statement_month
+        )
         query = _apply_owner_scope(query, owner_user_id)
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
@@ -89,6 +93,22 @@ class BankStatementRepository:
             row.source_file_id = source_file_id
             await self._session.flush()
 
+    async def update_after_merge(
+        self,
+        statement_id: int,
+        *,
+        row_count: int,
+        source_file_id: int,
+        statement_date: date,
+    ) -> None:
+        row = await self.get(statement_id)
+        if row:
+            row.row_count = row_count
+            row.source_file_id = source_file_id
+            row.statement_date = statement_date
+            row.processing_status = "processed"
+            await self._session.flush()
+
     async def list_statements(
         self,
         page: int,
@@ -109,7 +129,7 @@ class BankStatementRepository:
             .join(UploadedFile, BankStatement.source_file_id == UploadedFile.id)
             .join(User, BankStatement.uploaded_by == User.id)
             .order_by(
-                BankStatement.statement_date.desc().nullslast(),
+                BankStatement.statement_month.desc(),
                 BankStatement.uploaded_at.desc(),
             )
             .offset(offset)
@@ -121,6 +141,7 @@ class BankStatementRepository:
             BankStatementListItem(
                 id=stmt.id,
                 statement_date=stmt.statement_date,
+                statement_month=stmt.statement_month,
                 original_filename=filename,
                 uploaded_at=stmt.uploaded_at,
                 uploaded_by=stmt.uploaded_by,

@@ -309,9 +309,9 @@ def dedupe_parsed_rows(rows: list[ParsedBankRow]) -> tuple[list[ParsedBankRow], 
 
 
 _FILENAME_DATE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(\d{4})(\d{2})(\d{2})"), "%Y%m%d"),
-    (re.compile(r"(\d{4})[-_](\d{2})[-_](\d{2})"), "%Y-%m-%d"),
-    (re.compile(r"(\d{4})[-_](\d{2})(?:[^0-9]|$)"), "%Y-%m"),
+    (re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"), "%Y%m%d"),
+    (re.compile(r"(?<!\d)(\d{4})[-_](\d{2})[-_](\d{2})(?!\d)"), "%Y-%m-%d"),
+    (re.compile(r"(?<!\d)(\d{4})[-_](\d{2})(?:[^0-9]|$)"), "%Y-%m"),
 )
 
 
@@ -351,6 +351,11 @@ def extract_statement_date(
 def statement_id_from_date(statement_date: date) -> int:
     """Business statement ID shown in the UI (YYYYMMDD)."""
     return int(statement_date.strftime("%Y%m%d"))
+
+
+def statement_month_from_date(statement_date: date) -> date:
+    """First day of the month used as the statement merge key."""
+    return date(statement_date.year, statement_date.month, 1)
 
 
 def _map_columns(header_row: list[Any]) -> dict[str, int]:

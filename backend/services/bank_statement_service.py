@@ -21,7 +21,7 @@ from utils.bank_excel_parser import (
     dedupe_parsed_rows,
     extract_statement_date,
     parse_bank_statement_excel,
-    statement_id_from_date,
+    statement_month_from_date,
     transaction_dedupe_key,
 )
 from utils.file_storage import delete_storage_object, read_bytes, save_bytes
@@ -87,6 +87,7 @@ class BankStatementService:
                     "No transaction rows found after removing duplicates."
                 )
             statement_date = extract_statement_date(filename, parsed_rows)
+            statement_month = statement_month_from_date(statement_date)
         except ExcelParseError:
             await self._upload_repo.update_status(upload_row.id, "failed")
             raise
@@ -110,9 +111,8 @@ class BankStatementService:
         ]
 
         try:
-            statement_id = statement_id_from_date(statement_date)
-            existing_statement = await self._statement_repo.get(
-                statement_id, owner_user_id=None
+            existing_statement = await self._statement_repo.get_by_month(
+                statement_month, owner_user_id=None
             )
 
             if existing_statement is not None:
@@ -145,16 +145,19 @@ class BankStatementService:
                     )
 
                 new_row_count = len(existing_txns) + len(rows_to_add)
-                await self._statement_repo.update_status(
-                    existing_statement.id,
-                    "processed",
-                    row_count=new_row_count,
+                merged_statement_date = max(
+                    existing_statement.statement_date or statement_date,
+                    statement_date,
                 )
-                await self._statement_repo.update_source_file(
-                    existing_statement.id, upload_row.id
+                await self._statement_repo.update_after_merge(
+                    existing_statement.id,
+                    row_count=new_row_count,
+                    source_file_id=upload_row.id,
+                    statement_date=merged_statement_date,
                 )
 
                 statement = existing_statement
+                statement.statement_date = merged_statement_date
                 merged_into_existing = True
                 new_rows_added = len(rows_to_add)
                 existing_rows_kept = len(existing_txns)
@@ -166,6 +169,7 @@ class BankStatementService:
                     uploaded_by=user.user_id,
                     row_count=len(row_dicts),
                     statement_date=statement_date,
+                    statement_month=statement_month,
                     processing_status="processed",
                 )
                 await self._transaction_repo.create_bulk(statement.id, row_dicts)
@@ -208,7 +212,8 @@ class BankStatementService:
 
         return BankStatementUploadResponse(
             bank_statement_id=statement.id,
-            statement_date=statement_date,
+            statement_date=statement.statement_date or statement_date,
+            statement_month=statement_month,
             row_count=final_row_count,
             processing_status="processed",
             unparsed_date_rows=unparsed_date_rows,
