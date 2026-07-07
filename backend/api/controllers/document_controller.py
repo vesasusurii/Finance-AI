@@ -1,7 +1,11 @@
 from fastapi import HTTPException, UploadFile
 
 from schemas.auth import UserContext
-from schemas.document import DocumentStatusResponse, DocumentUploadResponse
+from schemas.document import (
+    DocumentStatusBatchResponse,
+    DocumentStatusResponse,
+    DocumentUploadResponse,
+)
 from services.document_service import DocumentService
 
 
@@ -27,3 +31,11 @@ class DocumentController:
         user: UserContext,
     ) -> DocumentStatusResponse:
         return await self._service.get_status(document_id, user)
+
+    async def status_batch(
+        self,
+        document_ids: list[int],
+        user: UserContext,
+    ) -> DocumentStatusBatchResponse:
+        items = await self._service.get_status_batch(document_ids, user)
+        return DocumentStatusBatchResponse(items=items)

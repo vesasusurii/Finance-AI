@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from schemas.auth import UserContext
 from services.document_service import DocumentService
@@ -57,7 +58,9 @@ async def test_get_status_allows_foreign_upload_without_invoice(
 
     result = await document_service.get_status(141, _user(21))
 
-    assert exc.value.status_code == 404
+    assert result.document_id == 141
+    assert result.upload_status == "processing"
+    assert result.invoice_id is None
 
 
 @pytest.mark.asyncio

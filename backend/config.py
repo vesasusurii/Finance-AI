@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         default=True, validation_alias="OPENAI_TEXT_FIRST_ENABLED"
     )
     openai_text_first_max_pages: int = Field(
-        default=5, validation_alias="OPENAI_TEXT_FIRST_MAX_PAGES"
+        default=10, validation_alias="OPENAI_TEXT_FIRST_MAX_PAGES"
     )
     openai_text_first_min_chars: int = Field(
         default=200, validation_alias="OPENAI_TEXT_FIRST_MIN_CHARS"
@@ -88,11 +88,40 @@ class Settings(BaseSettings):
     openai_max_supplemental_chars: int = Field(
         default=80000, validation_alias="OPENAI_MAX_SUPPLEMENTAL_CHARS"
     )
+    openai_vision_supplemental_text_max_chars: int = Field(
+        default=12000,
+        validation_alias="OPENAI_VISION_SUPPLEMENTAL_TEXT_MAX_CHARS",
+    )
     openai_pdf_render_scale: float = Field(
         default=1.5, validation_alias="OPENAI_PDF_RENDER_SCALE"
     )
+    openai_parallel_pdf_rendering: bool = Field(
+        default=True, validation_alias="OPENAI_PARALLEL_PDF_RENDERING"
+    )
+    openai_pdf_render_workers: int = Field(
+        default=4, validation_alias="OPENAI_PDF_RENDER_WORKERS"
+    )
     openai_vision_full_document_max_bytes: int = Field(
         default=2_500_000, validation_alias="OPENAI_VISION_FULL_DOCUMENT_MAX_BYTES"
+    )
+    openai_adaptive_image_detail: bool = Field(
+        default=True, validation_alias="OPENAI_ADAPTIVE_IMAGE_DETAIL"
+    )
+    openai_adaptive_image_detail_middle: str = Field(
+        default="low", validation_alias="OPENAI_ADAPTIVE_IMAGE_DETAIL_MIDDLE"
+    )
+    # Dynamic Vision page selection: score pages and send only likely invoice pages.
+    openai_dynamic_page_selection_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_DYNAMIC_PAGE_SELECTION_ENABLED"
+    )
+    openai_dynamic_page_selection_max_pages: int = Field(
+        default=4, validation_alias="OPENAI_DYNAMIC_PAGE_SELECTION_MAX_PAGES"
+    )
+    openai_deterministic_merge_enabled: bool = Field(
+        default=True, validation_alias="OPENAI_DETERMINISTIC_MERGE_ENABLED"
+    )
+    openai_deterministic_merge_min_confidence: float = Field(
+        default=0.7, validation_alias="OPENAI_DETERMINISTIC_MERGE_MIN_CONFIDENCE"
     )
     ocr_cache_enabled: bool = Field(default=True, validation_alias="OCR_CACHE_ENABLED")
     max_startup_recovery_jobs: int = Field(

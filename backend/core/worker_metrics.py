@@ -6,6 +6,7 @@ from statistics import mean
 from rq import Queue
 
 from config import settings
+from core.ocr_progress import openai_avg_from_recent_timings
 from core.queue_names import all_queue_names
 from core.redis_client import get_redis_connection
 
@@ -68,15 +69,20 @@ def metrics_snapshot() -> dict:
     ocr_size = sizes.get(settings.rq_ocr_high_queue, 0) + sizes.get(
         settings.rq_ocr_normal_queue, 0
     )
+    worker_avg = round(mean(ocr_durations), 1) if ocr_durations else 0
+    openai_avg = round(mean(openai_latencies), 1) if openai_latencies else None
+    if openai_avg is None:
+        openai_avg = openai_avg_from_recent_timings() or 0
     return {
         "ocr_queue_size": ocr_size,
         "ocr_high_priority_queue_size": sizes.get(settings.rq_ocr_high_queue, 0),
         "ocr_normal_queue_size": sizes.get(settings.rq_ocr_normal_queue, 0),
         "review_queue_size": sizes.get(settings.rq_review_queue, 0),
         "transaction_queue_size": sizes.get(settings.rq_transaction_queue, 0),
-        "ocr_avg_duration_ms": round(mean(ocr_durations), 1) if ocr_durations else 0,
+        # End-to-end worker job duration (queue + download + extract + persist).
+        "ocr_avg_duration_ms": worker_avg,
+        "worker_avg_duration_ms": worker_avg,
         "failure_rate_5m": round(failures / total, 4) if total else 0,
-        "openai_avg_latency_ms": round(mean(openai_latencies), 1)
-        if openai_latencies
-        else 0,
+        # OpenAI API time only — not full worker duration.
+        "openai_avg_latency_ms": openai_avg,
     }

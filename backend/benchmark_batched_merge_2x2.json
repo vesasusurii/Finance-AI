@@ -1,0 +1,100 @@
+[
+  {
+    "file": "/tmp/benchmark/scanned_4page.pdf",
+    "ok": true,
+    "total_ms": 15509.2,
+    "model": "gpt-4o-mini",
+    "meta": {
+      "pages_processed": 4,
+      "total_pdf_pages": 4,
+      "document_category": "generic",
+      "text_layer_chars": 0,
+      "text_extraction_ms": 145.5,
+      "document_classification_ms": 0.0,
+      "render_ms": 197.1,
+      "render_strategy": "parallel",
+      "render_parallel_ms": 196.9,
+      "rendered_page_count": 4,
+      "rendered_image_bytes": 440252,
+      "text_first_reason": "text_too_short",
+      "text_chars": 0,
+      "hints_found_count": 0,
+      "missing_hint_fields": [
+        "invoice_number",
+        "invoice_date",
+        "amount",
+        "name_of_company"
+      ],
+      "text_quality_score": 0.0,
+      "extraction_mode": "vision_batched_merge",
+      "model": "gpt-4o-mini",
+      "merge_ms": 1.0,
+      "merge_strategy": "deterministic",
+      "deterministic_merge_conflicts": [],
+      "deterministic_merge_missing_fields": [],
+      "image_detail_strategy": "adaptive_first_last_high",
+      "high_detail_pages": [
+        1,
+        4
+      ],
+      "low_detail_pages": [
+        2,
+        3
+      ],
+      "total_pages": 4,
+      "prompt_strategy": "minimal",
+      "supplemental_text_chars": 0,
+      "estimated_prompt_tokens": 527,
+      "total_ms": 15509.2,
+      "openai_total_ms": 15157.8,
+      "openai_call_count": 2,
+      "openai_calls": [
+        {
+          "model": "gpt-4o-mini",
+          "attempt": 1,
+          "openai_ms": 5683.2,
+          "content_len": 1027
+        },
+        {
+          "model": "gpt-4o-mini",
+          "attempt": 1,
+          "openai_ms": 9474.6,
+          "content_len": 1096
+        }
+      ]
+    },
+    "result": {
+      "invoice_date": "2026-01-28",
+      "name_of_company": "Deloitte Kosova sh.p.k",
+      "address_of_company": "Rr.Uksin Holt Nr.128, 10 000 Prishtine, Republic of Kosovo",
+      "invoice_number": "1/2026/0048",
+      "amount": 1931.78,
+      "debt": null,
+      "currency": "EUR",
+      "document_type": "generic",
+      "account_details": "ProCredit Bank, Rr. Xhorxh Bush, Nr 26; 10000, Prishtin\u00eb Kosove || 1110342170000160 || XK05111304217000160 || MBKOKXKPRXXX",
+      "internal_note_description": "Tax Compliance Services Admin fee",
+      "client_employee_related": "Borek Solutions",
+      "category": "Other",
+      "confidence_score": 0.845,
+      "needs_review": true,
+      "field_confidences": {
+        "document_type": 1.0,
+        "invoice_date": 1.0,
+        "name_of_company": 1.0,
+        "address_of_company": 1.0,
+        "invoice_number": 1.0,
+        "amount": 1.0,
+        "debt": 0.0,
+        "currency": 1.0,
+        "account_details": 1.0,
+        "internal_note_description": 1.0,
+        "client_employee_related": 1.0,
+        "category": 1.0,
+        "confidence_score": 1.0,
+        "needs_review": 1.0
+      },
+      "review_reasons": []
+    }
+  }
+]

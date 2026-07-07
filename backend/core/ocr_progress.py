@@ -17,12 +17,54 @@ _PROGRESS_TTL_SECONDS = 30 * 60
 _RECENT_TTL_SECONDS = 60 * 60
 _RECENT_LIMIT = 50
 
+# Scalar timing fields exposed on progress, status API, and recent_ocr_timings.
+OCR_TIMING_SCALAR_FIELDS: tuple[str, ...] = (
+    "queue_wait_ms",
+    "storage_download_ms",
+    "download_ms",
+    "text_extraction_ms",
+    "document_classification_ms",
+    "text_llm_ms",
+    "render_ms",
+    "merge_ms",
+    "hybrid_merge_ms",
+    "field_recovery_ms",
+    "validation_ms",
+    "ocr_ms",
+    "persist_ms",
+    "openai_total_ms",
+    "total_ms",
+)
+
+
+def normalize_ocr_timing_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """Ensure consistent timing keys for metrics and status consumers."""
+    normalized = dict(payload)
+    storage = normalized.get("storage_download_ms")
+    download = normalized.get("download_ms")
+    if storage is not None and download is None:
+        normalized["download_ms"] = storage
+    elif download is not None and storage is None:
+        normalized["storage_download_ms"] = download
+    for field in OCR_TIMING_SCALAR_FIELDS:
+        normalized.setdefault(field, None)
+    if normalized.get("openai_call_count") is None:
+        calls = normalized.get("openai_calls")
+        if isinstance(calls, list):
+            normalized["openai_call_count"] = len(calls)
+        else:
+            normalized.setdefault("openai_call_count", None)
+    normalized.setdefault("extraction_mode", None)
+    return normalized
+
 
 def _progress_key(upload_id: int) -> str:
     return f"{_PROGRESS_PREFIX}{upload_id}"
 
 
 def update_ocr_progress(upload_id: int, **fields: Any) -> None:
+    if any(key in OCR_TIMING_SCALAR_FIELDS for key in fields):
+        fields = normalize_ocr_timing_fields(fields)
     payload = {
         key: json.dumps(value, default=str)
         for key, value in fields.items()
@@ -53,14 +95,18 @@ def get_ocr_progress(upload_id: int) -> dict[str, Any]:
             result[name] = json.loads(text)
         except json.JSONDecodeError:
             result[name] = text
+    if any(key in result for key in OCR_TIMING_SCALAR_FIELDS):
+        return normalize_ocr_timing_fields(result)
     return result
 
 
 def record_recent_ocr_timing(payload: dict[str, Any]) -> None:
-    entry = {
-        "recorded_at": time.time(),
-        **payload,
-    }
+    entry = normalize_ocr_timing_fields(
+        {
+            "recorded_at": time.time(),
+            **payload,
+        }
+    )
     try:
         redis = get_redis_connection()
         member = json.dumps(entry, default=str, sort_keys=True)
@@ -81,7 +127,25 @@ def recent_ocr_timings(limit: int = 10) -> list[dict[str, Any]]:
     for raw in rows:
         text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
         try:
-            result.append(json.loads(text))
+            parsed = json.loads(text)
         except json.JSONDecodeError:
             continue
+        if isinstance(parsed, dict):
+            result.append(normalize_ocr_timing_fields(parsed))
     return result
+
+
+def openai_avg_from_recent_timings(limit: int = 20) -> float | None:
+    """Mean OpenAI latency from recent production extractions (ms)."""
+    values: list[float] = []
+    for row in recent_ocr_timings(limit=limit):
+        raw = row.get("openai_total_ms")
+        if raw is None:
+            continue
+        try:
+            values.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)

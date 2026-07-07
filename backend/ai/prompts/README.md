@@ -1,6 +1,6 @@
 # Invoice OCR prompts
 
-Modular prompt assembly for Borek Finance OpenAI Vision extraction. **Prompt text is unchanged** from the legacy monolithic `services/extraction_prompts.py`; only structure moved.
+Modular prompt assembly for Borek Finance OpenAI Vision extraction.
 
 ## Folder structure
 
@@ -38,12 +38,6 @@ from ai.prompts import (
     BATCH_SYSTEM_PROMPT,
     MERGE_SYSTEM_PROMPT,
 )
-```
-
-Legacy import still works:
-
-```python
-from services.extraction_prompts import VISION_SYSTEM_PROMPT
 ```
 
 ## Adding a new prompt version (v2)

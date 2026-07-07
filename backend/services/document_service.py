@@ -202,6 +202,25 @@ class DocumentService:
             **progress,
         )
 
+    async def get_status_batch(
+        self,
+        document_ids: list[int],
+        user: UserContext,
+    ) -> list[DocumentStatusResponse]:
+        items: list[DocumentStatusResponse] = []
+        seen: set[int] = set()
+        for document_id in document_ids:
+            if document_id in seen:
+                continue
+            seen.add(document_id)
+            try:
+                items.append(await self.get_status(document_id, user))
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    continue
+                raise
+        return items
+
     async def get_status(
         self,
         document_id: int,

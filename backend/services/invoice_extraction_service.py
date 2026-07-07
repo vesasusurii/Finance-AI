@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy.exc import IntegrityError
 
@@ -21,7 +21,12 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 from config import settings
 from core.debug_logger import debug_trace, get_logger, log_typed_fields
 from core.exceptions import ExtractionError
-from core.ocr_progress import get_ocr_progress, record_recent_ocr_timing, update_ocr_progress
+from core.ocr_progress import (
+    get_ocr_progress,
+    normalize_ocr_timing_fields,
+    record_recent_ocr_timing,
+    update_ocr_progress,
+)
 from repositories.audit_repository import AuditRepository
 from repositories.invoice_access_repository import InvoiceAccessRepository
 from repositories.invoice_repository import DuplicateInvoiceNumberError, InvoiceRepository
@@ -29,26 +34,32 @@ from repositories.upload_repository import UploadRepository
 from utils.content_hash import sha256_hex
 from schemas.auth import UserContext
 from schemas.invoice import ExtractionResult, UploadItemResponse
-from ai.prompts import MERGE_SYSTEM_PROMPT, VISION_SYSTEM_PROMPT
+from ai.prompts import VISION_SYSTEM_PROMPT
 from ai.prompts.builders.prompt_builder import (
     build_batch_system_prompt,
+    build_merge_system_prompt,
     build_vision_system_prompt,
+    estimate_prompt_tokens,
+    prompt_strategy_label,
 )
 from core.document_categories import DocumentCategory
 from services.ai_validation_service import AIValidationService
+from services.deterministic_partial_merge_service import DeterministicPartialMergeService
 from services.document_classifier_service import DocumentClassifierService
 from services.field_recovery_service import FieldRecoveryService
 from services.hybrid_extraction_service import HybridExtractionService
 from services.text_first_extraction_service import TextFirstExtractionService
+from services.vision_page_selection_service import select_vision_pages
 from services.ocr.pdf_text_extractor import (
     TextLayerHints,
+    extract_pdf_page_texts,
     extract_pdf_text,
     parse_text_layer_hints,
 )
 from services.ocr.pdf_reader import (
     pdf_is_encrypted,
     pdf_page_count,
-    render_pdf_pages_as_images,
+    render_pdf_pages,
 )
 from utils.file_storage import resolve_upload_bytes, save_bytes
 from utils.openai_chat import chat_completion_kwargs, is_reasoning_model
@@ -72,6 +83,35 @@ VISION_RETRY_CONFIDENCE = 0.82
 # GPT-4 output budget; GPT-5/o-series also spend tokens on internal reasoning first.
 _MAX_TOKENS = 2400
 
+_MIDDLE_IMAGE_DETAIL_LEVELS = frozenset({"low", "auto"})
+
+
+def _image_detail_for_page(page_num: int, total_pages: int) -> str:
+    """OpenAI Vision detail for a 1-based page index."""
+    if not settings.openai_adaptive_image_detail:
+        return "high"
+    if total_pages <= 1:
+        return "high"
+    if page_num <= 1 or page_num >= total_pages:
+        return "high"
+    middle = settings.openai_adaptive_image_detail_middle.strip().lower()
+    if middle not in _MIDDLE_IMAGE_DETAIL_LEVELS:
+        return "low"
+    return middle
+
+
+def _image_detail_strategy_name() -> str:
+    if settings.openai_adaptive_image_detail:
+        return "adaptive_first_last_high"
+    return "all_high"
+
+
+def _cap_vision_supplemental_text(text: str | None) -> tuple[str | None, int]:
+    if not text:
+        return None, 0
+    capped = text[: settings.openai_vision_supplemental_text_max_chars]
+    return capped, len(capped)
+
 
 @dataclass(frozen=True)
 class _ExtractionContext:
@@ -81,6 +121,11 @@ class _ExtractionContext:
     vision_system_prompt: str
     batch_system_prompt: str
     text_extraction_ms: float = 0.0
+    document_classification_ms: float = 0.0
+    prompt_strategy: str = "minimal"
+    supplemental_text_chars: int = 0
+    estimated_prompt_tokens: int = 0
+    page_texts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,9 +158,74 @@ class InvoiceExtractionService:
         self._hybrid = HybridExtractionService(ai_validation)
         self._field_recovery = FieldRecoveryService(openai_client, ai_validation)
         self._text_first = TextFirstExtractionService(openai_client, ai_validation)
+        self._deterministic_merge = DeterministicPartialMergeService(ai_validation)
         self._progress_upload_id: int | None = None
         self._openai_timings: list[dict] = []
         self._last_merge_ms: float | None = None
+        self._last_merge_meta: dict[str, object] = {}
+        self._last_page_selection_meta: dict[str, object] = {}
+        self._last_hybrid_merge_ms: float | None = None
+        self._last_field_recovery_ms: float | None = None
+        self._image_detail_high_pages: set[int] = set()
+        self._image_detail_low_pages: set[int] = set()
+
+    def _reset_image_detail_tracking(self) -> None:
+        self._image_detail_high_pages = set()
+        self._image_detail_low_pages = set()
+
+    def _record_image_detail_page(self, page_num: int, detail: str) -> None:
+        if detail == "high":
+            self._image_detail_high_pages.add(page_num)
+            self._image_detail_low_pages.discard(page_num)
+        else:
+            self._image_detail_low_pages.add(page_num)
+            self._image_detail_high_pages.discard(page_num)
+
+    def _image_detail_meta(self, total_pages: int | None) -> dict[str, object]:
+        pages = total_pages if total_pages else 1
+        return {
+            "image_detail_strategy": _image_detail_strategy_name(),
+            "high_detail_pages": sorted(self._image_detail_high_pages),
+            "low_detail_pages": sorted(self._image_detail_low_pages),
+            "total_pages": pages,
+        }
+
+    def _prompt_meta(self, ctx: _ExtractionContext | None, *, mode: str) -> dict[str, object]:
+        if ctx is None:
+            return {}
+        strategy = prompt_strategy_label(
+            mode=mode,
+            document_category=ctx.document_category,
+        )
+        system_prompt = (
+            ctx.batch_system_prompt
+            if mode
+            in {
+                "batch",
+                "vision_batched",
+                "vision_batched_merge",
+                "vision_first_last_middle",
+                "vision_dynamic",
+                "vision_dynamic_fallback",
+            }
+            else ctx.vision_system_prompt
+        )
+        if mode == "merge":
+            system_prompt = build_merge_system_prompt()
+        return {
+            "prompt_strategy": strategy,
+            "supplemental_text_chars": ctx.supplemental_text_chars,
+            "estimated_prompt_tokens": estimate_prompt_tokens(
+                system_prompt,
+                ctx.supplemental_text or "",
+            ),
+        }
+
+    def _text_first_skip_meta(self) -> dict[str, object]:
+        route = self._text_first.last_route
+        if route is None:
+            return {}
+        return route.metadata()
 
     def _update_progress(self, **fields) -> None:
         if self._progress_upload_id is not None:
@@ -328,6 +438,10 @@ class InvoiceExtractionService:
             extract_t0 = time.perf_counter()
             self._openai_timings = []
             self._last_merge_ms = None
+            self._last_merge_meta = {}
+            self._last_hybrid_merge_ms = None
+            self._last_field_recovery_ms = None
+            self._reset_image_detail_tracking()
             result, model_used, meta = await self._extract(
                 stored_filename, mime, content
             )
@@ -345,7 +459,15 @@ class InvoiceExtractionService:
             log_typed_fields(logger, "OCR raw extraction", result)
             logger.debug("OCR meta: %r model_used=%r", meta, model_used)
 
+            validation_t0 = time.perf_counter()
             result = self._ai_validation.sanitize_and_validate(result)
+            meta["validation_ms"] = round(
+                (time.perf_counter() - validation_t0) * 1000, 1
+            )
+            if self._last_hybrid_merge_ms is not None:
+                meta["hybrid_merge_ms"] = self._last_hybrid_merge_ms
+            if self._last_field_recovery_ms is not None:
+                meta["field_recovery_ms"] = self._last_field_recovery_ms
             log_typed_fields(logger, "OCR after sanitize_and_validate", result)
 
             missing = self._ai_validation.validate_required_fields(result)
@@ -400,7 +522,7 @@ class InvoiceExtractionService:
                 1,
             )
             meta["openai_call_count"] = len(self._openai_timings)
-            record_recent_ocr_timing(
+            timing_payload = normalize_ocr_timing_fields(
                 {
                     "upload_id": source_file_id,
                     "invoice_id": invoice.id,
@@ -411,10 +533,16 @@ class InvoiceExtractionService:
                     "total_pdf_pages": meta.get("total_pdf_pages"),
                     "text_layer_chars": meta.get("text_layer_chars"),
                     "text_extraction_ms": meta.get("text_extraction_ms"),
+                    "document_classification_ms": meta.get(
+                        "document_classification_ms"
+                    ),
                     "text_llm_ms": meta.get("text_llm_ms"),
                     "render_ms": meta.get("render_ms"),
                     "rendered_image_bytes": meta.get("rendered_image_bytes"),
                     "merge_ms": meta.get("merge_ms"),
+                    "hybrid_merge_ms": meta.get("hybrid_merge_ms"),
+                    "field_recovery_ms": meta.get("field_recovery_ms"),
+                    "validation_ms": meta.get("validation_ms"),
                     "storage_download_ms": storage_download_ms,
                     "ocr_ms": extract_ms,
                     "persist_ms": persist_ms,
@@ -422,29 +550,40 @@ class InvoiceExtractionService:
                     "openai_total_ms": meta["openai_total_ms"],
                     "openai_call_count": meta["openai_call_count"],
                     "openai_calls": self._openai_timings,
+                    "image_detail_strategy": meta.get("image_detail_strategy"),
+                    "high_detail_pages": meta.get("high_detail_pages"),
+                    "low_detail_pages": meta.get("low_detail_pages"),
+                    "text_first_reason": meta.get("text_first_reason"),
+                    "text_chars": meta.get("text_chars"),
+                    "hints_found_count": meta.get("hints_found_count"),
+                    "missing_hint_fields": meta.get("missing_hint_fields"),
+                    "text_quality_score": meta.get("text_quality_score"),
+                    "merge_strategy": meta.get("merge_strategy"),
+                    "deterministic_merge_conflicts": meta.get(
+                        "deterministic_merge_conflicts"
+                    ),
+                    "deterministic_merge_missing_fields": meta.get(
+                        "deterministic_merge_missing_fields"
+                    ),
+                    "prompt_strategy": meta.get("prompt_strategy"),
+                    "supplemental_text_chars": meta.get("supplemental_text_chars"),
+                    "estimated_prompt_tokens": meta.get("estimated_prompt_tokens"),
+                    "render_strategy": meta.get("render_strategy"),
+                    "render_parallel_ms": meta.get("render_parallel_ms"),
+                    "rendered_page_count": meta.get("rendered_page_count"),
                 }
             )
+            record_recent_ocr_timing(timing_payload)
+            progress_fields = {
+                key: value
+                for key, value in timing_payload.items()
+                if key not in {"upload_id", "openai_calls", "recorded_at"}
+            }
             self._update_progress(
                 stage="processed",
                 stage_label="Invoice saved",
                 upload_status="processed",
-                invoice_id=invoice.id,
-                model=model_used,
-                extraction_mode=meta.get("extraction_mode"),
-                queue_wait_ms=queue_wait_ms,
-                pages_processed=meta.get("pages_processed"),
-                total_pdf_pages=meta.get("total_pdf_pages"),
-                storage_download_ms=storage_download_ms,
-                text_extraction_ms=meta.get("text_extraction_ms"),
-                text_llm_ms=meta.get("text_llm_ms"),
-                render_ms=meta.get("render_ms"),
-                rendered_image_bytes=meta.get("rendered_image_bytes"),
-                merge_ms=meta.get("merge_ms"),
-                ocr_ms=extract_ms,
-                persist_ms=persist_ms,
-                total_ms=total_ms,
-                openai_total_ms=meta["openai_total_ms"],
-                openai_call_count=meta["openai_call_count"],
+                **progress_fields,
             )
             return UploadItemResponse(
                 upload_id=source_file_id,
@@ -593,47 +732,70 @@ class InvoiceExtractionService:
     ) -> _ExtractionContext:
         raw_text = ""
         hints = TextLayerHints(raw_text="")
+        page_texts: tuple[str, ...] = ()
         text_t0 = time.perf_counter()
         text_extraction_ms = 0.0
         if (
             mime == "application/pdf"
             and content
-            and settings.openai_hybrid_text_enabled
+            and (
+                settings.openai_hybrid_text_enabled
+                or settings.openai_dynamic_page_selection_enabled
+            )
         ):
             self._update_progress(
                 stage="extracting_text",
                 stage_label="Extracting PDF text",
             )
-            raw_text = extract_pdf_text(content)
+            pages = extract_pdf_page_texts(content)
+            page_texts = tuple(pages)
+            raw_text = "\n".join(text for text in pages if text.strip())
             hints = parse_text_layer_hints(raw_text)
             text_extraction_ms = round((time.perf_counter() - text_t0) * 1000, 1)
             self._update_progress(text_extraction_ms=text_extraction_ms)
 
+        classify_t0 = time.perf_counter()
         category = self._classifier.classify(hints.raw_text or raw_text, filename=filename)
+        document_classification_ms = round(
+            (time.perf_counter() - classify_t0) * 1000, 1
+        )
         supplemental: str | None = None
+        supplemental_chars = 0
         if hints.has_usable_text:
-            supplemental = raw_text[: settings.openai_max_supplemental_chars]
+            supplemental, supplemental_chars = _cap_vision_supplemental_text(raw_text)
+
+        vision_prompt = build_vision_system_prompt(category)
+        batch_prompt = build_batch_system_prompt(category)
+        prompt_strategy = prompt_strategy_label(
+            mode="vision",
+            document_category=category,
+        )
+        estimated_tokens = estimate_prompt_tokens(
+            vision_prompt,
+            supplemental or "",
+        )
 
         logger.info(
-            "Extraction context filename=%r category=%s text_chars=%d",
+            "Extraction context filename=%r category=%s text_chars=%d supplemental_chars=%d prompt_tokens~=%d",
             filename,
             category.value,
             len(raw_text),
+            supplemental_chars,
+            estimated_tokens,
         )
 
         return _ExtractionContext(
             document_category=category,
             text_hints=hints,
             supplemental_text=supplemental,
-            vision_system_prompt=build_vision_system_prompt(
-                category,
-                legacy_include_utility=False,
-            ),
-            batch_system_prompt=build_batch_system_prompt(
-                category,
-                legacy_include_utility=False,
-            ),
+            vision_system_prompt=vision_prompt,
+            batch_system_prompt=batch_prompt,
             text_extraction_ms=text_extraction_ms,
+            document_classification_ms=document_classification_ms,
+            prompt_strategy=prompt_strategy,
+            supplemental_text_chars=supplemental_chars,
+            estimated_prompt_tokens=estimated_tokens,
+            page_texts=page_texts,
         )
 
     async def _apply_post_vision_pipeline(
@@ -646,7 +808,11 @@ class InvoiceExtractionService:
         model: str,
     ) -> ExtractionResult:
         if settings.openai_hybrid_text_enabled:
+            hybrid_t0 = time.perf_counter()
             result = self._hybrid.merge(result, ctx.text_hints)
+            self._last_hybrid_merge_ms = round(
+                (time.perf_counter() - hybrid_t0) * 1000, 1
+            )
 
         if settings.openai_field_recovery_enabled:
             missing = self._ai_validation.validate_required_fields(result)
@@ -656,11 +822,15 @@ class InvoiceExtractionService:
                     filename,
                     missing,
                 )
+                recovery_t0 = time.perf_counter()
                 result = await self._field_recovery.recover_missing_fields(
                     result,
                     images=images,
                     model=model,
                     filename=filename,
+                )
+                self._last_field_recovery_ms = round(
+                    (time.perf_counter() - recovery_t0) * 1000, 1
                 )
         return result
 
@@ -673,21 +843,34 @@ class InvoiceExtractionService:
         ctx: _ExtractionContext,
     ) -> tuple[ExtractionResult, str, str, dict] | None:
         """Fast path for digital PDFs — regex hints or text-only LLM, no Vision."""
-        if not self._text_first.can_attempt(
+        route = self._text_first.evaluate_route(
             total_pages=total_pages,
             hints=ctx.text_hints,
-        ):
+        )
+        self._text_first.last_route = route
+        text_meta: dict = route.metadata()
+
+        if not route.use_text_first:
+            logger.info(
+                "Text-first skipped for %r: %s (chars=%d, hints=%d, quality=%.3f)",
+                filename,
+                route.reason,
+                route.text_chars,
+                route.hints_found_count,
+                route.text_quality_score,
+            )
             return None
 
-        hints_result = self._text_first.result_from_hints(ctx.text_hints)
-        if hints_result is not None:
-            logger.info(
-                "Text-first hints path for %r (pages=%d, chars=%d)",
-                filename,
-                total_pages,
-                len(ctx.text_hints.raw_text),
-            )
-            return hints_result, settings.openai_model, "text_hints", {}
+        if route.mode == "text_hints":
+            hints_result = self._text_first.result_from_hints(ctx.text_hints)
+            if hints_result is not None:
+                logger.info(
+                    "Text-first hints path for %r (pages=%d, chars=%d)",
+                    filename,
+                    total_pages,
+                    route.text_chars,
+                )
+                return hints_result, settings.openai_model, "text_hints", text_meta
 
         text_llm_t0 = time.perf_counter()
         self._update_progress(
@@ -701,20 +884,26 @@ class InvoiceExtractionService:
             model=settings.openai_model,
             chat_completion=self._chat_completion,
             parse_response=self._parse_response,
+            hints=ctx.text_hints,
+            partial_hint_count=route.hints_found_count,
         )
         text_llm_ms = round((time.perf_counter() - text_llm_t0) * 1000, 1)
         self._update_progress(text_llm_ms=text_llm_ms)
         if text_result is not None:
             logger.info(
-                "Text-first LLM path for %r (pages=%d, chars=%d)",
+                "Text-first LLM path for %r (pages=%d, chars=%d, reason=%s)",
                 filename,
                 total_pages,
-                len(ctx.text_hints.raw_text),
+                route.text_chars,
+                route.reason,
             )
             return text_result, settings.openai_model, "text_llm", {
-                "text_llm_ms": text_llm_ms
+                **text_meta,
+                "text_llm_ms": text_llm_ms,
             }
 
+        text_meta["text_first_reason"] = "text_llm_insufficient"
+        self._text_first.last_route = replace(route, reason="text_llm_insufficient")
         logger.info(
             "Text-first insufficient for %r — falling back to Vision",
             filename,
@@ -727,6 +916,8 @@ class InvoiceExtractionService:
     ) -> tuple[ExtractionResult, str, dict]:
         if self._openai is None or not settings.openai_api_key:
             raise ExtractionError("OPENAI_API_KEY is not configured")
+
+        self._reset_image_detail_tracking()
 
         if mime == "application/pdf":
             if pdf_is_encrypted(content):
@@ -757,29 +948,33 @@ class InvoiceExtractionService:
                     "document_category": ctx.document_category.value,
                     "text_layer_chars": len(ctx.text_hints.raw_text),
                     "text_extraction_ms": ctx.text_extraction_ms,
+                    "document_classification_ms": ctx.document_classification_ms,
                     "extraction_mode": mode,
                     "model": model_used,
                     **text_meta,
+                    **self._prompt_meta(ctx, mode=mode),
+                    **self._image_detail_meta(total_pages),
                 }
                 return result, model_used, meta
 
-            render_t0 = time.perf_counter()
             self._update_progress(
                 stage="rendering_pdf",
                 stage_label="Rendering PDF pages",
             )
-            images = render_pdf_pages_as_images(
+            render_result = render_pdf_pages(
                 content,
                 max_pages=settings.openai_max_pdf_pages,
                 scale=settings.openai_pdf_render_scale,
             )
-            render_ms = round((time.perf_counter() - render_t0) * 1000, 1)
+            images = render_result.images
+            render_ms = render_result.render_ms
             rendered_bytes = sum(len(img) for img, _mime in images)
             logger.debug(
-                "Rendered PDF pages: count=%d bytes=%d render_ms=%s (%s of tuples)",
+                "Rendered PDF pages: count=%d bytes=%d render_ms=%s strategy=%s (%s of tuples)",
                 len(images),
                 rendered_bytes,
                 render_ms,
+                render_result.render_strategy,
                 type(images).__name__,
             )
             if not images:
@@ -791,15 +986,41 @@ class InvoiceExtractionService:
                 "document_category": ctx.document_category.value,
                 "text_layer_chars": len(ctx.text_hints.raw_text),
                 "text_extraction_ms": ctx.text_extraction_ms,
+                "document_classification_ms": ctx.document_classification_ms,
                 "render_ms": render_ms,
+                "render_strategy": render_result.render_strategy,
+                "render_parallel_ms": render_result.render_parallel_ms,
+                "rendered_page_count": render_result.rendered_page_count,
                 "rendered_image_bytes": rendered_bytes,
+                **self._text_first_skip_meta(),
             }
 
             async def _run_pdf(model: str):
+                self._last_page_selection_meta = {}
                 use_edges_first = len(images) >= 5 or (
                     len(images) > 2
                     and rendered_bytes > settings.openai_vision_full_document_max_bytes
                 )
+
+                if (
+                    settings.openai_dynamic_page_selection_enabled
+                    and len(images) > 2
+                ):
+                    dynamic = await self._extract_pdf_dynamic_selection(
+                        filename,
+                        images,
+                        total_pages=total_pages,
+                        model=model,
+                        ctx=ctx,
+                        use_edges_first=use_edges_first,
+                    )
+                    if dynamic is not None:
+                        r, m, mode = dynamic
+                        r = await self._apply_post_vision_pipeline(
+                            r, ctx=ctx, images=images, filename=filename, model=m
+                        )
+                        return r, m, mode
+
                 if use_edges_first:
                     r, m, mode = await self._extract_pdf_edges_then_middle(
                         filename,
@@ -831,12 +1052,23 @@ class InvoiceExtractionService:
                 )
             meta["extraction_mode"] = mode
             meta["model"] = model_used
-            if mode == "vision_first_last":
-                meta["pages_processed"] = min(2, len(images))
+            if mode in {"vision_first_last", "vision_dynamic"}:
+                meta["pages_processed"] = self._last_page_selection_meta.get(
+                    "selected_vision_pages",
+                    min(2, len(images)),
+                )
+                if isinstance(meta["pages_processed"], list):
+                    meta["pages_processed"] = len(meta["pages_processed"])
+            elif mode == "vision_dynamic_fallback":
+                meta["pages_processed"] = len(images)
             else:
                 meta["pages_processed"] = len(images)
             if self._last_merge_ms is not None:
                 meta["merge_ms"] = self._last_merge_ms
+            meta.update(self._last_merge_meta)
+            meta.update(self._last_page_selection_meta)
+            meta.update(self._image_detail_meta(total_pages))
+            meta.update(self._prompt_meta(ctx, mode=mode))
             return await self._maybe_retry_strong(
                 filename,
                 result,
@@ -891,6 +1123,8 @@ class InvoiceExtractionService:
             "extraction_mode": mode,
             "model": model_used,
             "document_category": ctx.document_category.value,
+            **self._prompt_meta(ctx, mode=mode),
+            **self._image_detail_meta(1),
         }
         return await self._maybe_retry_strong(
             filename,
@@ -905,6 +1139,100 @@ class InvoiceExtractionService:
     # ─────────────────────────────────────────────────────────────────────
     # PDF multi-page extraction
     # ─────────────────────────────────────────────────────────────────────
+
+    @debug_trace
+    async def _extract_pdf_dynamic_selection(
+        self,
+        filename: str,
+        images: list[tuple[bytes, str]],
+        *,
+        total_pages: int,
+        model: str,
+        ctx: _ExtractionContext,
+        use_edges_first: bool,
+    ) -> tuple[ExtractionResult, str, str] | None:
+        """Score pages and run Vision on a capped subset; None triggers fallback."""
+        page_texts = list(ctx.page_texts) if ctx.page_texts else None
+        selection = select_vision_pages(
+            total_pages=total_pages,
+            page_texts=page_texts,
+        )
+        self._last_page_selection_meta = selection.metadata()
+
+        if len(selection.selected_pages) >= total_pages:
+            return None
+
+        selected_images = [images[p - 1] for p in selection.selected_pages]
+        vision_prompt = ctx.vision_system_prompt
+        category = ctx.document_category
+        supplemental = ctx.supplemental_text
+
+        self._update_progress(
+            stage="openai_vision",
+            stage_label="Extracting selected pages",
+            model=model,
+        )
+        logger.info(
+            "Dynamic Vision page selection for %r: selected=%s skipped=%s strategy=%s",
+            filename,
+            list(selection.selected_pages),
+            list(selection.skipped_pages),
+            selection.strategy,
+        )
+
+        result = await self._openai_vision_extract(
+            selected_images,
+            filename=filename,
+            file_type="pdf",
+            model=model,
+            page_range=None,
+            page_numbers=list(selection.selected_pages),
+            total_pages=total_pages,
+            system_prompt=vision_prompt,
+            supplemental_text=supplemental,
+            document_category=category,
+        )
+        result = self._ai_validation.sanitize_and_validate(result)
+        missing = self._ai_validation.validate_required_fields(result)
+        suspicious = self._ai_validation.detect_suspicious_values(result)
+        if not missing and not suspicious:
+            return result, model, "vision_dynamic"
+
+        if not selection.skipped_pages:
+            return None
+
+        logger.info(
+            "Dynamic Vision insufficient for %r — falling back (missing=%s suspicious=%s)",
+            filename,
+            missing,
+            suspicious,
+        )
+        self._last_page_selection_meta = {
+            **selection.metadata(),
+            "dynamic_fallback_reason": {
+                "missing": missing,
+                "suspicious": suspicious,
+            },
+        }
+
+        if use_edges_first:
+            result, model, mode = await self._extract_pdf_edges_then_middle(
+                filename,
+                images,
+                total_pages=total_pages,
+                model=model,
+                ctx=ctx,
+            )
+            return result, model, "vision_dynamic_fallback"
+
+        result, model, mode = await self._extract_pdf_pages(
+            filename,
+            images,
+            total_pages=total_pages,
+            model=model,
+            ctx=ctx,
+        )
+        return result, model, "vision_dynamic_fallback"
 
     @debug_trace
     async def _extract_pdf_edges_then_middle(
@@ -1142,24 +1470,60 @@ class InvoiceExtractionService:
         total_pages: int,
         model: str,
     ) -> ExtractionResult:
-        payload = [p.model_dump() for p in partials]
+        if len(partials) == 1:
+            return partials[0]
+
         self._update_progress(stage="merging", stage_label="Merging page results")
         merge_t0 = time.perf_counter()
+
+        outcome = self._deterministic_merge.merge_partials(partials)
+        self._last_merge_meta = outcome.metadata()
+
+        if not outcome.use_llm and outcome.result is not None:
+            self._last_merge_ms = round((time.perf_counter() - merge_t0) * 1000, 1)
+            self._update_progress(merge_ms=self._last_merge_ms)
+            logger.info(
+                "Deterministic merge for %d partials (pages=%d) conflicts=%s",
+                len(partials),
+                total_pages,
+                outcome.conflicts,
+            )
+            return outcome.result
+
+        payload = [p.model_dump() for p in partials]
         user_text = (
             f"Merge these {len(partials)} partial Vision extractions from a "
             f"{total_pages}-page invoice into one final JSON.\n\n"
             f"Partials (index = page batch order, 0 = first pages):\n"
             f"{json.dumps(payload, indent=2, default=str)}"
         )
+        if outcome.conflicts:
+            user_text += (
+                "\n\nDeterministic merge notes (conflicts to resolve):\n"
+                + "\n".join(f"- {item}" for item in outcome.conflicts)
+            )
+        merge_prompt = build_merge_system_prompt()
         response = await self._chat_completion(
             model=model,
             messages=[
-                {"role": "system", "content": MERGE_SYSTEM_PROMPT},
+                {"role": "system", "content": merge_prompt},
                 {"role": "user", "content": user_text},
             ],
         )
         self._last_merge_ms = round((time.perf_counter() - merge_t0) * 1000, 1)
+        self._last_merge_meta["merge_strategy"] = "llm"
+        self._last_merge_meta["prompt_strategy"] = prompt_strategy_label(mode="merge")
+        self._last_merge_meta["estimated_prompt_tokens"] = estimate_prompt_tokens(
+            merge_prompt,
+            user_text,
+        )
         self._update_progress(merge_ms=self._last_merge_ms)
+        logger.info(
+            "LLM merge for %d partials (pages=%d) reason=%s",
+            len(partials),
+            total_pages,
+            outcome.conflicts or outcome.missing_fields,
+        )
         return self._parse_response(response.choices[0].message.content or "{}")
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1186,6 +1550,7 @@ class InvoiceExtractionService:
             settings.openai_model_strong,
             exc,
         )
+        self._reset_image_detail_tracking()
         return await extract_fn(settings.openai_model_strong)
 
     @debug_trace
@@ -1235,6 +1600,7 @@ class InvoiceExtractionService:
                 retry_reasons,
             )
             meta["strong_retry_reasons"] = retry_reasons
+            self._reset_image_detail_tracking()
             retry_result, retry_model, retry_mode = await extract_fn(
                 settings.openai_model_strong
             )
@@ -1251,6 +1617,9 @@ class InvoiceExtractionService:
             if retry_is_better:
                 meta["extraction_mode"] = retry_mode
                 meta["model"] = retry_model
+                meta.update(
+                    self._image_detail_meta(meta.get("total_pdf_pages"))
+                )
                 return retry_result, retry_model, meta
 
         meta["model"] = model_used
@@ -1270,12 +1639,23 @@ class InvoiceExtractionService:
         model: str,
         page_range: tuple[int, int] | None,
         total_pages: int,
+        page_numbers: list[int] | None = None,
         system_prompt: str = VISION_SYSTEM_PROMPT,
         context_hint: str | None = None,
         supplemental_text: str | None = None,
         document_category: DocumentCategory | None = None,
     ) -> ExtractionResult:
-        if page_range:
+        if page_numbers:
+            if len(page_numbers) == 1:
+                scope = (
+                    f"Page {page_numbers[0]} of {total_pages}."
+                    if total_pages > 1
+                    else "Single page document."
+                )
+            else:
+                listed = ", ".join(str(p) for p in page_numbers)
+                scope = f"Pages {listed} of {total_pages}."
+        elif page_range:
             start, end = page_range
             scope = (
                 f"Pages {start}–{end} of {total_pages}."
@@ -1305,82 +1685,59 @@ class InvoiceExtractionService:
                 f"Classified document category: {document_category.value}"
             )
         if supplemental_text:
+            capped, _ = _cap_vision_supplemental_text(supplemental_text)
             instruction_parts += [
                 "",
-                "Supplemental text extracted from PDF text layer (cross-check with images):",
-                supplemental_text[: settings.openai_max_supplemental_chars],
+                "Supplemental PDF text (cross-check with images):",
+                capped or "",
             ]
         instruction_parts += [
             "",
-            "Instructions:",
-            "1. Study EVERY image completely — read every text block including headers, footers, and small print.",
-            "2. Follow the visual scanning strategy from the system prompt (top→bottom, header→totals→payment).",
-            "3. Apply all field rules exactly — especially the amount decision tree.",
-            "4. Return a single JSON object. Nothing else.",
+            "Return one JSON object per the system prompt. Read all images before answering.",
         ]
-        fn_lower = filename.lower()
-        if "kesco" in fn_lower:
-            instruction_parts += [
-                "",
-                "KESCO bill detected:",
-                "• invoice_number = exact value after Nr. Ref. / Nr. Ret. on the BOTTOM payment strip (below barcode), as printed.",
-                "• NEVER use Shifra e konsumatorit, Customer ID, DPR codes, or other numeric-only header IDs.",
-            ]
-        elif any(
-            token in fn_lower for token in ("pastrimi", "mbeturinave", "krm")
-        ):
-            instruction_parts += [
-                "",
-                "Pastrimi / KRM waste bill detected:",
-                "• amount = Gjithsej borxhi / Total Due / Ukupan dug (includes prior debt).",
-                "• NOT Vlera mujore e fatures / Monthly Invoice Total / Per pagese alone.",
-                "• invoice_number = Nr.-No.-Br. in header; debt = Borgji paraprak / Previous due.",
-                "• Capture all bank accounts from Xhirollogaria block.",
-            ]
-        elif any(
-            token in fn_lower
-            for token in ("ujesjel", "ujësjell", "ujesjell", "water", "ujesjelles")
-        ):
-            instruction_parts += [
-                "",
-                "Regional water bill — CRITICAL invoice_number:",
-                "• Scan bottom 10–15%: full payment string above barcode (^F[0-9]+[A-Z]?$, usually 12+ digits after F).",
-                "• Read twice character-by-character; if reads disagree → invoice_number null, needs_review true.",
-                "• Optional trailing letter A–Z varies per bill — read from document. Never truncate to header Bill number.",
-                "• FORBIDDEN: Customer ID, NUI/NIPT, meter #, amounts, dates, values not starting with F.",
-            ]
-
-        # Multi-page specific guidance injected directly into the user message
-        # so the model receives it regardless of which system prompt is active.
-        if total_pages > 1 and page_range:
-            p_start, p_end = page_range
-            is_full_document = (p_start == 1 and p_end == total_pages)
-            instruction_parts += [
-                "",
-                f"MULTI-PAGE DOCUMENT — {total_pages} pages:",
-            ]
-            if is_full_document:
-                instruction_parts += [
-                    f"  • You are receiving ALL {total_pages} pages in order.",
-                    "  • Page 1 = header (issuer name, address, invoice number, date, client block).",
-                    f"  • Page {total_pages} = FINAL PAGE (grand total incl. VAT, Zahlbetrag/Amount due, IBAN, bank).",
-                    "  • AMOUNT rule: extract `amount` ONLY from the grand-total / Bruttobetrag / Zahlbetrag line",
-                    "    on the FINAL page. NEVER use individual line-item prices from earlier pages.",
-                    "  • IBAN rule: read ALL IBANs from the final page footer; list every one.",
-                ]
+        if total_pages > 1 and (page_range or page_numbers):
+            if page_numbers:
+                p_start = page_numbers[0]
+                p_end = page_numbers[-1]
+                includes_first = 1 in page_numbers
+                includes_last = total_pages in page_numbers
             else:
-                instruction_parts += [
-                    f"  • You are processing pages {p_start}–{p_end} of {total_pages}.",
-                    f"  • {'This is the FIRST page — capture header fields.' if p_start == 1 else ''}",
-                    f"  • {'This is the FINAL page — capture totals and IBAN.' if p_end == total_pages else 'Line-items page — set amount to null (totals come later).'}",
-                ]
+                p_start, p_end = page_range  # type: ignore[misc]
+                includes_first = p_start == 1
+                includes_last = p_end == total_pages
+
+            if (
+                includes_first
+                and includes_last
+                and len(page_numbers or images) == total_pages
+            ):
+                instruction_parts.append(
+                    f"All {total_pages} pages included — amount and IBAN from final page only."
+                )
+            elif includes_last and p_end == total_pages:
+                instruction_parts.append(
+                    "Selected pages include the final page — capture totals and payment details."
+                )
+            elif includes_first and p_start == 1:
+                instruction_parts.append(
+                    "Selected pages include the first page — capture header fields; amount null unless shown."
+                )
+            else:
+                instruction_parts.append(
+                    "Selected middle pages — line items only; amount null unless totals visible."
+                )
 
         user_content: list[dict] = [
             {"type": "text", "text": "\n".join(instruction_parts)},
         ]
 
         for index, (img_bytes, mime) in enumerate(images, start=1):
-            page_num = (page_range[0] + index - 1) if page_range else index
+            if page_numbers:
+                page_num = page_numbers[index - 1]
+            elif page_range:
+                page_num = page_range[0] + index - 1
+            else:
+                page_num = index
             if len(images) > 1 or total_pages > 1:
                 # Label each page with its role so the model knows where to look
                 if total_pages > 1:
@@ -1399,12 +1756,14 @@ class InvoiceExtractionService:
                     label = f"─── Page {page_num} of {total_pages} ───"
                 user_content.append({"type": "text", "text": label})
             b64 = base64.standard_b64encode(img_bytes).decode("ascii")
+            detail = _image_detail_for_page(page_num, total_pages)
+            self._record_image_detail_page(page_num, detail)
             user_content.append(
                 {
                     "type": "image_url",
                     "image_url": {
                         "url": f"data:{mime};base64,{b64}",
-                        "detail": "high",
+                        "detail": detail,
                     },
                 }
             )
