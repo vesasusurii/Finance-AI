@@ -1,7 +1,7 @@
 """remove email ingest metadata from uploaded_files
 
-Revision ID: v9w0x1y2z3a4
-Revises: u8v9w0x1y2z3
+Revision ID: w0x1y2z3a4b5
+Revises: v9w0x1y2z3a4
 Create Date: 2026-07-07 17:30:00.000000
 """
 from typing import Sequence, Union
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "v9w0x1y2z3a4"
-down_revision: Union[str, Sequence[str], None] = "u8v9w0x1y2z3"
+revision: str = "w0x1y2z3a4b5"
+down_revision: Union[str, Sequence[str], None] = "v9w0x1y2z3a4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
