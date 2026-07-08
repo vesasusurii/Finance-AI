@@ -212,6 +212,7 @@ export function InvoiceFilePreview({
           <PdfCanvasPreview
             blob={previewBlob}
             invoiceId={invoiceId}
+            fileUrl={invoiceFileUrl(invoiceId)}
             minHeightClass={minHeightClass}
             className="h-full"
           />

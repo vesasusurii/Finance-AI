@@ -17,11 +17,20 @@ import "@/lib/pdfjs";
 export function PdfCanvasPreview({
   blob,
   invoiceId,
+  fileUrl,
   className,
   minHeightClass = "min-h-[400px]",
 }: {
   blob: Blob;
   invoiceId?: number;
+  /**
+   * Direct same-origin endpoint for the source file (e.g.
+   * /api/invoices/{id}/file). Preferred for the native fallback viewer because
+   * the browser sends session cookies automatically and the server supplies
+   * Content-Type/Content-Length, which Chrome's PDF viewer handles far more
+   * reliably than a blob: URL.
+   */
+  fileUrl?: string;
   className?: string;
   minHeightClass?: string;
 }) {
@@ -156,11 +165,12 @@ export function PdfCanvasPreview({
     };
   }, [blob, invoiceId]);
 
-  // Only render the browser viewer when we have a real blob: URL. A raw
-  // authenticated API URL must never be used here — it would need cookies the
-  // <iframe> cannot guarantee and would leak the endpoint.
+  // Prefer the direct same-origin endpoint (cookies + server Content-Type) for
+  // the native viewer; fall back to the blob: URL only when no fileUrl is given.
   const hasValidBlobUrl = Boolean(nativeUrl && nativeUrl.startsWith("blob:"));
-  const showNativeFallback = Boolean(error && hasValidBlobUrl);
+  const viewerSrc = fileUrl ?? (hasValidBlobUrl ? nativeUrl : null);
+  const usingDirectUrl = Boolean(fileUrl);
+  const showNativeFallback = Boolean(error && viewerSrc);
 
   useEffect(() => {
     if (!showNativeFallback) return;
@@ -170,7 +180,8 @@ export function PdfCanvasPreview({
     const height = el.clientHeight;
     console.info("[invoice-file] native pdf fallback layout", {
       invoiceId,
-      nativeUrl,
+      viewerSrc,
+      usingDirectUrl,
       showNativeFallback,
       width,
       height,
@@ -181,7 +192,7 @@ export function PdfCanvasPreview({
         { invoiceId, height },
       );
     }
-  }, [showNativeFallback, invoiceId, nativeUrl]);
+  }, [showNativeFallback, invoiceId, viewerSrc, usingDirectUrl]);
 
   return (
     <div
@@ -211,7 +222,7 @@ export function PdfCanvasPreview({
               browser viewer instead.
             </p>
             <a
-              href={nativeUrl ?? undefined}
+              href={viewerSrc ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[12px] text-primary hover:underline"
@@ -219,11 +230,12 @@ export function PdfCanvasPreview({
               Open in new tab
             </a>
           </div>
-          {/* iframe is reliable for blob: PDFs in Chrome; <embed>/<object>
-              frequently render blank. CSP allows this via frame-src blob:. */}
+          {/* iframe against the same-origin endpoint: cookies are sent and the
+              server sets Content-Type/Content-Length, which Chrome's PDF viewer
+              renders reliably (unlike blob:). CSP allows this via frame-src 'self'. */}
           <iframe
-            key={nativeUrl ?? "pdf-fallback"}
-            src={nativeUrl ?? undefined}
+            key={viewerSrc ?? "pdf-fallback"}
+            src={viewerSrc ?? undefined}
             title="Invoice PDF preview"
             className={cn(
               "w-full flex-1 border-0 bg-background",
@@ -233,7 +245,8 @@ export function PdfCanvasPreview({
               setFallbackUnavailable(false);
               console.info("[invoice-file] native pdf iframe rendered", {
                 invoiceId,
-                nativeUrl,
+                viewerSrc,
+                usingDirectUrl,
               });
             }}
             onError={() => setFallbackUnavailable(true)}
