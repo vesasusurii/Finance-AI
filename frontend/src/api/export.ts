@@ -20,7 +20,9 @@ export async function downloadPurchaseInvoicesExcel(
 ): Promise<void> {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) qs.set(key, value);
+    if (value !== undefined && value !== "") {
+      qs.set(key, String(value));
+    }
   }
   const query = qs.toString();
   const res = await fetch(
