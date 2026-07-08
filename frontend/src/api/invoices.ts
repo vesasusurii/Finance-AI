@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { inspectPdfBlob, logPdfByteReport } from "@/lib/pdfBytes";
 import type {
   Invoice,
   InvoiceFilters,
@@ -182,6 +183,25 @@ export async function fetchInvoiceFile(
   if (blob.size === 0) {
     logInvoiceFileError(invoiceId, "Invoice file response was empty", meta);
     throw new Error("Invoice file is empty");
+  }
+
+  if (
+    (meta.contentType ?? "").includes("pdf") ||
+    blob.type.includes("pdf")
+  ) {
+    const report = await inspectPdfBlob(blob);
+    logPdfByteReport("fetch", invoiceId, report, {
+      contentType: meta.contentType,
+      contentDisposition: meta.contentDisposition,
+    });
+    if (!report.startsWithPdf) {
+      logInvoiceFileError(
+        invoiceId,
+        "Response is not a valid PDF (missing %PDF header)",
+        meta,
+      );
+      throw new Error("Invoice file is not a valid PDF");
+    }
   }
 
   return blob;

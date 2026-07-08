@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from config import settings
 from core.debug_logger import debug_trace, get_logger
 from storage.factory import get_storage_backend
+from utils.pdf_bytes import find_pdf_start
 
 logger = get_logger(__name__)
 
@@ -89,13 +90,22 @@ async def resolve_upload_bytes(
         return None
 
     suffix = f"_{original_filename}"
-    for entry in invoices_dir.iterdir():
-        if entry.is_file() and entry.name.endswith(suffix):
-            logger.debug(
-                "Resolved legacy local upload via filename fallback: %s",
+    for entry in sorted(invoices_dir.iterdir(), key=lambda p: p.name):
+        if not entry.is_file() or not entry.name.endswith(suffix):
+            continue
+        data = entry.read_bytes()
+        if find_pdf_start(data) < 0 and original_filename.lower().endswith(".pdf"):
+            logger.warning(
+                "Skipping legacy local fallback without PDF header: %s",
                 entry.name,
             )
-            return entry.read_bytes()
+            continue
+        logger.warning(
+            "Resolved legacy local upload via filename fallback: %s (primary missing: %s)",
+            entry.name,
+            storage_path,
+        )
+        return data
     return None
 
 

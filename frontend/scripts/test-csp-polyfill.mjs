@@ -1,30 +1,45 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const themeInit = readFileSync(path.join(root, "public", "theme-init.js"), "utf8");
+const inlineScript = readFileSync(
+  path.join(root, "scripts", "csp-polyfill-inline.js"),
+  "utf8",
+).trim();
 
-const required = [
-  'defineProperty(document, "oninput"',
-  "isInlineEventHandlerAttribute",
-  "Element.prototype.setAttribute",
-];
+const indexHtml = readFileSync(path.join(root, "index.html"), "utf8");
+const scriptMatch = indexHtml.match(/<script>([\s\S]*?)<\/script>/);
+if (!scriptMatch) {
+  console.error("index.html is missing inline CSP polyfill script");
+  process.exit(1);
+}
 
-for (const snippet of required) {
-  if (!themeInit.includes(snippet)) {
-    console.error(`theme-init.js is missing CSP polyfill marker: ${snippet}`);
-    process.exit(1);
-  }
+const indexInline = scriptMatch[1];
+if (indexInline !== inlineScript) {
+  console.error("index.html inline CSP polyfill does not match scripts/csp-polyfill-inline.js");
+  console.error("Expected length:", inlineScript.length, "Got:", indexInline.length);
+  process.exit(1);
+}
+
+const hash = createHash("sha256").update(inlineScript, "utf8").digest("base64");
+const expectedDirective = `'sha256-${hash}'`;
+const cspConf = readFileSync(
+  path.resolve(root, "..", "infra", "nginx", "csp.conf"),
+  "utf8",
+);
+
+if (!cspConf.includes(expectedDirective)) {
+  console.error(`infra/nginx/csp.conf is missing ${expectedDirective}`);
+  console.error("Run: npm run csp:hash");
+  process.exit(1);
 }
 
 const elementProto = {
   setAttribute(name, value) {
-    if (name === "oninput" && typeof value === "string") {
-      throw new Error("CSP blocked inline event handler");
-    }
-    if (name === "onclick" && typeof value === "string") {
+    if (typeof name === "string" && typeof value === "string" && name.startsWith("on")) {
       throw new Error("CSP blocked inline event handler");
     }
   },
@@ -32,14 +47,7 @@ const elementProto = {
 
 const sandbox = {
   console,
-  localStorage: {
-    getItem: () => null,
-  },
-  window: {
-    matchMedia: () => ({ matches: false }),
-  },
   document: {
-    documentElement: { classList: { add() {} } },
     createElement() {
       return Object.create(elementProto);
     },
@@ -48,20 +56,14 @@ const sandbox = {
   Element: { prototype: elementProto },
 };
 
-sandbox.window.document = sandbox.document;
 vm.createContext(sandbox);
-vm.runInContext(themeInit, sandbox);
+vm.runInContext(inlineScript, sandbox);
 
-for (const [name, value] of [
-  ["oninput", "return;"],
-  ["onclick", "doSomething()"],
-]) {
-  try {
-    sandbox.document.createElement("div").setAttribute(name, value);
-  } catch (e) {
-    console.error(`Inline handler ${name} was not neutralised:`, e.message);
-    process.exit(1);
-  }
+try {
+  sandbox.document.createElement("div").setAttribute("oninput", "return;");
+} catch (error) {
+  console.error("Inline CSP polyfill failed:", error.message);
+  process.exit(1);
 }
 
-console.log("CSP polyfill blocks inline on* setAttribute probes");
+console.log("CSP polyfill inline script, hash, and nginx policy are in sync");

@@ -1,0 +1,1 @@
+(function(){try{Object.defineProperty(document,"oninput",{value:null,configurable:!0,writable:!0})}catch(e){}var n=Element.prototype.setAttribute;Element.prototype.setAttribute=function(e,t){if(typeof e=="string"&&e.length>2&&e.charCodeAt(0)===111&&e.charCodeAt(1)===110&&typeof t=="string")return;return n.call(this,e,t)}})();

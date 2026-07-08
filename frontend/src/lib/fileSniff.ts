@@ -1,13 +1,13 @@
 /** Magic-byte checks for invoice file preview (MIME headers can lie). */
 
+import {
+  bytesLookLikePdfAt,
+  findPdfStart,
+  hasPdfEofMarker,
+} from "@/lib/pdfBytes";
+
 export function bytesLookLikePdf(bytes: Uint8Array): boolean {
-  return (
-    bytes.length >= 4 &&
-    bytes[0] === 0x25 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x44 &&
-    bytes[3] === 0x46
-  );
+  return bytesLookLikePdfAt(bytes, findPdfStart(bytes));
 }
 
 export function bytesLookLikePng(bytes: Uint8Array): boolean {
@@ -30,12 +30,16 @@ export function bytesLookLikeJpeg(bytes: Uint8Array): boolean {
 
 export type SniffedFileKind = "pdf" | "image" | "invalid-pdf" | "unsupported";
 
+const SNIFF_WINDOW = 4096;
+
 export async function sniffInvoiceBlob(
   blob: Blob,
   displayName: string,
   mimeType: string | null,
 ): Promise<SniffedFileKind> {
-  const header = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const header = new Uint8Array(
+    await blob.slice(0, SNIFF_WINDOW).arrayBuffer(),
+  );
   if (bytesLookLikePdf(header)) return "pdf";
   if (bytesLookLikePng(header) || bytesLookLikeJpeg(header)) return "image";
 
@@ -52,6 +56,11 @@ export async function sniffInvoiceBlob(
           : "");
 
   if (mime.startsWith("image/")) return "image";
-  if (mime.includes("pdf") || lower.endsWith(".pdf")) return "invalid-pdf";
+  if (mime.includes("pdf") || lower.endsWith(".pdf")) {
+    const full = new Uint8Array(await blob.arrayBuffer());
+    return bytesLookLikePdf(full) ? "pdf" : "invalid-pdf";
+  }
   return "unsupported";
 }
+
+export { hasPdfEofMarker };
