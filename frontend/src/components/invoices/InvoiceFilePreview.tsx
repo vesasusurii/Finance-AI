@@ -4,6 +4,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PdfCanvasPreview } from "@/components/invoices/PdfCanvasPreview";
 import {
   fetchInvoiceFile,
+  fetchInvoicePdfPreview,
   fetchInvoicePdfPreviewPage,
   invoiceFileUrl,
 } from "@/api/invoices";
@@ -38,13 +39,21 @@ type ServerPreviewPage = {
   url: string;
 };
 
+function base64ToBlob(dataBase64: string, contentType: string): Blob {
+  const binary = atob(dataBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: contentType });
+}
+
 function ServerPdfPreview({
   invoiceId,
   displayName,
 }: {
   invoiceId: number;
   displayName: string;
-  minHeightClass?: string;
 }) {
   const [pages, setPages] = useState<ServerPreviewPage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,15 +173,18 @@ export function InvoiceFilePreview({
   mimeType = null,
   minHeightClass = "min-h-[420px]",
   className,
+  preferBatchPdfPreview = false,
 }: {
   invoiceId: number;
   displayName: string;
   mimeType?: string | null;
   minHeightClass?: string;
   className?: string;
+  preferBatchPdfPreview?: boolean;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [batchPreviewPages, setBatchPreviewPages] = useState<ServerPreviewPage[]>([]);
   const [previewIsImage, setPreviewIsImage] = useState(false);
   const [previewIsPdf, setPreviewIsPdf] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -181,8 +193,38 @@ export function InvoiceFilePreview({
   const [pdfCanvasError, setPdfCanvasError] = useState(false);
 
   useEffect(() => {
-    let objectUrl: string | null = null;
+    let objectUrls: string[] = [];
     let cancelled = false;
+
+    const createObjectUrl = (blob: Blob) => {
+      const url = URL.createObjectURL(blob);
+      objectUrls.push(url);
+      return url;
+    };
+
+    const loadOriginalPreview = async () => {
+      const blob = await fetchInvoiceFile(invoiceId);
+      if (cancelled) return;
+      const resolvedMime =
+        blob.type || mimeFromName(displayName, mimeType) || "";
+      const image = resolvedMime.startsWith("image/");
+      const pdf = isPdfMime(resolvedMime, displayName);
+
+      setPreviewIsImage(image);
+      setPreviewIsPdf(pdf);
+
+      if (image) {
+        setPreviewUrl(createObjectUrl(blob));
+        return;
+      }
+
+      if (pdf) {
+        const useServerPreview = await shouldUseServerPdfPreview(blob);
+        if (cancelled) return;
+        setPdfCanvasError(useServerPreview);
+        setPreviewBlob(blob);
+      }
+    };
 
     setLoading(true);
     setError(null);
@@ -190,48 +232,58 @@ export function InvoiceFilePreview({
     setPdfCanvasError(false);
     setPreviewUrl(null);
     setPreviewBlob(null);
+    setBatchPreviewPages([]);
     setPreviewIsImage(false);
     setPreviewIsPdf(false);
 
-    void fetchInvoiceFile(invoiceId)
-      .then(async (blob) => {
-        if (cancelled) return;
-        const resolvedMime =
-          blob.type || mimeFromName(displayName, mimeType) || "";
-        const image = resolvedMime.startsWith("image/");
-        const pdf = isPdfMime(resolvedMime, displayName);
+    void (async () => {
+      try {
+        const resolvedMime = mimeFromName(displayName, mimeType) || "";
+        const shouldTryBatchPreview =
+          preferBatchPdfPreview && isPdfMime(resolvedMime, displayName);
 
-        setPreviewIsImage(image);
-        setPreviewIsPdf(pdf);
-
-        if (image) {
-          objectUrl = URL.createObjectURL(blob);
-          setPreviewUrl(objectUrl);
-          return;
+        if (shouldTryBatchPreview) {
+          try {
+            const batch = await fetchInvoicePdfPreview(invoiceId);
+            if (cancelled) return;
+            if (batch.pages.length === 0) {
+              throw new Error("PDF preview returned no pages");
+            }
+            const pages = batch.pages.map((page) => ({
+              pageNumber: page.pageNumber,
+              url: createObjectUrl(
+                base64ToBlob(page.dataBase64, page.contentType),
+              ),
+            }));
+            setPreviewIsPdf(true);
+            setBatchPreviewPages(pages);
+            return;
+          } catch (e: unknown) {
+            console.debug("[invoice-file] batch pdf preview failed", {
+              invoiceId,
+              name: e instanceof Error ? e.name : undefined,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
 
-        if (pdf) {
-          const useServerPreview = await shouldUseServerPdfPreview(blob);
-          if (cancelled) return;
-          setPdfCanvasError(useServerPreview);
-          setPreviewBlob(blob);
-        }
-      })
-      .catch((e: unknown) => {
+        await loadOriginalPreview();
+      } catch (e: unknown) {
         if (cancelled) return;
         setError(
           e instanceof Error ? e.message : "Could not load invoice file",
         );
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      objectUrls = [];
     };
-  }, [displayName, invoiceId, mimeType]);
+  }, [displayName, invoiceId, mimeType, preferBatchPdfPreview]);
 
   const handlePdfCanvasError = useCallback(
     (e: unknown) => {
@@ -256,6 +308,12 @@ export function InvoiceFilePreview({
           ? "FILE"
           : null;
   const canOpen = !loading && !error;
+  const showBatchPdf =
+    !loading &&
+    !error &&
+    batchPreviewPages.length > 0 &&
+    previewIsPdf &&
+    !pdfCanvasError;
   const showImage = !loading && !error && previewUrl !== null && isImage;
   const showPdf =
     !loading &&
@@ -276,7 +334,8 @@ export function InvoiceFilePreview({
     !previewIsImage &&
     !previewIsPdf &&
     previewUrl === null &&
-    previewBlob === null;
+    previewBlob === null &&
+    batchPreviewPages.length === 0;
 
   return (
     <div
@@ -320,7 +379,7 @@ export function InvoiceFilePreview({
             <LoadingSpinner
               size="lg"
               className="text-muted-foreground"
-              label="Loading preview…"
+              label="Loading preview..."
             />
           </div>
         )}
@@ -331,6 +390,19 @@ export function InvoiceFilePreview({
             <p className="max-w-sm text-[13px] text-muted-foreground">
               {error}
             </p>
+          </div>
+        )}
+
+        {showBatchPdf && (
+          <div className="min-h-0 flex-1 overflow-auto p-2">
+            {batchPreviewPages.map((page) => (
+              <img
+                key={page.pageNumber}
+                src={page.url}
+                alt={`${displayName} page ${page.pageNumber}`}
+                className="mx-auto mb-2 block h-auto max-w-full bg-background"
+              />
+            ))}
           </div>
         )}
 
@@ -354,10 +426,7 @@ export function InvoiceFilePreview({
         )}
 
         {showServerPdf && (
-          <ServerPdfPreview
-            invoiceId={invoiceId}
-            displayName={displayName}
-          />
+          <ServerPdfPreview invoiceId={invoiceId} displayName={displayName} />
         )}
 
         {(showUnsupported || showImgError) && (

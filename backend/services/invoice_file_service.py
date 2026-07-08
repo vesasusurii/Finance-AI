@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from core.debug_logger import get_logger
 from core.invoice_access import invoice_owner_user_id
@@ -23,7 +24,11 @@ from utils.pdf_bytes import (
     normalize_pdf_bytes,
 )
 from utils.safe_filename import content_disposition_inline
-from services.ocr.pdf_reader import pdf_page_count, render_pdf_page_jpeg
+from services.ocr.pdf_reader import (
+    pdf_page_count,
+    render_pdf_page_jpeg,
+    render_pdf_pages,
+)
 
 logger = get_logger(__name__)
 
@@ -356,7 +361,7 @@ async def serve_invoice_file_preview_page(
                 "error": "preview_render_failed",
                 "message": (
                     "Could not render this PDF for preview. "
-                    "The stored file may be corrupt — re-upload the invoice."
+                    "The stored file may be corrupt - re-upload the invoice."
                 ),
             },
         ) from exc
@@ -369,3 +374,61 @@ async def serve_invoice_file_preview_page(
     headers["X-Pdf-Page-Count"] = str(total_pages)
     headers["X-Pdf-Page-Number"] = str(page_number)
     return Response(content=jpeg, media_type="image/jpeg", headers=headers)
+
+
+async def serve_invoice_file_preview(
+    invoice_id: int,
+    user: UserContext,
+) -> Response:
+    """Render every PDF page to JPEG in one request for fast review previews."""
+    meta, prepared = await _load_invoice_file_bytes(invoice_id, user)
+    if meta.mime_type != "application/pdf":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_pdf",
+                "message": "Preview pages are only available for PDF invoices.",
+            },
+        )
+
+    try:
+        render_result = render_pdf_pages(
+            prepared,
+            parallel=True,
+            max_dimension=2400,
+            jpeg_quality=85,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Invoice PDF batch preview render failed invoice_id=%s: %s",
+            invoice_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "preview_render_failed",
+                "message": (
+                    "Could not render this PDF for preview. "
+                    "The stored file may be corrupt - re-upload the invoice."
+                ),
+            },
+        ) from exc
+
+    pages = [
+        {
+            "pageNumber": page_number,
+            "contentType": mime,
+            "dataBase64": base64.b64encode(image).decode("ascii"),
+        }
+        for page_number, (image, mime) in zip(
+            render_result.page_numbers,
+            render_result.images,
+            strict=True,
+        )
+    ]
+    headers = {"Cache-Control": "private, max-age=3600"}
+    return JSONResponse(
+        content={"pageCount": len(pages), "pages": pages},
+        headers=headers,
+    )

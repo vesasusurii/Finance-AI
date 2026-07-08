@@ -144,6 +144,7 @@ function BankMatchView({
           key={invoice.id}
           invoiceId={invoice.id}
           invoice={invoice}
+          preferBatchPdfPreview
         />
       </div>
       <BankTransactionCandidatesPanel
@@ -173,6 +174,7 @@ function ExtractionView({
           key={invoice.id}
           invoiceId={invoice.id}
           invoice={invoice}
+          preferBatchPdfPreview
         />
       </div>
       <div className="flex h-full min-h-0 flex-col rounded-lg border border-border bg-card lg:min-h-[960px]">

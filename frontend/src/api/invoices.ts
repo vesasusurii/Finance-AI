@@ -154,6 +154,35 @@ export type InvoicePdfPreviewPage = {
   pageNumber: number;
 };
 
+export type InvoicePdfPreviewBatchPage = {
+  pageNumber: number;
+  contentType: "image/jpeg";
+  dataBase64: string;
+};
+
+export type InvoicePdfPreviewBatch = {
+  pageCount: number;
+  pages: InvoicePdfPreviewBatchPage[];
+};
+
+export async function fetchInvoicePdfPreview(
+  invoiceId: number,
+): Promise<InvoicePdfPreviewBatch> {
+  const path = `/api/invoices/${invoiceId}/file/preview`;
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+  const res = await refreshSessionIfNeeded(await doFetch(), doFetch);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(body.message ?? "Could not render PDF preview");
+  }
+
+  return res.json() as Promise<InvoicePdfPreviewBatch>;
+}
+
 export async function fetchInvoicePdfPreviewPage(
   invoiceId: number,
   pageNumber: number,

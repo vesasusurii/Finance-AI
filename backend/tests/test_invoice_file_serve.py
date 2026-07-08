@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -154,6 +155,102 @@ async def test_serve_invoice_file_preview_page_returns_jpeg() -> None:
     assert response.status_code == 200
     assert response.body == jpeg_bytes
     assert response.media_type == "image/jpeg"
+
+
+@pytest.mark.asyncio
+async def test_serve_invoice_file_preview_returns_all_pages() -> None:
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+    pdf_bytes = b"%PDF-1.4 test %%EOF"
+    render_result = type(
+        "RenderResult",
+        (),
+        {
+            "page_numbers": [1, 2],
+            "images": [
+                (b"\xff\xd8\xff page one", "image/jpeg"),
+                (b"\xff\xd8\xff page two", "image/jpeg"),
+            ],
+        },
+    )()
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_bytes",
+            new=AsyncMock(
+                return_value=(
+                    type(
+                        "Meta",
+                        (),
+                        {
+                            "storage_path": "users/1/file.pdf",
+                            "original_filename": "multi.pdf",
+                            "mime_type": "application/pdf",
+                            "file_size": len(pdf_bytes),
+                        },
+                    )(),
+                    pdf_bytes,
+                )
+            ),
+        ),
+        patch(
+            "services.invoice_file_service.render_pdf_pages",
+            return_value=render_result,
+        ) as mock_render,
+    ):
+        from services.invoice_file_service import serve_invoice_file_preview
+
+        response = await serve_invoice_file_preview(35, user)
+
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert response.media_type == "application/json"
+    assert response.headers["cache-control"] == "private, max-age=3600"
+    assert payload["pageCount"] == 2
+    assert [page["pageNumber"] for page in payload["pages"]] == [1, 2]
+    assert [page["contentType"] for page in payload["pages"]] == [
+        "image/jpeg",
+        "image/jpeg",
+    ]
+    mock_render.assert_called_once_with(
+        pdf_bytes,
+        parallel=True,
+        max_dimension=2400,
+        jpeg_quality=85,
+    )
+
+
+@pytest.mark.asyncio
+async def test_serve_invoice_file_preview_rejects_non_pdf() -> None:
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_bytes",
+            new=AsyncMock(
+                return_value=(
+                    type(
+                        "Meta",
+                        (),
+                        {
+                            "storage_path": "users/1/file.png",
+                            "original_filename": "scan.png",
+                            "mime_type": "image/png",
+                            "file_size": 10,
+                        },
+                    )(),
+                    b"not a pdf",
+                )
+            ),
+        ),
+        patch("services.invoice_file_service.render_pdf_pages") as mock_render,
+    ):
+        from services.invoice_file_service import serve_invoice_file_preview
+
+        with pytest.raises(HTTPException) as exc:
+            await serve_invoice_file_preview(35, user)
+
+    assert exc.value.status_code == 404
+    mock_render.assert_not_called()
 
 
 @pytest.mark.asyncio
