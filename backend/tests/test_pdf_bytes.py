@@ -31,9 +31,17 @@ def test_inspect_pdf_bytes_detects_missing_eof() -> None:
     assert report.likely_truncated
 
 
-def test_has_pdf_eof_marker_scans_entire_file() -> None:
+def test_has_pdf_eof_marker_ignores_marker_outside_tail_window() -> None:
+    """An %%EOF from an earlier PDF revision (incremental update) sitting deep
+    in the file must not mask a truncation that cuts off before the real end."""
+    early_eof = b"%PDF-1.4 body %%EOF"
+    data = early_eof + b"y" * 50_000
+    assert not has_pdf_eof_marker(data)
+
+
+def test_has_pdf_eof_marker_finds_marker_within_tail_window() -> None:
     padding = b"x" * 100_000
-    data = padding + b"%PDF-1.4 body %%EOF" + b"y" * 50_000
+    data = padding + b"%PDF-1.4 body %%EOF"
     assert has_pdf_eof_marker(data)
 
 

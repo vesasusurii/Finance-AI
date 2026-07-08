@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import httpx
 
@@ -65,7 +66,17 @@ class SupabaseStorageBackend(StorageBackend):
         url = self._object_url(storage_path)
         last_mismatch: str | None = None
         for attempt in range(1, _MAX_READ_ATTEMPTS + 1):
-            resp = await self._client.get(url, headers=self._headers())
+            headers = self._headers()
+            request_url = url
+            if attempt > 1:
+                # A prior attempt looked truncated. If a CDN edge cached the
+                # short response, re-requesting the same URL can just hit the
+                # same bad cache entry — bust it so the retry has a chance to
+                # reach a fresh copy.
+                headers["Cache-Control"] = "no-cache"
+                headers["Pragma"] = "no-cache"
+                request_url = f"{url}?cb={attempt}-{time.time_ns()}"
+            resp = await self._client.get(request_url, headers=headers)
             if resp.status_code == 404:
                 raise FileNotFoundError(storage_path)
             if resp.status_code != 200:

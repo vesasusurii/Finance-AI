@@ -43,13 +43,21 @@ def find_pdf_start(data: bytes, *, scan_limit: int = 4096) -> int:
     return idx if idx >= 0 else -1
 
 
-def has_pdf_eof_marker(data: bytes) -> bool:
-    """Return True when %%EOF appears anywhere in the file (PDFs may have multiple)."""
+def has_pdf_eof_marker(data: bytes, *, tail_window: int = 4096) -> bool:
+    """Return True when %%EOF appears near the end of the file.
+
+    Only the tail is checked. Incrementally-updated PDFs (signed, annotated,
+    re-saved) legitimately contain an earlier %%EOF mid-file from a prior
+    revision — scanning the whole file for that byte sequence produced false
+    "complete" reads for downloads truncated after that earlier marker but
+    before the file's real end, letting truncated files slip past retry/
+    validation checks undetected.
+    """
     if not data:
         return False
-    if _EOF_MARKER in data:
+    tail = data[-tail_window:] if len(data) > tail_window else data
+    if _EOF_MARKER in tail:
         return True
-    tail = data[-4096:] if len(data) > 4096 else data
     return b"%EOF" in tail
 
 

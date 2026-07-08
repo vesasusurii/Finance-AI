@@ -292,8 +292,8 @@ async def test_serve_invoice_file_retries_truncated_download() -> None:
 
 @pytest.mark.asyncio
 async def test_serve_invoice_file_gives_up_after_max_retries() -> None:
-    """When every attempt comes back truncated, serve the last attempt rather
-    than retrying forever, but log it loudly (covered by caplog elsewhere)."""
+    """When every attempt comes back truncated, stop retrying and fail loudly
+    (502) rather than silently handing the browser a corrupted PDF."""
     user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
     truncated = b"%PDF-1.4 partial, no trailer"
     full_size = 9999
@@ -320,10 +320,11 @@ async def test_serve_invoice_file_gives_up_after_max_retries() -> None:
         ) as mock_resolve,
         patch("services.invoice_file_service.asyncio.sleep", new=AsyncMock()),
     ):
-        response = await serve_invoice_file(35, user)
+        with pytest.raises(HTTPException) as exc:
+            await serve_invoice_file(35, user)
 
     assert mock_resolve.await_count == 3
-    assert response.body == truncated
+    assert exc.value.status_code == 502
 
 
 @pytest.mark.asyncio

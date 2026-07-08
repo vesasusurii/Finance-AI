@@ -275,7 +275,16 @@ async def _download_verified_bytes(
         meta.file_size,
         len(last_data) if last_data is not None else None,
     )
-    return last_data
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "error": "file_truncated",
+            "message": (
+                "Could not download the invoice file completely after "
+                "multiple attempts. Please try again in a moment."
+            ),
+        },
+    )
 
 
 async def _load_invoice_file_bytes(
