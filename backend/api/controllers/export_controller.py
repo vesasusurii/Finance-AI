@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from core.debug_logger import debug_trace, get_logger
 from core.exceptions import ExportError
 from core.invoice_access import invoice_owner_user_id
+from repositories.bank_statement_repository import BankStatementRepository
 from repositories.invoice_repository import InvoiceRepository
 from schemas.auth import UserContext
 from schemas.report import PeriodReportResponse
@@ -21,10 +22,12 @@ class ExportController:
         excel_service: ExcelService,
         export_service: ExportService,
         invoice_repo: InvoiceRepository,
+        statement_repo: BankStatementRepository,
     ) -> None:
         self._excel = excel_service
         self._export = export_service
         self._invoice_repo = invoice_repo
+        self._statement_repo = statement_repo
 
     @debug_trace
     async def period_report(
@@ -91,7 +94,22 @@ class ExportController:
         category: str | None,
         company: str | None,
         sort: str | None,
+        bank_statement_id: int | None,
     ) -> StreamingResponse:
+        if bank_statement_id is not None:
+            statement = await self._statement_repo.get(
+                bank_statement_id,
+                owner_user_id=invoice_owner_user_id(user),
+            )
+            if statement is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "bank_statement_not_found",
+                        "message": "Bank statement not found.",
+                    },
+                )
+
         filters = {
             k: v
             for k, v in {
@@ -102,6 +120,7 @@ class ExportController:
                 "category": category,
                 "company": company,
                 "sort": sort,
+                "bank_statement_id": bank_statement_id,
             }.items()
             if v is not None
         }
@@ -118,7 +137,10 @@ class ExportController:
             raise ExportError(str(exc)) from exc
 
         stamp = date.today().isoformat()
-        filename = f"purchase_invoices_export_{stamp}.xlsx"
+        if bank_statement_id is not None:
+            filename = f"purchase_invoices_statement_{bank_statement_id}_{stamp}.xlsx"
+        else:
+            filename = f"purchase_invoices_export_{stamp}.xlsx"
         return StreamingResponse(
             iter([data]),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

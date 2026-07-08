@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from core.debug_logger import get_logger
+from models.bank_transaction import BankTransaction
 from models.invoice import Invoice
+from models.invoice_payment_match import InvoicePaymentMatch
 from models.uploaded_file import UploadedFile
 from schemas.invoice import ExtractionResult, InvoiceResponse, InvoiceUpdate
 from sqlalchemy.orm import joinedload
@@ -24,6 +26,8 @@ from utils.normalization import normalize_invoice_number, split_invoice_number
 from utils.search_escape import escape_ilike_pattern
 
 logger = get_logger(__name__)
+
+_CONFIRMED_MATCH_STATUSES = ("matched", "approved")
 
 
 class DuplicateInvoiceNumberError(ValueError):
@@ -326,6 +330,24 @@ class InvoiceRepository:
         if filters.get("category"):
             pattern = f"%{filters['category']}%"
             query = query.where(Invoice.category.ilike(pattern))
+        if filters.get("bank_statement_id") is not None:
+            query = (
+                query.join(
+                    InvoicePaymentMatch,
+                    InvoicePaymentMatch.invoice_id == Invoice.id,
+                )
+                .join(
+                    BankTransaction,
+                    InvoicePaymentMatch.bank_transaction_id == BankTransaction.id,
+                )
+                .where(
+                    BankTransaction.bank_statement_id == filters["bank_statement_id"]
+                )
+                .where(
+                    InvoicePaymentMatch.status.in_(_CONFIRMED_MATCH_STATUSES)
+                )
+                .distinct()
+            )
 
         query = query.order_by(
             *_invoice_order_by_clauses(filters.get("sort"), for_export=True)

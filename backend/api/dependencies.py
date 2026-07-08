@@ -214,8 +214,9 @@ async def get_export_controller(
     excel: ExcelService = Depends(get_excel_service),
     export_service: ExportService = Depends(get_export_service),
     invoice_repo: InvoiceRepository = Depends(get_invoice_repo),
+    statement_repo: BankStatementRepository = Depends(get_bank_statement_repo),
 ) -> ExportController:
-    return ExportController(excel, export_service, invoice_repo)
+    return ExportController(excel, export_service, invoice_repo, statement_repo)
 
 
 async def get_bank_transaction_repo(

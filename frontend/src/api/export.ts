@@ -7,6 +7,7 @@ export type PurchaseInvoicesExportParams = {
   review_status?: string;
   category?: string;
   company?: string;
+  bank_statement_id?: number;
   sort?:
     | "paid_at_date_desc"
     | "paid_at_date_asc"

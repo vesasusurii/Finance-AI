@@ -56,6 +56,7 @@ async def purchase_invoices_excel(
         pattern="^(paid_at_date_desc|paid_at_date_asc|invoice_date_desc|invoice_date_asc)$",
         description="Row order for the export (defaults to paid date, newest first).",
     ),
+    bank_statement_id: int | None = None,
     user: UserContext = Depends(get_current_user),
     ctrl: ExportController = Depends(get_export_controller),
 ) -> StreamingResponse:
@@ -68,4 +69,5 @@ async def purchase_invoices_excel(
         category,
         company,
         sort,
+        bank_statement_id,
     )

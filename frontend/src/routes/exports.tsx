@@ -1,4 +1,4 @@
-import { PurchaseInvoicesExportPanel } from "@/components/reports/PurchaseInvoicesExportPanel";
+import { BankStatementInvoicesExportPanel } from "@/components/reports/BankStatementInvoicesExportPanel";
 import { PageHeader } from "@/components/ui-finance/PageHeader";
 
 export function ExportsPage() {
@@ -7,10 +7,10 @@ export function ExportsPage() {
       <PageHeader
         eyebrow="Workflow · Step 4"
         title="Reports"
-        description="Filtered purchase invoice exports."
+        description="Download purchase invoice exports scoped to a bank statement."
       />
 
-      <PurchaseInvoicesExportPanel />
+      <BankStatementInvoicesExportPanel />
     </div>
   );
 }
