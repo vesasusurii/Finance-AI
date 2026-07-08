@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,15 @@ from utils.safe_filename import content_disposition_inline
 from services.ocr.pdf_reader import pdf_page_count, render_pdf_page_jpeg
 
 logger = get_logger(__name__)
+
+# Supabase's storage CDN occasionally ends a large download mid-stream without
+# raising an HTTP error — seen intermittently on the Azure-hosted backend
+# (never reproduced locally). The client gets a 200 with a shorter-than-expected
+# body and no error, so pdf.js chokes on the missing trailer. Detect that by
+# comparing against the recorded file size / PDF trailer and retry before
+# giving up, instead of silently serving a truncated file.
+_MAX_DOWNLOAD_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.4
 
 
 @dataclass(frozen=True)
@@ -185,6 +195,84 @@ def _binary_response(
     return Response(content=data, media_type=mime_type, headers=headers)
 
 
+def _download_looks_complete(meta: _InvoiceFileMeta, data: bytes) -> bool:
+    if meta.file_size is not None and meta.file_size > 0 and len(data) != meta.file_size:
+        return False
+    if meta.mime_type == "application/pdf":
+        report = inspect_pdf_bytes(data)
+        if report.starts_with_pdf and report.likely_truncated:
+            return False
+    return True
+
+
+async def _download_verified_bytes(
+    invoice_id: int,
+    meta: _InvoiceFileMeta,
+) -> bytes | None:
+    """Fetch storage bytes, retrying when the payload looks truncated.
+
+    Returns None only when the object genuinely does not exist in storage
+    (mirrors `resolve_upload_bytes`'s not-found signal for its local-disk
+    fallback path).
+    """
+    last_data: bytes | None = None
+    for attempt in range(1, _MAX_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            data = await resolve_upload_bytes(meta.storage_path, meta.original_filename)
+        except Exception as exc:  # noqa: BLE001 - retry any transient storage error
+            logger.warning(
+                "Invoice file download raised invoice_id=%s storage_path=%s "
+                "attempt=%s/%s: %s",
+                invoice_id,
+                meta.storage_path,
+                attempt,
+                _MAX_DOWNLOAD_ATTEMPTS,
+                exc,
+            )
+            if attempt < _MAX_DOWNLOAD_ATTEMPTS:
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+                continue
+            raise
+        if data is None:
+            return None
+        last_data = data
+
+        if _download_looks_complete(meta, data):
+            if attempt > 1:
+                logger.info(
+                    "Invoice file download recovered on retry invoice_id=%s "
+                    "attempt=%s size=%s",
+                    invoice_id,
+                    attempt,
+                    len(data),
+                )
+            return data
+
+        logger.warning(
+            "Invoice file download looks truncated invoice_id=%s storage_path=%s "
+            "attempt=%s/%s expected_size=%s received_size=%s",
+            invoice_id,
+            meta.storage_path,
+            attempt,
+            _MAX_DOWNLOAD_ATTEMPTS,
+            meta.file_size,
+            len(data),
+        )
+        if attempt < _MAX_DOWNLOAD_ATTEMPTS:
+            await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+
+    logger.error(
+        "Invoice file download still truncated after %d attempts invoice_id=%s "
+        "storage_path=%s expected_size=%s received_size=%s",
+        _MAX_DOWNLOAD_ATTEMPTS,
+        invoice_id,
+        meta.storage_path,
+        meta.file_size,
+        len(last_data) if last_data is not None else None,
+    )
+    return last_data
+
+
 async def _load_invoice_file_bytes(
     invoice_id: int,
     user: UserContext,
@@ -195,7 +283,7 @@ async def _load_invoice_file_bytes(
         owner_user_id=invoice_owner_user_id(user),
     )
 
-    data = await resolve_upload_bytes(meta.storage_path, meta.original_filename)
+    data = await _download_verified_bytes(invoice_id, meta)
     if data is None:
         file_path = resolve_upload_path(meta.storage_path, meta.original_filename)
         if file_path is None:

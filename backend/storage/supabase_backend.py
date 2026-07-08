@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 
 from config import settings
@@ -5,6 +7,14 @@ from core.debug_logger import get_logger
 from storage.base import StorageBackend
 from storage.helpers import encode_storage_path
 logger = get_logger(__name__)
+
+# Downloads occasionally get cut short mid-stream (seen intermittently on the
+# Azure-hosted backend's outbound path to Supabase, not locally) while still
+# reporting HTTP 200 — httpx does not always raise when a chunked response is
+# terminated early. When the server told us how many bytes to expect via
+# Content-Length, cross-check the body we actually received and retry.
+_MAX_READ_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.3
 
 
 class SupabaseStorageBackend(StorageBackend):
@@ -53,14 +63,32 @@ class SupabaseStorageBackend(StorageBackend):
 
     async def read(self, storage_path: str) -> bytes:
         url = self._object_url(storage_path)
-        resp = await self._client.get(url, headers=self._headers())
-        if resp.status_code == 404:
-            raise FileNotFoundError(storage_path)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Storage download failed ({resp.status_code}): {resp.text[:200]}"
-            )
-        return resp.content
+        last_mismatch: str | None = None
+        for attempt in range(1, _MAX_READ_ATTEMPTS + 1):
+            resp = await self._client.get(url, headers=self._headers())
+            if resp.status_code == 404:
+                raise FileNotFoundError(storage_path)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"Storage download failed ({resp.status_code}): {resp.text[:200]}"
+                )
+
+            content = resp.content
+            declared = resp.headers.get("content-length")
+            declared_len = int(declared) if declared and declared.isdigit() else None
+            if declared_len is not None and len(content) != declared_len:
+                last_mismatch = (
+                    f"declared={declared_len} received={len(content)} "
+                    f"path={storage_path} attempt={attempt}"
+                )
+                logger.warning("Supabase storage download truncated: %s", last_mismatch)
+                if attempt < _MAX_READ_ATTEMPTS:
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+                    continue
+                raise RuntimeError(f"Storage download truncated: {last_mismatch}")
+            return content
+
+        raise RuntimeError(f"Storage download truncated: {last_mismatch}")
 
     async def delete(self, storage_path: str) -> None:
         url = self._object_url(storage_path)

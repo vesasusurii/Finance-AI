@@ -153,6 +153,79 @@ async def test_serve_invoice_file_preview_page_returns_jpeg() -> None:
 
 
 @pytest.mark.asyncio
+async def test_serve_invoice_file_retries_truncated_download() -> None:
+    """Supabase's storage occasionally returns a short body with HTTP 200
+    (seen only on the Azure-hosted backend). Serving must retry rather than
+    hand the browser a truncated PDF."""
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+    truncated = b"%PDF-1.4 partial, no trailer"
+    full = b"%PDF-1.4 full body %%EOF"
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_meta",
+            new=AsyncMock(
+                return_value=type(
+                    "Meta",
+                    (),
+                    {
+                        "storage_path": "users/1/file.pdf",
+                        "original_filename": "invoice.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size": len(full),
+                    },
+                )()
+            ),
+        ),
+        patch(
+            "services.invoice_file_service.resolve_upload_bytes",
+            new=AsyncMock(side_effect=[truncated, full]),
+        ) as mock_resolve,
+        patch("services.invoice_file_service.asyncio.sleep", new=AsyncMock()),
+    ):
+        response = await serve_invoice_file(35, user)
+
+    assert mock_resolve.await_count == 2
+    assert response.body == full
+
+
+@pytest.mark.asyncio
+async def test_serve_invoice_file_gives_up_after_max_retries() -> None:
+    """When every attempt comes back truncated, serve the last attempt rather
+    than retrying forever, but log it loudly (covered by caplog elsewhere)."""
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+    truncated = b"%PDF-1.4 partial, no trailer"
+    full_size = 9999
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_meta",
+            new=AsyncMock(
+                return_value=type(
+                    "Meta",
+                    (),
+                    {
+                        "storage_path": "users/1/file.pdf",
+                        "original_filename": "invoice.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size": full_size,
+                    },
+                )()
+            ),
+        ),
+        patch(
+            "services.invoice_file_service.resolve_upload_bytes",
+            new=AsyncMock(return_value=truncated),
+        ) as mock_resolve,
+        patch("services.invoice_file_service.asyncio.sleep", new=AsyncMock()),
+    ):
+        response = await serve_invoice_file(35, user)
+
+    assert mock_resolve.await_count == 3
+    assert response.body == truncated
+
+
+@pytest.mark.asyncio
 async def test_serve_invoice_file_not_found() -> None:
     user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
 
