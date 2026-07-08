@@ -34,11 +34,10 @@ type ServerPreviewPage = {
 function ServerPdfPreview({
   invoiceId,
   displayName,
-  minHeightClass,
 }: {
   invoiceId: number;
   displayName: string;
-  minHeightClass: string;
+  minHeightClass?: string;
 }) {
   const [pages, setPages] = useState<ServerPreviewPage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,21 +101,21 @@ function ServerPdfPreview({
 
   if (loading && pages.length === 0) {
     return (
-      <LoadingSpinner
-        centered
-        size="lg"
-        className="text-muted-foreground"
-        label="Rendering PDF preview..."
-        containerClassName={cn(minHeightClass, "py-0")}
-      />
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/30">
+        <LoadingSpinner
+          centered
+          size="lg"
+          className="text-muted-foreground"
+          label="Rendering PDF preview..."
+          containerClassName="py-8"
+        />
+      </div>
     );
   }
 
   if (error && pages.length === 0) {
     return (
-      <div
-        className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
-      >
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
         <p className="text-[13px] text-muted-foreground">{error}</p>
         <a
           href={invoiceFileUrl(invoiceId)}
@@ -131,13 +130,13 @@ function ServerPdfPreview({
   }
 
   return (
-    <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
+    <div className="min-h-0 flex-1 overflow-auto p-2">
       {pages.map((page) => (
         <img
           key={page.pageNumber}
           src={page.url}
           alt={`${displayName} page ${page.pageNumber}`}
-          className="mx-auto mb-2 h-auto max-w-full bg-background"
+          className="mx-auto mb-2 block h-auto max-w-full bg-background"
         />
       ))}
       {loading && pages.length > 0 && (
@@ -272,7 +271,7 @@ export function InvoiceFilePreview({
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-lg border border-border bg-card",
+        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
         minHeightClass,
         className,
       )}
@@ -305,21 +304,19 @@ export function InvoiceFilePreview({
         </div>
       </div>
 
-      <div className="relative min-h-[400px] flex-1 overflow-hidden bg-muted/30">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30">
         {loading && (
-          <LoadingSpinner
-            centered
-            size="lg"
-            className="text-muted-foreground"
-            label="Loading preview…"
-            containerClassName={cn(minHeightClass, "py-0")}
-          />
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-muted/30">
+            <LoadingSpinner
+              size="lg"
+              className="text-muted-foreground"
+              label="Loading preview…"
+            />
+          </div>
         )}
 
         {!loading && error && (
-          <div
-            className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
-          >
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
             <FileText className="h-10 w-10 text-muted-foreground/40" />
             <p className="max-w-sm text-[13px] text-muted-foreground">
               {error}
@@ -328,11 +325,11 @@ export function InvoiceFilePreview({
         )}
 
         {showImage && (
-          <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
+          <div className="min-h-0 flex-1 overflow-auto p-2">
             <img
               src={previewUrl}
               alt={displayName}
-              className="mx-auto h-auto max-w-full object-contain"
+              className="mx-auto block h-auto max-w-full object-contain"
               onError={() => setImgError(true)}
             />
           </div>
@@ -341,8 +338,7 @@ export function InvoiceFilePreview({
         {showPdf && previewBlob && (
           <PdfCanvasPreview
             blob={previewBlob}
-            minHeightClass={minHeightClass}
-            className="h-full"
+            className="min-h-0"
             onError={handlePdfCanvasError}
           />
         )}
@@ -351,14 +347,11 @@ export function InvoiceFilePreview({
           <ServerPdfPreview
             invoiceId={invoiceId}
             displayName={displayName}
-            minHeightClass={minHeightClass}
           />
         )}
 
         {(showUnsupported || showImgError) && (
-          <div
-            className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
-          >
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
             <p className="text-[13px] text-muted-foreground">
               Preview unavailable for this file type.
             </p>

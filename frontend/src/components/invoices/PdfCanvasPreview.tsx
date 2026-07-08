@@ -4,6 +4,21 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import "@/lib/pdfjs";
 
+async function waitForContainerWidth(
+  container: HTMLElement,
+  timeoutMs = 4000,
+): Promise<number> {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const width = container.clientWidth;
+    if (width > 0) return width;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }
+  return container.clientWidth || 600;
+}
+
 export function PdfCanvasPreview({
   blob,
   className,
@@ -36,7 +51,7 @@ export function PdfCanvasPreview({
           // Avoid eval/new Function in the worker (CSP script-src 'self').
           isEvalSupported: false,
         }).promise;
-        const containerWidth = container.clientWidth || 600;
+        const containerWidth = await waitForContainerWidth(container);
 
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
           if (cancelled) return;
@@ -67,6 +82,11 @@ export function PdfCanvasPreview({
           if (cancelled) return;
           container.appendChild(canvas);
         }
+
+        // Force a layout pass so canvases paint without needing a scroll nudge.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
       } catch (e: unknown) {
         if (!cancelled) {
           setError(
@@ -87,26 +107,26 @@ export function PdfCanvasPreview({
   return (
     <div
       className={cn(
-        "relative overflow-auto p-2",
+        "relative min-h-0 flex-1 overflow-auto p-2",
         minHeightClass,
         className,
       )}
     >
       {rendering && (
-        <LoadingSpinner
-          centered
-          size="lg"
-          className="text-muted-foreground"
-          label="Rendering PDF…"
-          containerClassName={cn(minHeightClass, "py-0")}
-        />
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-muted/30">
+          <LoadingSpinner
+            size="lg"
+            className="text-muted-foreground"
+            label="Rendering PDF…"
+          />
+        </div>
       )}
       {error && !rendering && (
         <p className="px-4 py-6 text-center text-[13px] text-muted-foreground">
           {error}
         </p>
       )}
-      <div ref={containerRef} className={rendering ? "invisible h-0" : undefined} />
+      <div ref={containerRef} />
     </div>
   );
 }

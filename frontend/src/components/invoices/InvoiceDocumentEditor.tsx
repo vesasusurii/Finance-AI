@@ -208,6 +208,7 @@ export function InvoiceDocumentEditor({
           }
           mimeType={invoice.source_mime_type}
           minHeightClass="min-h-[280px] sm:min-h-[360px] lg:min-h-0"
+          className="min-h-0 lg:h-full"
         />
       ) : (
         <div className="flex min-h-[280px] flex-col overflow-hidden rounded-lg border border-border bg-card sm:min-h-[360px] lg:min-h-0">

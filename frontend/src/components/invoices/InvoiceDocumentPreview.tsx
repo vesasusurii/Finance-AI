@@ -85,7 +85,7 @@ export function InvoiceDocumentPreview({
   const canPreview = Boolean(invoice.source_file_id);
 
   return (
-    <div className="flex min-h-[960px] flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card lg:min-h-[960px]">
       <div className="shrink-0 border-b border-border px-4 py-3">
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -123,17 +123,16 @@ export function InvoiceDocumentPreview({
         </dl>
       </div>
 
-      <div className="relative min-h-[960px] flex-1">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         {canPreview ? (
           <InvoiceFilePreview
             invoiceId={invoice.id}
             displayName={displayName}
             mimeType={invoice.source_mime_type}
-            minHeightClass="min-h-[960px]"
-            className="h-[960px] rounded-none border-0 border-t border-border"
+            className="min-h-0 flex-1 rounded-none border-0 border-t border-border"
           />
         ) : (
-          <div className="flex h-[960px] flex-col items-center justify-center gap-2 px-6 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
             <p className="text-[13px] text-muted-foreground">
               No source file attached to this invoice.
             </p>

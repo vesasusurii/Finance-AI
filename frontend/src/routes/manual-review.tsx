@@ -138,8 +138,8 @@ function BankMatchView({
 }) {
   const { invoice, task } = entry;
   return (
-    <div className="grid min-h-[calc(100vh-14rem)] grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
-      <div className="flex h-full min-h-[960px] flex-col lg:min-h-0">
+    <div className="grid min-h-0 grid-cols-1 items-stretch gap-4 lg:min-h-[calc(100vh-14rem)] lg:grid-cols-2">
+      <div className="flex h-full min-h-0 flex-col lg:min-h-[960px]">
         <InvoiceDocumentPreview
           key={invoice.id}
           invoiceId={invoice.id}
@@ -167,15 +167,15 @@ function ExtractionView({
   if (!task) return null;
 
   return (
-    <div className="grid min-h-[calc(100vh-14rem)] grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
-      <div className="flex h-full min-h-[960px] flex-col lg:min-h-0">
+    <div className="grid min-h-0 grid-cols-1 items-stretch gap-4 lg:min-h-[calc(100vh-14rem)] lg:grid-cols-2">
+      <div className="flex h-full min-h-0 flex-col lg:min-h-[960px]">
         <InvoiceDocumentPreview
           key={invoice.id}
           invoiceId={invoice.id}
           invoice={invoice}
         />
       </div>
-      <div className="flex h-full min-h-[960px] flex-col rounded-lg border border-border bg-card lg:min-h-0">
+      <div className="flex h-full min-h-0 flex-col rounded-lg border border-border bg-card lg:min-h-[960px]">
         <div className="border-b border-border px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold text-foreground">
