@@ -22,7 +22,7 @@ from utils.pdf_bytes import (
     normalize_pdf_bytes,
 )
 from utils.safe_filename import content_disposition_inline
-from services.ocr.pdf_reader import render_pdf_page_jpeg
+from services.ocr.pdf_reader import pdf_page_count, render_pdf_page_jpeg
 
 logger = get_logger(__name__)
 
@@ -245,6 +245,7 @@ async def serve_invoice_file_preview_page(
         )
 
     try:
+        total_pages = pdf_page_count(prepared)
         jpeg = render_pdf_page_jpeg(prepared, page_number)
     except IndexError:
         raise HTTPException(
@@ -277,4 +278,6 @@ async def serve_invoice_file_preview_page(
     )
     headers["Content-Length"] = str(len(jpeg))
     headers["Cache-Control"] = "private, max-age=3600"
+    headers["X-Pdf-Page-Count"] = str(total_pages)
+    headers["X-Pdf-Page-Number"] = str(page_number)
     return Response(content=jpeg, media_type="image/jpeg", headers=headers)

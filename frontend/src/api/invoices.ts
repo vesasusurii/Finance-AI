@@ -229,7 +229,13 @@ export async function fetchInvoicePreviewPages(
   invoiceId: number,
 ): Promise<Blob[]> {
   const pages: Blob[] = [];
+  let totalPages: number | null = null;
+
   for (let page = 1; page <= MAX_PREVIEW_PAGES; page++) {
+    if (totalPages !== null && page > totalPages) {
+      break;
+    }
+
     const res = await fetch(invoiceFilePreviewPageUrl(invoiceId, page), {
       credentials: "include",
     });
@@ -243,6 +249,17 @@ export async function fetchInvoicePreviewPages(
       }
       break;
     }
+
+    if (page === 1) {
+      const countHeader = res.headers.get("X-Pdf-Page-Count");
+      if (countHeader) {
+        const parsed = Number.parseInt(countHeader, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          totalPages = parsed;
+        }
+      }
+    }
+
     pages.push(await res.blob());
   }
   return pages;
