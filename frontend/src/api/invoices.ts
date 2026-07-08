@@ -1,5 +1,4 @@
 import { apiFetch } from "./client";
-import { inspectPdfBlob, logPdfByteReport } from "@/lib/pdfBytes";
 import type {
   Invoice,
   InvoiceFilters,
@@ -11,25 +10,26 @@ import type { MatchListResponse } from "../types/match";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
-export type InvoiceFileFetchMeta = {
-  invoiceId: number;
-  status: number;
-  contentType: string | null;
-  contentDisposition: string | null;
-  blobSize: number;
-  blobType: string;
-};
+async function refreshSessionIfNeeded(
+  res: Response,
+  retry: () => Promise<Response>,
+): Promise<Response> {
+  if (res.status !== 401) {
+    return res;
+  }
 
-function logInvoiceFileFetch(meta: InvoiceFileFetchMeta): void {
-  console.info("[invoice-file] loaded", meta);
-}
+  const body = (await res.clone().json().catch(() => ({}))) as {
+    error?: string;
+  };
+  if (body.error !== "token_expired" && body.error !== "invalid_token") {
+    return res;
+  }
 
-function logInvoiceFileError(
-  invoiceId: number,
-  message: string,
-  meta?: Partial<InvoiceFileFetchMeta>,
-): void {
-  console.error("[invoice-file] failed", { invoiceId, message, ...meta });
+  const refresh = await fetch(`${API_BASE}/api/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return refresh.ok ? retry() : res;
 }
 
 function blobFromResponse(res: Response): Promise<Blob> {
@@ -39,10 +39,7 @@ function blobFromResponse(res: Response): Promise<Blob> {
       return blob;
     }
     const baseType = contentType.split(";")[0]?.trim();
-    if (!baseType) {
-      return blob;
-    }
-    return new Blob([blob], { type: baseType });
+    return baseType ? new Blob([blob], { type: baseType }) : blob;
   });
 }
 
@@ -129,82 +126,21 @@ export async function deleteInvoice(id: number): Promise<void> {
 /**
  * Fetch invoice source file with session cookies (for preview blob URLs).
  */
-export async function fetchInvoiceFile(
-  invoiceId: number,
-): Promise<Blob> {
+export async function fetchInvoiceFile(invoiceId: number): Promise<Blob> {
   const path = `/api/invoices/${invoiceId}/file`;
   const doFetch = () =>
     fetch(`${API_BASE}${path}`, { credentials: "include" });
 
-  let res = await doFetch();
-
-  if (res.status === 401) {
-    const body = (await res.clone().json().catch(() => ({}))) as {
-      error?: string;
-    };
-    if (body.error === "token_expired" || body.error === "invalid_token") {
-      const refresh = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (refresh.ok) {
-        res = await doFetch();
-      }
-    }
-  }
-
-  const headerMeta = {
-    invoiceId,
-    status: res.status,
-    contentType: res.headers.get("content-type"),
-    contentDisposition: res.headers.get("content-disposition"),
-  };
+  const res = await refreshSessionIfNeeded(await doFetch(), doFetch);
 
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as {
       message?: string;
     };
-    logInvoiceFileError(invoiceId, body.message ?? "Could not load invoice file", {
-      ...headerMeta,
-      blobSize: 0,
-      blobType: "",
-    });
     throw new Error(body.message ?? "Could not load invoice file");
   }
 
-  const blob = await blobFromResponse(res);
-  const meta: InvoiceFileFetchMeta = {
-    ...headerMeta,
-    blobSize: blob.size,
-    blobType: blob.type,
-  };
-  logInvoiceFileFetch(meta);
-
-  if (blob.size === 0) {
-    logInvoiceFileError(invoiceId, "Invoice file response was empty", meta);
-    throw new Error("Invoice file is empty");
-  }
-
-  if (
-    (meta.contentType ?? "").includes("pdf") ||
-    blob.type.includes("pdf")
-  ) {
-    const report = await inspectPdfBlob(blob);
-    logPdfByteReport("fetch", invoiceId, report, {
-      contentType: meta.contentType,
-      contentDisposition: meta.contentDisposition,
-    });
-    if (!report.startsWithPdf) {
-      logInvoiceFileError(
-        invoiceId,
-        "Response is not a valid PDF (missing %PDF header)",
-        meta,
-      );
-      throw new Error("Invoice file is not a valid PDF");
-    }
-  }
-
-  return blob;
+  return blobFromResponse(res);
 }
 
 /** Direct URL — only works when the browser sends session cookies (e.g. Open link). */
@@ -212,55 +148,41 @@ export function invoiceFileUrl(invoiceId: number): string {
   return `${API_BASE}/api/invoices/${invoiceId}/file`;
 }
 
-/** Server-rendered JPEG for one PDF page (pypdfium2). */
-export function invoiceFilePreviewPageUrl(
+export type InvoicePdfPreviewPage = {
+  blob: Blob;
+  pageCount: number;
+  pageNumber: number;
+};
+
+export async function fetchInvoicePdfPreviewPage(
   invoiceId: number,
   pageNumber: number,
-): string {
-  return `${API_BASE}/api/invoices/${invoiceId}/file/preview/${pageNumber}`;
-}
+): Promise<InvoicePdfPreviewPage> {
+  const path = `/api/invoices/${invoiceId}/file/preview/${pageNumber}`;
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, { credentials: "include" });
 
-const MAX_PREVIEW_PAGES = 50;
-
-/**
- * Fetch server-rendered JPEG pages until the API returns 404 (no more pages).
- */
-export async function fetchInvoicePreviewPages(
-  invoiceId: number,
-): Promise<Blob[]> {
-  const pages: Blob[] = [];
-  let totalPages: number | null = null;
-
-  for (let page = 1; page <= MAX_PREVIEW_PAGES; page++) {
-    if (totalPages !== null && page > totalPages) {
-      break;
-    }
-
-    const res = await fetch(invoiceFilePreviewPageUrl(invoiceId, page), {
-      credentials: "include",
-    });
-    if (res.status === 404) {
-      break;
-    }
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { message?: string };
-      if (page === 1) {
-        throw new Error(body.message ?? "Could not render PDF preview");
-      }
-      break;
-    }
-
-    if (page === 1) {
-      const countHeader = res.headers.get("X-Pdf-Page-Count");
-      if (countHeader) {
-        const parsed = Number.parseInt(countHeader, 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-          totalPages = parsed;
-        }
-      }
-    }
-
-    pages.push(await res.blob());
+  const res = await refreshSessionIfNeeded(await doFetch(), doFetch);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(body.message ?? "Could not render PDF preview");
   }
-  return pages;
+
+  const blob = await blobFromResponse(res);
+  const headerPageCount = Number(res.headers.get("x-pdf-page-count"));
+  const headerPageNumber = Number(res.headers.get("x-pdf-page-number"));
+
+  return {
+    blob: blob.type ? blob : new Blob([blob], { type: "image/jpeg" }),
+    pageCount:
+      Number.isFinite(headerPageCount) && headerPageCount > 0
+        ? headerPageCount
+        : pageNumber,
+    pageNumber:
+      Number.isFinite(headerPageNumber) && headerPageNumber > 0
+        ? headerPageNumber
+        : pageNumber,
+  };
 }

@@ -139,6 +139,10 @@ async def test_serve_invoice_file_preview_page_returns_jpeg() -> None:
             ),
         ),
         patch(
+            "services.invoice_file_service.pdf_page_count",
+            return_value=1,
+        ),
+        patch(
             "services.invoice_file_service.render_pdf_page_jpeg",
             return_value=jpeg_bytes,
         ),

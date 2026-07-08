@@ -517,32 +517,6 @@ class InvoiceExtractionService:
         if not validate_content_matches_mime(content, mime):
             raise ExtractionError(mime_validation_error(mime))
 
-        if mime == "application/pdf":
-            from services.ocr.pdf_reader import pdf_page_count
-
-            try:
-                page_count = pdf_page_count(content)
-            except Exception as exc:
-                logger.error(
-                    "Upload rejected: PDF unreadable filename=%r size=%d: %s",
-                    file.filename,
-                    len(content),
-                    exc,
-                )
-                raise ExtractionError(
-                    "This PDF could not be read. Re-save or re-export the file and upload again."
-                ) from exc
-            if page_count < 1:
-                raise ExtractionError(
-                    "This PDF has no pages. Re-export the file and upload again."
-                )
-            logger.debug(
-                "Upload PDF validated: filename=%r pages=%d size=%d",
-                file.filename,
-                page_count,
-                len(content),
-            )
-
         content_hash = sha256_hex(content) if settings.ocr_cache_enabled else None
         if content_hash is not None:
             existing = await self._handle_duplicate_upload(

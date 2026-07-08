@@ -1,8 +1,9 @@
 import hashlib
+import mimetypes
 from datetime import date
 
 from fastapi import HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 
 from core.cache import cache
 from core.debug_logger import debug_trace, get_logger
@@ -30,7 +31,8 @@ from schemas.invoice import (
 )
 from services.invoice_extraction_service import InvoiceExtractionService
 from utils.invoice_currency import CurrencyConversionError
-from services.invoice_file_service import serve_invoice_file
+from utils.file_storage import resolve_upload_bytes, resolve_upload_path
+from utils.safe_filename import content_disposition_inline
 from utils.user_display import approver_paid_by
 
 logger = get_logger(__name__)
@@ -385,4 +387,70 @@ class InvoiceController:
         return InvoiceApproveResponse(id=invoice.id, review_status=invoice.review_status)
 
     async def serve_file(self, invoice_id: int, user: UserContext) -> Response:
-        return await serve_invoice_file(invoice_id, user)
+        owner = invoice_owner_user_id(user)
+        row = await self._invoice_repo.get_owned_row(invoice_id, owner_user_id=owner)
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "invoice_not_found",
+                    "message": "Invoice not found.",
+                },
+            )
+        if not row.source_file_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "no_source_file",
+                    "message": "No source file attached to this invoice.",
+                },
+            )
+
+        upload = row.source_file
+        if not upload:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "file_record_missing",
+                    "message": "File record not found.",
+                },
+            )
+
+        mime = (
+            upload.mime_type
+            or mimetypes.guess_type(upload.original_filename)[0]
+            or "application/octet-stream"
+        )
+
+        data = await resolve_upload_bytes(
+            upload.storage_path,
+            upload.original_filename,
+        )
+        if data is None:
+            file_path = resolve_upload_path(
+                upload.storage_path,
+                upload.original_filename,
+            )
+            if file_path is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "file_missing",
+                        "message": (
+                            "Original file is not available in storage. "
+                            "Re-upload the invoice to attach a new copy."
+                        ),
+                    },
+                )
+            return FileResponse(
+                path=str(file_path),
+                media_type=mime,
+                filename=upload.original_filename,
+                headers=content_disposition_inline(upload.original_filename),
+            )
+
+        return Response(
+            content=data,
+            media_type=mime,
+            headers=content_disposition_inline(upload.original_filename),
+        )

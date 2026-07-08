@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { PdfCanvasPreview } from "@/components/invoices/PdfCanvasPreview";
-import { fetchInvoiceFile, invoiceFileUrl } from "@/api/invoices";
-import { sniffInvoiceBlob } from "@/lib/fileSniff";
+import {
+  fetchInvoiceFile,
+  fetchInvoicePdfPreviewPage,
+  invoiceFileUrl,
+} from "@/api/invoices";
 import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
@@ -15,11 +18,138 @@ function mimeFromName(name: string, fallback: string | null): string | null {
   return null;
 }
 
-function pdfPreviewBlob(blob: Blob): Blob {
-  if (blob.type === "application/pdf") {
-    return blob;
+function isPdfMime(mime: string, displayName: string): boolean {
+  return (
+    mime === "application/pdf" ||
+    mime.includes("pdf") ||
+    displayName.toLowerCase().endsWith(".pdf")
+  );
+}
+
+type ServerPreviewPage = {
+  pageNumber: number;
+  url: string;
+};
+
+function ServerPdfPreview({
+  invoiceId,
+  displayName,
+  minHeightClass,
+}: {
+  invoiceId: number;
+  displayName: string;
+  minHeightClass: string;
+}) {
+  const [pages, setPages] = useState<ServerPreviewPage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const objectUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const revokeObjectUrls = () => {
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      objectUrlsRef.current = [];
+    };
+
+    setPages([]);
+    setLoading(true);
+    setError(null);
+    revokeObjectUrls();
+
+    void (async () => {
+      try {
+        console.info("[invoice-file] trying server pdf preview", { invoiceId });
+        const first = await fetchInvoicePdfPreviewPage(invoiceId, 1);
+        const nextPages: ServerPreviewPage[] = [];
+
+        const addPage = (page: typeof first) => {
+          const url = URL.createObjectURL(page.blob);
+          objectUrlsRef.current.push(url);
+          nextPages.push({ pageNumber: page.pageNumber, url });
+          if (!cancelled) setPages([...nextPages]);
+        };
+
+        addPage(first);
+        for (let pageNumber = 2; pageNumber <= first.pageCount; pageNumber++) {
+          if (cancelled) return;
+          addPage(await fetchInvoicePdfPreviewPage(invoiceId, pageNumber));
+        }
+
+        if (!cancelled) {
+          console.info("[invoice-file] server pdf preview rendered", {
+            invoiceId,
+            pageCount: first.pageCount,
+          });
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Could not render PDF preview",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      revokeObjectUrls();
+    };
+  }, [invoiceId]);
+
+  if (loading && pages.length === 0) {
+    return (
+      <LoadingSpinner
+        centered
+        size="lg"
+        className="text-muted-foreground"
+        label="Rendering PDF preview..."
+        containerClassName={cn(minHeightClass, "py-0")}
+      />
+    );
   }
-  return new Blob([blob], { type: "application/pdf" });
+
+  if (error && pages.length === 0) {
+    return (
+      <div
+        className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
+      >
+        <p className="text-[13px] text-muted-foreground">{error}</p>
+        <a
+          href={invoiceFileUrl(invoiceId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[12px] text-primary hover:underline"
+        >
+          Open file in new tab
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
+      {pages.map((page) => (
+        <img
+          key={page.pageNumber}
+          src={page.url}
+          alt={`${displayName} page ${page.pageNumber}`}
+          className="mx-auto mb-2 h-auto max-w-full bg-background"
+        />
+      ))}
+      {loading && pages.length > 0 && (
+        <LoadingSpinner
+          centered
+          size="sm"
+          className="py-4 text-muted-foreground"
+          label="Rendering pages..."
+        />
+      )}
+    </div>
+  );
 }
 
 export function InvoiceFilePreview({
@@ -39,56 +169,43 @@ export function InvoiceFilePreview({
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewIsImage, setPreviewIsImage] = useState(false);
   const [previewIsPdf, setPreviewIsPdf] = useState(false);
-  const [previewInvalidPdf, setPreviewInvalidPdf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
-  const imageRef = useRef<HTMLImageElement>(null);
-  const objectUrlRef = useRef<string | null>(null);
+  const [pdfCanvasError, setPdfCanvasError] = useState(false);
 
   useEffect(() => {
+    let objectUrl: string | null = null;
     let cancelled = false;
-
-    const revokeObjectUrl = () => {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-    };
 
     setLoading(true);
     setError(null);
     setImgError(false);
+    setPdfCanvasError(false);
     setPreviewUrl(null);
     setPreviewBlob(null);
     setPreviewIsImage(false);
     setPreviewIsPdf(false);
-    setPreviewInvalidPdf(false);
-    revokeObjectUrl();
 
     void fetchInvoiceFile(invoiceId)
-      .then(async (blob) => {
+      .then((blob) => {
         if (cancelled) return;
-        const kind = await sniffInvoiceBlob(blob, displayName, mimeType);
+        const resolvedMime =
+          blob.type || mimeFromName(displayName, mimeType) || "";
+        const image = resolvedMime.startsWith("image/");
+        const pdf = isPdfMime(resolvedMime, displayName);
 
-        setPreviewIsImage(kind === "image");
-        setPreviewIsPdf(kind === "pdf");
-        setPreviewInvalidPdf(kind === "invalid-pdf");
+        setPreviewIsImage(image);
+        setPreviewIsPdf(pdf);
 
-        if (kind === "image") {
-          const imageBlob = blob.type.startsWith("image/")
-            ? blob
-            : new Blob([blob], {
-                type: mimeFromName(displayName, mimeType) ?? "image/png",
-              });
-          const objectUrl = URL.createObjectURL(imageBlob);
-          objectUrlRef.current = objectUrl;
+        if (image) {
+          objectUrl = URL.createObjectURL(blob);
           setPreviewUrl(objectUrl);
           return;
         }
 
-        if (kind === "pdf") {
-          setPreviewBlob(pdfPreviewBlob(blob));
+        if (pdf) {
+          setPreviewBlob(blob);
         }
       })
       .catch((e: unknown) => {
@@ -103,17 +220,21 @@ export function InvoiceFilePreview({
 
     return () => {
       cancelled = true;
-      revokeObjectUrl();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [displayName, invoiceId, mimeType]);
 
-  useEffect(() => {
-    const image = imageRef.current;
-    if (!image || !previewUrl) return;
-    const onError = () => setImgError(true);
-    image.addEventListener("error", onError);
-    return () => image.removeEventListener("error", onError);
-  }, [previewUrl]);
+  const handlePdfCanvasError = useCallback(
+    (e: unknown) => {
+      console.warn("[invoice-file] pdf.js preview failed", {
+        invoiceId,
+        name: e instanceof Error ? e.name : undefined,
+        message: e instanceof Error ? e.message : String(e),
+      });
+      setPdfCanvasError(true);
+    },
+    [invoiceId],
+  );
 
   const resolvedMime = mimeFromName(displayName, mimeType);
   const isImage = previewIsImage && resolvedMime?.startsWith("image/") && !imgError;
@@ -127,8 +248,17 @@ export function InvoiceFilePreview({
           : null;
   const canOpen = !loading && !error;
   const showImage = !loading && !error && previewUrl !== null && isImage;
-  const showPdf = !loading && !error && previewBlob !== null && previewIsPdf;
-  const showInvalidPdf = !loading && !error && previewInvalidPdf;
+  const showPdf =
+    !loading &&
+    !error &&
+    previewBlob !== null &&
+    previewIsPdf &&
+    !pdfCanvasError;
+  const showServerPdf =
+    !loading &&
+    !error &&
+    previewIsPdf &&
+    pdfCanvasError;
   const showImgError =
     !loading && !error && previewIsImage && imgError && previewUrl !== null;
   const showUnsupported =
@@ -200,32 +330,37 @@ export function InvoiceFilePreview({
         {showImage && (
           <div className={`h-full ${minHeightClass} overflow-auto p-2`}>
             <img
-              ref={imageRef}
               src={previewUrl}
               alt={displayName}
               className="mx-auto h-auto max-w-full object-contain"
+              onError={() => setImgError(true)}
             />
           </div>
         )}
 
-        {showPdf && (
+        {showPdf && previewBlob && (
           <PdfCanvasPreview
             blob={previewBlob}
-            invoiceId={invoiceId}
-            fileUrl={invoiceFileUrl(invoiceId)}
             minHeightClass={minHeightClass}
             className="h-full"
+            onError={handlePdfCanvasError}
           />
         )}
 
-        {(showUnsupported || showImgError || showInvalidPdf) && (
+        {showServerPdf && (
+          <ServerPdfPreview
+            invoiceId={invoiceId}
+            displayName={displayName}
+            minHeightClass={minHeightClass}
+          />
+        )}
+
+        {(showUnsupported || showImgError) && (
           <div
             className={`flex ${minHeightClass} flex-col items-center justify-center gap-2 px-6 text-center`}
           >
             <p className="text-[13px] text-muted-foreground">
-              {showInvalidPdf
-                ? "This file could not be read as a PDF. It may be corrupt or saved in an unsupported format."
-                : "Preview unavailable for this file type."}
+              Preview unavailable for this file type.
             </p>
             <a
               href={invoiceFileUrl(invoiceId)}
