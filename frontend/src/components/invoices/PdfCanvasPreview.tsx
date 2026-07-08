@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AnnotationMode, getDocument } from "pdfjs-dist";
+import { AnnotationMode, VerbosityLevel, getDocument } from "pdfjs-dist";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn } from "@/lib/utils";
 import "@/lib/pdfjs";
@@ -48,6 +48,7 @@ export function PdfCanvasPreview({
         const data = await blob.arrayBuffer();
         const pdf = await getDocument({
           data,
+          verbosity: VerbosityLevel.ERRORS,
           // Avoid eval/new Function in the worker (CSP script-src 'self').
           isEvalSupported: false,
         }).promise;

@@ -7,6 +7,7 @@ import {
   fetchInvoicePdfPreviewPage,
   invoiceFileUrl,
 } from "@/api/invoices";
+import { hasPdfTailMarkers } from "@/lib/pdfBytes";
 import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
@@ -24,6 +25,12 @@ function isPdfMime(mime: string, displayName: string): boolean {
     mime.includes("pdf") ||
     displayName.toLowerCase().endsWith(".pdf")
   );
+}
+
+async function shouldUseServerPdfPreview(blob: Blob): Promise<boolean> {
+  const tailStart = Math.max(0, blob.size - 8192);
+  const tail = new Uint8Array(await blob.slice(tailStart).arrayBuffer());
+  return !hasPdfTailMarkers(tail);
 }
 
 type ServerPreviewPage = {
@@ -59,7 +66,7 @@ function ServerPdfPreview({
 
     void (async () => {
       try {
-        console.info("[invoice-file] trying server pdf preview", { invoiceId });
+        console.debug("[invoice-file] trying server pdf preview", { invoiceId });
         const first = await fetchInvoicePdfPreviewPage(invoiceId, 1);
         const nextPages: ServerPreviewPage[] = [];
 
@@ -77,7 +84,7 @@ function ServerPdfPreview({
         }
 
         if (!cancelled) {
-          console.info("[invoice-file] server pdf preview rendered", {
+          console.debug("[invoice-file] server pdf preview rendered", {
             invoiceId,
             pageCount: first.pageCount,
           });
@@ -187,7 +194,7 @@ export function InvoiceFilePreview({
     setPreviewIsPdf(false);
 
     void fetchInvoiceFile(invoiceId)
-      .then((blob) => {
+      .then(async (blob) => {
         if (cancelled) return;
         const resolvedMime =
           blob.type || mimeFromName(displayName, mimeType) || "";
@@ -204,6 +211,9 @@ export function InvoiceFilePreview({
         }
 
         if (pdf) {
+          const useServerPreview = await shouldUseServerPdfPreview(blob);
+          if (cancelled) return;
+          setPdfCanvasError(useServerPreview);
           setPreviewBlob(blob);
         }
       })
@@ -225,7 +235,7 @@ export function InvoiceFilePreview({
 
   const handlePdfCanvasError = useCallback(
     (e: unknown) => {
-      console.warn("[invoice-file] pdf.js preview failed", {
+      console.debug("[invoice-file] pdf.js preview failed", {
         invoiceId,
         name: e instanceof Error ? e.name : undefined,
         message: e instanceof Error ? e.message : String(e),
