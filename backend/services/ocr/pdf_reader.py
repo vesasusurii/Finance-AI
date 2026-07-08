@@ -45,6 +45,32 @@ def pdf_page_count(content: bytes) -> int:
 
 
 @debug_trace
+def render_pdf_page_jpeg(
+    content: bytes,
+    page_number: int,
+    *,
+    scale: float = 1.5,
+    max_dimension: int = 2400,
+    jpeg_quality: int = 85,
+) -> bytes:
+    """Render a single PDF page (1-based) to JPEG bytes for inline preview."""
+    if page_number < 1:
+        raise ValueError("page_number must be >= 1")
+    doc = pdfium.PdfDocument(content)
+    try:
+        if page_number > len(doc):
+            raise IndexError(f"page {page_number} out of range (document has {len(doc)} pages)")
+        return _page_to_jpeg(
+            doc[page_number - 1],
+            scale=scale,
+            max_dimension=max_dimension,
+            jpeg_quality=jpeg_quality,
+        )
+    finally:
+        doc.close()
+
+
+@debug_trace
 def pdf_is_encrypted(content: bytes) -> bool:
     """Return True only when the PDF genuinely requires a password to open."""
     try:

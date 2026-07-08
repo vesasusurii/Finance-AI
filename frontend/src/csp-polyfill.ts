@@ -34,4 +34,18 @@
     }
     nativeSetAttribute.call(this, name, value);
   };
+
+  const nativeSetAttributeNS = Element.prototype.setAttributeNS;
+  if (nativeSetAttributeNS) {
+    Element.prototype.setAttributeNS = function (
+      namespace: string | null,
+      name: string,
+      value: string,
+    ): void {
+      if (isInlineEventHandlerAttribute(name, value)) {
+        return;
+      }
+      nativeSetAttributeNS.call(this, namespace, name, value);
+    };
+  }
 })();

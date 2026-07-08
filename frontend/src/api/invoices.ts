@@ -211,3 +211,39 @@ export async function fetchInvoiceFile(
 export function invoiceFileUrl(invoiceId: number): string {
   return `${API_BASE}/api/invoices/${invoiceId}/file`;
 }
+
+/** Server-rendered JPEG for one PDF page (pypdfium2). */
+export function invoiceFilePreviewPageUrl(
+  invoiceId: number,
+  pageNumber: number,
+): string {
+  return `${API_BASE}/api/invoices/${invoiceId}/file/preview/${pageNumber}`;
+}
+
+const MAX_PREVIEW_PAGES = 50;
+
+/**
+ * Fetch server-rendered JPEG pages until the API returns 404 (no more pages).
+ */
+export async function fetchInvoicePreviewPages(
+  invoiceId: number,
+): Promise<Blob[]> {
+  const pages: Blob[] = [];
+  for (let page = 1; page <= MAX_PREVIEW_PAGES; page++) {
+    const res = await fetch(invoiceFilePreviewPageUrl(invoiceId, page), {
+      credentials: "include",
+    });
+    if (res.status === 404) {
+      break;
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      if (page === 1) {
+        throw new Error(body.message ?? "Could not render PDF preview");
+      }
+      break;
+    }
+    pages.push(await res.blob());
+  }
+  return pages;
+}

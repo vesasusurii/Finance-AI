@@ -7,12 +7,19 @@ import {
 } from "pdfjs-dist";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import {
+  fetchInvoicePreviewPages,
+  invoiceFileUrl,
+} from "@/api/invoices";
+import {
+  hasPdfTailMarkers,
   inspectPdfBlob,
   logPdfByteReport,
   normalizePdfBytes,
 } from "@/lib/pdfBytes";
 import { cn } from "@/lib/utils";
 import "@/lib/pdfjs";
+
+type PreviewMode = "canvas" | "server" | "native" | "failed";
 
 export function PdfCanvasPreview({
   blob,
@@ -25,10 +32,7 @@ export function PdfCanvasPreview({
   invoiceId?: number;
   /**
    * Direct same-origin endpoint for the source file (e.g.
-   * /api/invoices/{id}/file). Preferred for the native fallback viewer because
-   * the browser sends session cookies automatically and the server supplies
-   * Content-Type/Content-Length, which Chrome's PDF viewer handles far more
-   * reliably than a blob: URL.
+   * /api/invoices/{id}/file). Used only as a last-resort native viewer.
    */
   fileUrl?: string;
   className?: string;
@@ -38,9 +42,19 @@ export function PdfCanvasPreview({
   const fallbackWrapperRef = useRef<HTMLDivElement>(null);
   const [rendering, setRendering] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [nativeUrl, setNativeUrl] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("canvas");
+  const [serverPageUrls, setServerPageUrls] = useState<string[]>([]);
+  const [likelyCorrupt, setLikelyCorrupt] = useState(false);
   const [fallbackUnavailable, setFallbackUnavailable] = useState(false);
-  const nativeUrlRef = useRef<string | null>(null);
+  const objectUrlsRef = useRef<string[]>([]);
+
+  const revokeObjectUrls = () => {
+    for (const url of objectUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    objectUrlsRef.current = [];
+    setServerPageUrls([]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -48,21 +62,16 @@ export function PdfCanvasPreview({
     const container = containerRef.current;
     if (!container) return;
 
-    const revokeNativeUrl = () => {
-      if (nativeUrlRef.current) {
-        URL.revokeObjectURL(nativeUrlRef.current);
-        nativeUrlRef.current = null;
-      }
-      setNativeUrl(null);
-    };
-
     container.replaceChildren();
     setRendering(true);
     setError(null);
+    setPreviewMode("canvas");
+    setLikelyCorrupt(false);
     setFallbackUnavailable(false);
-    revokeNativeUrl();
+    revokeObjectUrls();
 
     void (async () => {
+      let hasStandardEof = false;
       try {
         const report = await inspectPdfBlob(blob);
         if (invoiceId != null) {
@@ -77,6 +86,12 @@ export function PdfCanvasPreview({
 
         const raw = new Uint8Array(await blob.arrayBuffer());
         const data = normalizePdfBytes(raw);
+        hasStandardEof = report.hasEofMarker;
+
+        if (!report.hasEofMarker && !hasPdfTailMarkers(data)) {
+          setLikelyCorrupt(true);
+        }
+
         const pdfBytes = new Uint8Array(data);
 
         loadingTask = getDocument({
@@ -125,34 +140,61 @@ export function PdfCanvasPreview({
           container.appendChild(canvas);
         }
       } catch (e: unknown) {
-        if (!cancelled) {
-          const name = e instanceof Error ? e.name : "Error";
-          const message =
-            e instanceof Error ? e.message : "Could not render PDF preview";
-          // pdf.js throws named exceptions (InvalidPDFException,
-          // PasswordException, UnknownErrorException). Print them inline so the
-          // real cause is visible without expanding the console object.
-          console.warn(
-            `[invoice-file] pdf.js preview failed: ${name} — ${message}`,
-            { invoiceId, name, message },
-          );
-          setError(message);
+        if (cancelled) return;
 
-          const fallbackUrl = URL.createObjectURL(
-            blob.type === "application/pdf"
-              ? blob
-              : new Blob([await blob.arrayBuffer()], { type: "application/pdf" }),
-          );
-          nativeUrlRef.current = fallbackUrl;
-          setNativeUrl(fallbackUrl);
+        const name = e instanceof Error ? e.name : "Error";
+        const message =
+          e instanceof Error ? e.message : "Could not render PDF preview";
+        console.warn(
+          `[invoice-file] pdf.js preview failed: ${name} — ${message}`,
+          { invoiceId, name, message },
+        );
+        setError(message);
+
+        if (invoiceId != null) {
+          try {
+            console.info("[invoice-file] trying server pdf preview", {
+              invoiceId,
+            });
+            const pageBlobs = await fetchInvoicePreviewPages(invoiceId);
+            if (cancelled) return;
+            if (pageBlobs.length > 0) {
+              const urls = pageBlobs.map((pageBlob) => {
+                const url = URL.createObjectURL(pageBlob);
+                objectUrlsRef.current.push(url);
+                return url;
+              });
+              setServerPageUrls(urls);
+              setPreviewMode("server");
+              console.info("[invoice-file] server pdf preview rendered", {
+                invoiceId,
+                pageCount: urls.length,
+              });
+              return;
+            }
+          } catch (serverErr: unknown) {
+            const serverMessage =
+              serverErr instanceof Error
+                ? serverErr.message
+                : "Server preview failed";
+            console.warn("[invoice-file] server pdf preview failed", {
+              invoiceId,
+              message: serverMessage,
+            });
+          }
+        }
+
+        if (fileUrl && hasStandardEof) {
+          setPreviewMode("native");
           console.info("[invoice-file] native pdf fallback engaged", {
             invoiceId,
-            nativeUrl: fallbackUrl,
-            isBlobUrl: fallbackUrl.startsWith("blob:"),
-            blobSize: blob.size,
-            blobType: blob.type,
+            viewerSrc: fileUrl,
+            usingDirectUrl: true,
           });
+          return;
         }
+
+        setPreviewMode("failed");
       } finally {
         if (!cancelled) setRendering(false);
       }
@@ -161,16 +203,13 @@ export function PdfCanvasPreview({
     return () => {
       cancelled = true;
       loadingTask?.destroy();
-      revokeNativeUrl();
+      revokeObjectUrls();
     };
-  }, [blob, invoiceId]);
+  }, [blob, fileUrl, invoiceId]);
 
-  // Prefer the direct same-origin endpoint (cookies + server Content-Type) for
-  // the native viewer; fall back to the blob: URL only when no fileUrl is given.
-  const hasValidBlobUrl = Boolean(nativeUrl && nativeUrl.startsWith("blob:"));
-  const viewerSrc = fileUrl ?? (hasValidBlobUrl ? nativeUrl : null);
-  const usingDirectUrl = Boolean(fileUrl);
-  const showNativeFallback = Boolean(error && viewerSrc);
+  const showServerPreview = previewMode === "server" && serverPageUrls.length > 0;
+  const showNativeFallback = previewMode === "native" && Boolean(fileUrl);
+  const viewerSrc = fileUrl ?? null;
 
   useEffect(() => {
     if (!showNativeFallback) return;
@@ -181,7 +220,6 @@ export function PdfCanvasPreview({
     console.info("[invoice-file] native pdf fallback layout", {
       invoiceId,
       viewerSrc,
-      usingDirectUrl,
       showNativeFallback,
       width,
       height,
@@ -192,7 +230,9 @@ export function PdfCanvasPreview({
         { invoiceId, height },
       );
     }
-  }, [showNativeFallback, invoiceId, viewerSrc, usingDirectUrl]);
+  }, [showNativeFallback, invoiceId, viewerSrc]);
+
+  const openUrl = viewerSrc ?? (invoiceId != null ? invoiceFileUrl(invoiceId) : null);
 
   return (
     <div
@@ -211,6 +251,36 @@ export function PdfCanvasPreview({
           containerClassName={cn(minHeightClass, "py-0")}
         />
       )}
+
+      {showServerPreview && (
+        <div className={cn("flex flex-col gap-2", minHeightClass)}>
+          <p className="px-4 pt-2 text-center text-[12px] text-muted-foreground">
+            Browser preview is unavailable for this PDF. Showing a server-rendered
+            copy instead.
+          </p>
+          {serverPageUrls.map((url, index) => (
+            <img
+              key={url}
+              src={url}
+              alt={`Invoice page ${index + 1}`}
+              className="mx-auto mb-2 block max-w-full"
+            />
+          ))}
+          {openUrl && (
+            <div className="px-4 pb-2 text-center">
+              <a
+                href={openUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] text-primary hover:underline"
+              >
+                Open original file
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       {showNativeFallback && (
         <div
           ref={fallbackWrapperRef}
@@ -221,18 +291,17 @@ export function PdfCanvasPreview({
               Inline canvas preview is unavailable for this PDF. Showing the
               browser viewer instead.
             </p>
-            <a
-              href={viewerSrc ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[12px] text-primary hover:underline"
-            >
-              Open in new tab
-            </a>
+            {openUrl && (
+              <a
+                href={openUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] text-primary hover:underline"
+              >
+                Open in new tab
+              </a>
+            )}
           </div>
-          {/* iframe against the same-origin endpoint: cookies are sent and the
-              server sets Content-Type/Content-Length, which Chrome's PDF viewer
-              renders reliably (unlike blob:). CSP allows this via frame-src 'self'. */}
           <iframe
             key={viewerSrc ?? "pdf-fallback"}
             src={viewerSrc ?? undefined}
@@ -246,27 +315,54 @@ export function PdfCanvasPreview({
               console.info("[invoice-file] native pdf iframe rendered", {
                 invoiceId,
                 viewerSrc,
-                usingDirectUrl,
               });
             }}
             onError={() => setFallbackUnavailable(true)}
           />
           {fallbackUnavailable && (
             <p className="px-4 pb-2 text-center text-[12px] text-destructive">
-              The browser could not display this PDF. Use “Open in new tab”
-              above to view or download it.
+              The browser could not display this PDF.
+              {likelyCorrupt
+                ? " The stored file appears corrupt — re-upload the invoice."
+                : " Use “Open in new tab” above to view or download it."}
             </p>
           )}
         </div>
       )}
-      {error && !showNativeFallback && !rendering && (
+
+      {previewMode === "failed" && !rendering && (
+        <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+          <p className="text-[13px] text-muted-foreground">
+            {likelyCorrupt
+              ? "This PDF appears corrupt or incomplete in storage. Re-upload the invoice to restore preview."
+              : (error ?? "Could not render PDF preview.")}
+          </p>
+          {openUrl && (
+            <a
+              href={openUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[12px] text-primary hover:underline"
+            >
+              Open original file
+            </a>
+          )}
+        </div>
+      )}
+
+      {error && previewMode === "canvas" && !rendering && (
         <p className="px-4 py-6 text-center text-[13px] text-muted-foreground">
           {error}
         </p>
       )}
+
       <div
         ref={containerRef}
-        className={rendering || showNativeFallback ? "invisible h-0" : undefined}
+        className={
+          rendering || showServerPreview || showNativeFallback
+            ? "invisible h-0"
+            : undefined
+        }
       />
     </div>
   );

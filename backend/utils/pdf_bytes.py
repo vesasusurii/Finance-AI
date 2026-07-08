@@ -27,7 +27,11 @@ class PdfByteReport:
 
     @property
     def likely_truncated(self) -> bool:
-        return self.starts_with_pdf and not self.has_eof_marker and self.size > 0
+        return (
+            self.starts_with_pdf
+            and self.size > 0
+            and not self.has_eof_marker
+        )
 
 
 def find_pdf_start(data: bytes, *, scan_limit: int = 4096) -> int:
@@ -40,11 +44,23 @@ def find_pdf_start(data: bytes, *, scan_limit: int = 4096) -> int:
 
 
 def has_pdf_eof_marker(data: bytes) -> bool:
-    """Return True when %%EOF appears in the file (PDFs may have multiple)."""
+    """Return True when %%EOF appears anywhere in the file (PDFs may have multiple)."""
     if not data:
         return False
-    tail = data[-65536:] if len(data) > 65536 else data
-    return _EOF_MARKER in tail
+    if _EOF_MARKER in data:
+        return True
+    tail = data[-4096:] if len(data) > 4096 else data
+    return b"%EOF" in tail
+
+
+def has_pdf_tail_markers(data: bytes) -> bool:
+    """Return True when the file tail looks like a finished PDF."""
+    if not data:
+        return False
+    if has_pdf_eof_marker(data):
+        return True
+    tail = data[-8192:] if len(data) > 8192 else data
+    return b"startxref" in tail
 
 
 def normalize_pdf_bytes(data: bytes) -> bytes:

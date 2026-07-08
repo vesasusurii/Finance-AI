@@ -114,6 +114,45 @@ async def test_serve_invoice_file_rejects_html_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_serve_invoice_file_preview_page_returns_jpeg() -> None:
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+    pdf_bytes = b"%PDF-1.4 test %%EOF"
+    jpeg_bytes = b"\xff\xd8\xff fake jpeg"
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_bytes",
+            new=AsyncMock(
+                return_value=(
+                    type(
+                        "Meta",
+                        (),
+                        {
+                            "storage_path": "users/1/file.pdf",
+                            "original_filename": "20260629_Deloitte.pdf",
+                            "mime_type": "application/pdf",
+                            "file_size": len(pdf_bytes),
+                        },
+                    )(),
+                    pdf_bytes,
+                )
+            ),
+        ),
+        patch(
+            "services.invoice_file_service.render_pdf_page_jpeg",
+            return_value=jpeg_bytes,
+        ),
+    ):
+        from services.invoice_file_service import serve_invoice_file_preview_page
+
+        response = await serve_invoice_file_preview_page(35, 1, user)
+
+    assert response.status_code == 200
+    assert response.body == jpeg_bytes
+    assert response.media_type == "image/jpeg"
+
+
+@pytest.mark.asyncio
 async def test_serve_invoice_file_not_found() -> None:
     user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
 

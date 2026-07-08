@@ -54,10 +54,29 @@ export function bytesLookLikePdfAt(bytes: Uint8Array, offset = 0): boolean {
 
 export function hasPdfEofMarker(bytes: Uint8Array): boolean {
   if (bytes.length === 0) return false;
-  const tail = bytes.subarray(Math.max(0, bytes.length - 65536));
   const marker = [0x25, 0x25, 0x45, 0x4f, 0x46]; // %%EOF
-  for (let i = 0; i <= tail.length - marker.length; i++) {
-    if (marker.every((b, j) => tail[i + j] === b)) {
+  for (let i = 0; i <= bytes.length - marker.length; i++) {
+    if (marker.every((b, j) => bytes[i + j] === b)) {
+      return true;
+    }
+  }
+  const tail = bytes.subarray(Math.max(0, bytes.length - 4096));
+  const singleEof = [0x25, 0x45, 0x4f, 0x46]; // %EOF
+  for (let i = 0; i <= tail.length - singleEof.length; i++) {
+    if (singleEof.every((b, j) => tail[i + j] === b)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function hasPdfTailMarkers(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return false;
+  if (hasPdfEofMarker(bytes)) return true;
+  const tail = bytes.subarray(Math.max(0, bytes.length - 8192));
+  const startxref = [0x73, 0x74, 0x61, 0x72, 0x74, 0x78, 0x72, 0x65, 0x66]; // startxref
+  for (let i = 0; i <= tail.length - startxref.length; i++) {
+    if (startxref.every((b, j) => tail[i + j] === b)) {
       return true;
     }
   }

@@ -5,7 +5,10 @@ from fastapi.responses import Response
 
 from api.controllers.invoice_controller import InvoiceController
 from api.dependencies import get_current_user, get_invoice_controller
-from services.invoice_file_service import serve_invoice_file
+from services.invoice_file_service import (
+    serve_invoice_file,
+    serve_invoice_file_preview_page,
+)
 from schemas.auth import UserContext
 from schemas.invoice import (
     InvoiceApproveResponse,
@@ -114,6 +117,16 @@ async def list_invoice_matches(
     ctrl: InvoiceController = Depends(get_invoice_controller),
 ):
     return await ctrl.list_matches(invoice_id, user)
+
+
+@router.get("/{invoice_id}/file/preview/{page_number}")
+async def get_invoice_file_preview_page(
+    invoice_id: int,
+    page_number: int,
+    user: UserContext = Depends(get_current_user),
+) -> Response:
+    """Render one PDF page as JPEG when browser/pdf.js preview fails."""
+    return await serve_invoice_file_preview_page(invoice_id, page_number, user)
 
 
 @router.get("/{invoice_id}/file")

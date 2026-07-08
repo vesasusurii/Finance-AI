@@ -31,6 +31,12 @@ def test_inspect_pdf_bytes_detects_missing_eof() -> None:
     assert report.likely_truncated
 
 
+def test_has_pdf_eof_marker_scans_entire_file() -> None:
+    padding = b"x" * 100_000
+    data = padding + b"%PDF-1.4 body %%EOF" + b"y" * 50_000
+    assert has_pdf_eof_marker(data)
+
+
 def test_looks_like_html_or_json() -> None:
     assert looks_like_html_or_json(b'{"error":"nope"}')
     assert looks_like_html_or_json(b"<!DOCTYPE html><html></html>")

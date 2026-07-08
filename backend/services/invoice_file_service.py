@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -21,6 +22,7 @@ from utils.pdf_bytes import (
     normalize_pdf_bytes,
 )
 from utils.safe_filename import content_disposition_inline
+from services.ocr.pdf_reader import render_pdf_page_jpeg
 
 logger = get_logger(__name__)
 
@@ -183,8 +185,11 @@ def _binary_response(
     return Response(content=data, media_type=mime_type, headers=headers)
 
 
-async def serve_invoice_file(invoice_id: int, user: UserContext) -> Response:
-    """Return raw invoice bytes with inline Content-Disposition."""
+async def _load_invoice_file_bytes(
+    invoice_id: int,
+    user: UserContext,
+) -> tuple[_InvoiceFileMeta, bytes]:
+    """Load and validate invoice file bytes from storage."""
     meta = await _load_invoice_file_meta(
         invoice_id,
         owner_user_id=invoice_owner_user_id(user),
@@ -207,8 +212,69 @@ async def serve_invoice_file(invoice_id: int, user: UserContext) -> Response:
         data = file_path.read_bytes()
 
     prepared = _prepare_serve_bytes(invoice_id, meta, data)
+    return meta, prepared
+
+
+async def serve_invoice_file(invoice_id: int, user: UserContext) -> Response:
+    """Return raw invoice bytes with inline Content-Disposition."""
+    meta, prepared = await _load_invoice_file_bytes(invoice_id, user)
     return _binary_response(
         prepared,
         mime_type=meta.mime_type,
         filename=meta.original_filename,
     )
+
+
+async def serve_invoice_file_preview_page(
+    invoice_id: int,
+    page_number: int,
+    user: UserContext,
+) -> Response:
+    """Render one PDF page to JPEG for preview when client-side viewers fail."""
+    if page_number < 1:
+        raise HTTPException(status_code=404, detail={"error": "page_not_found"})
+
+    meta, prepared = await _load_invoice_file_bytes(invoice_id, user)
+    if meta.mime_type != "application/pdf":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_pdf",
+                "message": "Preview pages are only available for PDF invoices.",
+            },
+        )
+
+    try:
+        jpeg = render_pdf_page_jpeg(prepared, page_number)
+    except IndexError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "page_not_found",
+                "message": f"Page {page_number} does not exist in this PDF.",
+            },
+        ) from None
+    except Exception as exc:
+        logger.warning(
+            "Invoice PDF preview render failed invoice_id=%s page=%s: %s",
+            invoice_id,
+            page_number,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "preview_render_failed",
+                "message": (
+                    "Could not render this PDF for preview. "
+                    "The stored file may be corrupt — re-upload the invoice."
+                ),
+            },
+        ) from exc
+
+    headers = content_disposition_inline(
+        f"{Path(meta.original_filename).stem}_p{page_number}.jpg"
+    )
+    headers["Content-Length"] = str(len(jpeg))
+    headers["Cache-Control"] = "private, max-age=3600"
+    return Response(content=jpeg, media_type="image/jpeg", headers=headers)
