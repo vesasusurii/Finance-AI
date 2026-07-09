@@ -18,11 +18,11 @@ function seedIsComplete(invoice: Invoice | undefined): boolean {
 export function InvoiceDocumentPreview({
   invoiceId,
   invoice: initialInvoice,
-  preferBatchPdfPreview = false,
 }: {
   invoiceId: number;
   /** Optional seed from list/review API; refreshed in the background when present. */
   invoice?: Invoice;
+  /** Kept for callers from the newer preview flow; the restored bdfc211 loader ignores it. */
   preferBatchPdfPreview?: boolean;
 }) {
   const [invoice, setInvoice] = useState<Invoice | null>(initialInvoice ?? null);
@@ -131,8 +131,8 @@ export function InvoiceDocumentPreview({
             invoiceId={invoice.id}
             displayName={displayName}
             mimeType={invoice.source_mime_type}
+            minHeightClass="min-h-[480px]"
             className="min-h-0 flex-1 rounded-none border-0 border-t border-border"
-            preferBatchPdfPreview={preferBatchPdfPreview}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
