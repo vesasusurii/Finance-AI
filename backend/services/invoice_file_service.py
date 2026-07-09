@@ -268,23 +268,15 @@ async def _download_verified_bytes(
 
     logger.error(
         "Invoice file download still truncated after %d attempts invoice_id=%s "
-        "storage_path=%s expected_size=%s received_size=%s",
+        "storage_path=%s expected_size=%s received_size=%s — serving best-effort "
+        "rather than failing the request outright",
         _MAX_DOWNLOAD_ATTEMPTS,
         invoice_id,
         meta.storage_path,
         meta.file_size,
         len(last_data) if last_data is not None else None,
     )
-    raise HTTPException(
-        status_code=502,
-        detail={
-            "error": "file_truncated",
-            "message": (
-                "Could not download the invoice file completely after "
-                "multiple attempts. Please try again in a moment."
-            ),
-        },
-    )
+    return last_data
 
 
 async def _load_invoice_file_bytes(
