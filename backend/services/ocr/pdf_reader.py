@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -16,6 +17,16 @@ from core.debug_logger import debug_trace, get_logger
 logger = get_logger(__name__)
 
 RenderStrategy = Literal["sequential", "parallel"]
+
+# PDFium is not thread-safe: it must not be called from more than one thread
+# at a time, even across separate PdfDocument instances (confirmed by the
+# pypdfium2 maintainers: https://github.com/pypdfium2-team/pypdfium2/issues/303).
+# _render_parallel_indices below runs page renders on a ThreadPoolExecutor for
+# throughput, so every actual pdfium call must be serialized through this lock
+# — without it, concurrent renders can silently produce corrupted/partially
+# -painted bitmaps (seen as pages that render gray/cut off, worse under the
+# heavier thread contention of production than on an idle local machine).
+_PDFIUM_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -37,11 +48,12 @@ class PdfRenderResult:
 
 @debug_trace
 def pdf_page_count(content: bytes) -> int:
-    doc = pdfium.PdfDocument(content)
-    try:
-        return len(doc)
-    finally:
-        doc.close()
+    with _PDFIUM_LOCK:
+        doc = pdfium.PdfDocument(content)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
 
 
 @debug_trace
@@ -56,26 +68,28 @@ def render_pdf_page_jpeg(
     """Render a single PDF page (1-based) to JPEG bytes for inline preview."""
     if page_number < 1:
         raise ValueError("page_number must be >= 1")
-    doc = pdfium.PdfDocument(content)
-    try:
-        if page_number > len(doc):
-            raise IndexError(f"page {page_number} out of range (document has {len(doc)} pages)")
-        return _page_to_jpeg(
-            doc[page_number - 1],
-            scale=scale,
-            max_dimension=max_dimension,
-            jpeg_quality=jpeg_quality,
-        )
-    finally:
-        doc.close()
+    with _PDFIUM_LOCK:
+        doc = pdfium.PdfDocument(content)
+        try:
+            if page_number > len(doc):
+                raise IndexError(f"page {page_number} out of range (document has {len(doc)} pages)")
+            return _page_to_jpeg(
+                doc[page_number - 1],
+                scale=scale,
+                max_dimension=max_dimension,
+                jpeg_quality=jpeg_quality,
+            )
+        finally:
+            doc.close()
 
 
 @debug_trace
 def pdf_is_encrypted(content: bytes) -> bool:
     """Return True only when the PDF genuinely requires a password to open."""
     try:
-        doc = pdfium.PdfDocument(content)
-        doc.close()
+        with _PDFIUM_LOCK:
+            doc = pdfium.PdfDocument(content)
+            doc.close()
         return False
     except Exception as exc:
         msg = str(exc).lower()
@@ -107,19 +121,22 @@ def _render_page_at_index(
     max_dimension: int,
     jpeg_quality: int,
 ) -> tuple[int, bytes, str]:
-    """Render one PDF page — opens its own document handle (thread-safe)."""
-    doc = pdfium.PdfDocument(content)
-    try:
-        jpeg_bytes = _page_to_jpeg(
-            doc[index],
-            scale=scale,
-            max_dimension=max_dimension,
-            jpeg_quality=jpeg_quality,
-        )
-        logger.debug("  rendered page %d: %d bytes scale=%.2f", index + 1, len(jpeg_bytes), scale)
-        return index, jpeg_bytes, "image/jpeg"
-    finally:
-        doc.close()
+    """Render one PDF page. Opens its own document handle, but pdfium itself is
+    not thread-safe (not even across separate documents), so the actual calls
+    are still serialized via _PDFIUM_LOCK when run from the thread pool."""
+    with _PDFIUM_LOCK:
+        doc = pdfium.PdfDocument(content)
+        try:
+            jpeg_bytes = _page_to_jpeg(
+                doc[index],
+                scale=scale,
+                max_dimension=max_dimension,
+                jpeg_quality=jpeg_quality,
+            )
+            logger.debug("  rendered page %d: %d bytes scale=%.2f", index + 1, len(jpeg_bytes), scale)
+            return index, jpeg_bytes, "image/jpeg"
+        finally:
+            doc.close()
 
 
 def _render_sequential_indices(
@@ -131,29 +148,30 @@ def _render_sequential_indices(
     max_dimension: int,
     jpeg_quality: int,
 ) -> list[tuple[int, tuple[bytes, str]]]:
-    doc = pdfium.PdfDocument(content)
-    try:
-        out: list[tuple[int, tuple[bytes, str]]] = []
-        for index in page_indices:
-            page_num = index + 1
-            scale = page_scales.get(page_num, default_scale)
-            jpeg_bytes = _page_to_jpeg(
-                doc[index],
-                scale=scale,
-                max_dimension=max_dimension,
-                jpeg_quality=jpeg_quality,
-            )
-            logger.debug(
-                "  rendered page %d/%d: %d bytes scale=%.2f",
-                page_num,
-                len(doc),
-                len(jpeg_bytes),
-                scale,
-            )
-            out.append((index, (jpeg_bytes, "image/jpeg")))
-        return out
-    finally:
-        doc.close()
+    with _PDFIUM_LOCK:
+        doc = pdfium.PdfDocument(content)
+        try:
+            out: list[tuple[int, tuple[bytes, str]]] = []
+            for index in page_indices:
+                page_num = index + 1
+                scale = page_scales.get(page_num, default_scale)
+                jpeg_bytes = _page_to_jpeg(
+                    doc[index],
+                    scale=scale,
+                    max_dimension=max_dimension,
+                    jpeg_quality=jpeg_quality,
+                )
+                logger.debug(
+                    "  rendered page %d/%d: %d bytes scale=%.2f",
+                    page_num,
+                    len(doc),
+                    len(jpeg_bytes),
+                    scale,
+                )
+                out.append((index, (jpeg_bytes, "image/jpeg")))
+            return out
+        finally:
+            doc.close()
 
 
 def _render_parallel_indices(
@@ -217,12 +235,13 @@ def render_pdf_pages(
     default_scale = scale if scale is not None else settings.openai_pdf_render_scale
     scales = page_scales or {}
 
-    doc = pdfium.PdfDocument(content)
-    try:
-        total = len(doc)
-        capped_total = total if max_pages is None else min(total, max_pages)
-    finally:
-        doc.close()
+    with _PDFIUM_LOCK:
+        doc = pdfium.PdfDocument(content)
+        try:
+            total = len(doc)
+            capped_total = total if max_pages is None else min(total, max_pages)
+        finally:
+            doc.close()
 
     if capped_total == 0:
         return PdfRenderResult(
