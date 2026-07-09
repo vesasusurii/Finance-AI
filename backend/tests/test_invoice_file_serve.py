@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -115,145 +114,6 @@ async def test_serve_invoice_file_rejects_html_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_serve_invoice_file_preview_page_returns_jpeg() -> None:
-    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
-    pdf_bytes = b"%PDF-1.4 test %%EOF"
-    jpeg_bytes = b"\xff\xd8\xff fake jpeg"
-
-    with (
-        patch(
-            "services.invoice_file_service._load_invoice_file_bytes",
-            new=AsyncMock(
-                return_value=(
-                    type(
-                        "Meta",
-                        (),
-                        {
-                            "storage_path": "users/1/file.pdf",
-                            "original_filename": "20260629_Deloitte.pdf",
-                            "mime_type": "application/pdf",
-                            "file_size": len(pdf_bytes),
-                        },
-                    )(),
-                    pdf_bytes,
-                )
-            ),
-        ),
-        patch(
-            "services.invoice_file_service.pdf_page_count",
-            return_value=1,
-        ),
-        patch(
-            "services.invoice_file_service.render_pdf_page_jpeg",
-            return_value=jpeg_bytes,
-        ),
-    ):
-        from services.invoice_file_service import serve_invoice_file_preview_page
-
-        response = await serve_invoice_file_preview_page(35, 1, user)
-
-    assert response.status_code == 200
-    assert response.body == jpeg_bytes
-    assert response.media_type == "image/jpeg"
-
-
-@pytest.mark.asyncio
-async def test_serve_invoice_file_preview_returns_all_pages() -> None:
-    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
-    pdf_bytes = b"%PDF-1.4 test %%EOF"
-    render_result = type(
-        "RenderResult",
-        (),
-        {
-            "page_numbers": [1, 2],
-            "images": [
-                (b"\xff\xd8\xff page one", "image/jpeg"),
-                (b"\xff\xd8\xff page two", "image/jpeg"),
-            ],
-        },
-    )()
-
-    with (
-        patch(
-            "services.invoice_file_service._load_invoice_file_bytes",
-            new=AsyncMock(
-                return_value=(
-                    type(
-                        "Meta",
-                        (),
-                        {
-                            "storage_path": "users/1/file.pdf",
-                            "original_filename": "multi.pdf",
-                            "mime_type": "application/pdf",
-                            "file_size": len(pdf_bytes),
-                        },
-                    )(),
-                    pdf_bytes,
-                )
-            ),
-        ),
-        patch(
-            "services.invoice_file_service.render_pdf_pages",
-            return_value=render_result,
-        ) as mock_render,
-    ):
-        from services.invoice_file_service import serve_invoice_file_preview
-
-        response = await serve_invoice_file_preview(35, user)
-
-    payload = json.loads(response.body)
-    assert response.status_code == 200
-    assert response.media_type == "application/json"
-    assert response.headers["cache-control"] == "private, max-age=3600"
-    assert payload["pageCount"] == 2
-    assert [page["pageNumber"] for page in payload["pages"]] == [1, 2]
-    assert [page["contentType"] for page in payload["pages"]] == [
-        "image/jpeg",
-        "image/jpeg",
-    ]
-    mock_render.assert_called_once_with(
-        pdf_bytes,
-        parallel=True,
-        max_dimension=2400,
-        jpeg_quality=85,
-    )
-
-
-@pytest.mark.asyncio
-async def test_serve_invoice_file_preview_rejects_non_pdf() -> None:
-    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
-
-    with (
-        patch(
-            "services.invoice_file_service._load_invoice_file_bytes",
-            new=AsyncMock(
-                return_value=(
-                    type(
-                        "Meta",
-                        (),
-                        {
-                            "storage_path": "users/1/file.png",
-                            "original_filename": "scan.png",
-                            "mime_type": "image/png",
-                            "file_size": 10,
-                        },
-                    )(),
-                    b"not a pdf",
-                )
-            ),
-        ),
-        patch("services.invoice_file_service.render_pdf_pages") as mock_render,
-    ):
-        from services.invoice_file_service import serve_invoice_file_preview
-
-        with pytest.raises(HTTPException) as exc:
-            await serve_invoice_file_preview(35, user)
-
-    assert exc.value.status_code == 404
-    mock_render.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_serve_invoice_file_retries_truncated_download() -> None:
     """Supabase's storage occasionally returns a short body with HTTP 200
     (seen only on the Azure-hosted backend). Serving must retry rather than
@@ -291,6 +151,43 @@ async def test_serve_invoice_file_retries_truncated_download() -> None:
 
 
 @pytest.mark.asyncio
+async def test_serve_invoice_file_ignores_db_size_mismatch() -> None:
+    """A DB-recorded file_size that disagrees with the downloaded bytes must
+    not gate retries on its own — it cross-references two independently
+    -maintained systems and proved unreliable enough to fail ~90% of
+    previews outright when it briefly gated retries. Only the %%EOF
+    structural check should decide whether a download looks truncated."""
+    user = type("User", (), {"user_id": 1, "email": "a@b.com", "role": "finance"})()
+    complete = b"%PDF-1.4 full body %%EOF"
+
+    with (
+        patch(
+            "services.invoice_file_service._load_invoice_file_meta",
+            new=AsyncMock(
+                return_value=type(
+                    "Meta",
+                    (),
+                    {
+                        "storage_path": "users/1/file.pdf",
+                        "original_filename": "invoice.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size": len(complete) + 500,  # stale/wrong DB value
+                    },
+                )()
+            ),
+        ),
+        patch(
+            "services.invoice_file_service.resolve_upload_bytes",
+            new=AsyncMock(return_value=complete),
+        ) as mock_resolve,
+    ):
+        response = await serve_invoice_file(35, user)
+
+    assert mock_resolve.await_count == 1
+    assert response.body == complete
+
+
+@pytest.mark.asyncio
 async def test_serve_invoice_file_gives_up_after_max_retries() -> None:
     """When every attempt comes back truncated, serve the last attempt rather
     than failing the request outright — a validation false-positive should
@@ -324,7 +221,7 @@ async def test_serve_invoice_file_gives_up_after_max_retries() -> None:
     ):
         response = await serve_invoice_file(35, user)
 
-    assert mock_resolve.await_count == 3
+    assert mock_resolve.await_count == 2
     assert response.body == truncated
 
 

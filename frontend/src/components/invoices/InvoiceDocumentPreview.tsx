@@ -22,8 +22,6 @@ export function InvoiceDocumentPreview({
   invoiceId: number;
   /** Optional seed from list/review API; refreshed in the background when present. */
   invoice?: Invoice;
-  /** Kept for callers from the newer preview flow; the restored bdfc211 loader ignores it. */
-  preferBatchPdfPreview?: boolean;
 }) {
   const [invoice, setInvoice] = useState<Invoice | null>(initialInvoice ?? null);
   const [loading, setLoading] = useState(!seedIsComplete(initialInvoice));

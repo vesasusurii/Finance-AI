@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import mimetypes
 from dataclasses import dataclass
-from pathlib import Path
 
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 from core.debug_logger import get_logger
 from core.invoice_access import invoice_owner_user_id
@@ -24,21 +22,24 @@ from utils.pdf_bytes import (
     normalize_pdf_bytes,
 )
 from utils.safe_filename import content_disposition_inline
-from services.ocr.pdf_reader import (
-    pdf_page_count,
-    render_pdf_page_jpeg,
-    render_pdf_pages,
-)
 
 logger = get_logger(__name__)
 
 # Supabase's storage CDN occasionally ends a large download mid-stream without
 # raising an HTTP error — seen intermittently on the Azure-hosted backend
 # (never reproduced locally). The client gets a 200 with a shorter-than-expected
-# body and no error, so pdf.js chokes on the missing trailer. Detect that by
-# comparing against the recorded file size / PDF trailer and retry before
-# giving up, instead of silently serving a truncated file.
-_MAX_DOWNLOAD_ATTEMPTS = 3
+# body and no error, so the native PDF viewer chokes on the missing trailer.
+# Detect that via the PDF trailer and retry before giving up, instead of
+# silently serving a truncated file. The DB-recorded file size is logged for
+# diagnostics but does NOT gate retries — it cross-references two
+# independently-maintained systems (a Postgres column vs. a Supabase read)
+# and proved too unreliable as a gating signal (a stale/incorrect file_size
+# on a broad cohort of rows once caused the vast majority of previews to
+# fail outright, since every one of them retried to exhaustion). The
+# Supabase read layer (storage/supabase_backend.py) already provides its own
+# independent retry on a more reliable signal — Content-Length vs. actual
+# bytes on the *same* response — so this layer doesn't need to retry as hard.
+_MAX_DOWNLOAD_ATTEMPTS = 2
 _RETRY_BACKOFF_SECONDS = 0.4
 
 
@@ -201,8 +202,6 @@ def _binary_response(
 
 
 def _download_looks_complete(meta: _InvoiceFileMeta, data: bytes) -> bool:
-    if meta.file_size is not None and meta.file_size > 0 and len(data) != meta.file_size:
-        return False
     if meta.mime_type == "application/pdf":
         report = inspect_pdf_bytes(data)
         if report.starts_with_pdf and report.likely_truncated:
@@ -316,120 +315,4 @@ async def serve_invoice_file(invoice_id: int, user: UserContext) -> Response:
         prepared,
         mime_type=meta.mime_type,
         filename=meta.original_filename,
-    )
-
-
-async def serve_invoice_file_preview_page(
-    invoice_id: int,
-    page_number: int,
-    user: UserContext,
-) -> Response:
-    """Render one PDF page to JPEG for preview when client-side viewers fail."""
-    if page_number < 1:
-        raise HTTPException(status_code=404, detail={"error": "page_not_found"})
-
-    meta, prepared = await _load_invoice_file_bytes(invoice_id, user)
-    if meta.mime_type != "application/pdf":
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "not_pdf",
-                "message": "Preview pages are only available for PDF invoices.",
-            },
-        )
-
-    try:
-        total_pages = pdf_page_count(prepared)
-        jpeg = render_pdf_page_jpeg(prepared, page_number)
-    except IndexError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "page_not_found",
-                "message": f"Page {page_number} does not exist in this PDF.",
-            },
-        ) from None
-    except Exception as exc:
-        logger.warning(
-            "Invoice PDF preview render failed invoice_id=%s page=%s: %s",
-            invoice_id,
-            page_number,
-            exc,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "preview_render_failed",
-                "message": (
-                    "Could not render this PDF for preview. "
-                    "The stored file may be corrupt - re-upload the invoice."
-                ),
-            },
-        ) from exc
-
-    headers = content_disposition_inline(
-        f"{Path(meta.original_filename).stem}_p{page_number}.jpg"
-    )
-    headers["Content-Length"] = str(len(jpeg))
-    headers["Cache-Control"] = "private, max-age=3600"
-    headers["X-Pdf-Page-Count"] = str(total_pages)
-    headers["X-Pdf-Page-Number"] = str(page_number)
-    return Response(content=jpeg, media_type="image/jpeg", headers=headers)
-
-
-async def serve_invoice_file_preview(
-    invoice_id: int,
-    user: UserContext,
-) -> Response:
-    """Render every PDF page to JPEG in one request for fast review previews."""
-    meta, prepared = await _load_invoice_file_bytes(invoice_id, user)
-    if meta.mime_type != "application/pdf":
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "not_pdf",
-                "message": "Preview pages are only available for PDF invoices.",
-            },
-        )
-
-    try:
-        render_result = render_pdf_pages(
-            prepared,
-            parallel=True,
-            max_dimension=2400,
-            jpeg_quality=85,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Invoice PDF batch preview render failed invoice_id=%s: %s",
-            invoice_id,
-            exc,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "preview_render_failed",
-                "message": (
-                    "Could not render this PDF for preview. "
-                    "The stored file may be corrupt - re-upload the invoice."
-                ),
-            },
-        ) from exc
-
-    pages = [
-        {
-            "pageNumber": page_number,
-            "contentType": mime,
-            "dataBase64": base64.b64encode(image).decode("ascii"),
-        }
-        for page_number, (image, mime) in zip(
-            render_result.page_numbers,
-            render_result.images,
-            strict=True,
-        )
-    ]
-    headers = {"Cache-Control": "private, max-age=3600"}
-    return JSONResponse(
-        content={"pageCount": len(pages), "pages": pages},
-        headers=headers,
     )

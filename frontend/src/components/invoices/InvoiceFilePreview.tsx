@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
-import { fetchInvoiceFile } from "@/api/invoices";
+import { fetchInvoiceFile, invoiceFileUrl } from "@/api/invoices";
 import { cn } from "@/lib/utils";
 
 function mimeFromName(name: string, fallback: string | null): string | null {
@@ -96,7 +96,7 @@ export function InvoiceFilePreview({
           )}
           {blobUrl && (
             <a
-              href={blobUrl}
+              href={invoiceFileUrl(invoiceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
@@ -158,7 +158,7 @@ export function InvoiceFilePreview({
               Preview unavailable for this file type.
             </p>
             <a
-              href={blobUrl}
+              href={invoiceFileUrl(invoiceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[12px] text-primary hover:underline"
